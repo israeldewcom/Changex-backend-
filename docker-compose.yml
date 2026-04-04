@@ -1,6 +1,3 @@
-// ============================================
-// FILE: docker-compose.yml (unchanged)
-// ============================================
 version: '3.8'
 services:
   mongodb-primary:
