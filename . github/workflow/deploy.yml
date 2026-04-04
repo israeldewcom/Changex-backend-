@@ -1,0 +1,53 @@
+// ============================================
+// FILE: .github/workflows/deploy.yml (unchanged)
+// ============================================
+name: Deploy to Production
+on:
+  push: { branches: [main] }
+  pull_request: { branches: [main] }
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mongodb: { image: mongo:7, ports: [27017:27017] }
+      redis: { image: redis:7-alpine, ports: [6379:6379] }
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-node@v3
+      with: { node-version: '20.x', cache: 'npm' }
+    - run: npm ci
+    - run: npm run lint
+    - run: npm test
+      env:
+        NODE_ENV: test
+        MONGODB_URI: mongodb://localhost:27017/changex_test
+        REDIS_HOST: localhost
+        JWT_ACCESS_SECRET: test_secret
+        JWT_REFRESH_SECRET: test_refresh_secret
+    - run: npm run build
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - uses: actions/checkout@v3
+    - name: Configure SSH
+      run: |
+        mkdir -p ~/.ssh/
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+        chmod 600 ~/.ssh/deploy_key
+        echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+    - name: Deploy to server
+      run: |
+        ssh -i ~/.ssh/deploy_key ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} '
+          cd /var/www/changex-backend
+          git pull origin main
+          docker-compose down
+          docker-compose build
+          docker-compose up -d
+          docker system prune -f
+        '
+    - name: Health check
+      run: |
+        sleep 10
+        curl -f http://${{ secrets.DEPLOY_HOST }}/health || exit 1
