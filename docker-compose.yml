@@ -1,0 +1,55 @@
+// ============================================
+// FILE: docker-compose.yml (unchanged)
+// ============================================
+version: '3.8'
+services:
+  mongodb-primary:
+    image: mongo:7
+    command: mongod --replSet rs0 --bind_ip localhost,mongodb-primary
+    ports: ["27017:27017"]
+    volumes: [mongo_data_primary:/data/db]
+    networks: [changex_network]
+  mongodb-secondary:
+    image: mongo:7
+    command: mongod --replSet rs0 --bind_ip localhost,mongodb-secondary
+    ports: ["27018:27017"]
+    volumes: [mongo_data_secondary:/data/db]
+    networks: [changex_network]
+  mongodb-arbiter:
+    image: mongo:7
+    command: mongod --replSet rs0 --bind_ip localhost,mongodb-arbiter
+    ports: ["27019:27017"]
+    volumes: [mongo_data_arbiter:/data/db]
+    networks: [changex_network]
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    ports: ["6379:6379"]
+    volumes: [redis_data:/data]
+    networks: [changex_network]
+  api:
+    build: .
+    ports: ["3000:3000"]
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongodb-primary:27017,mongodb-secondary:27018,mongodb-arbiter:27019/changex?replicaSet=rs0
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on: [mongodb-primary, mongodb-secondary, mongodb-arbiter, redis]
+    volumes: [./logs:/app/logs, ./uploads:/app/uploads]
+    networks: [changex_network]
+    restart: unless-stopped
+  worker:
+    build: .
+    command: npm run worker
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongodb-primary:27017,mongodb-secondary:27018,mongodb-arbiter:27019/changex?replicaSet=rs0
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    depends_on: [mongodb-primary, redis, api]
+    volumes: [./logs:/app/logs]
+    networks: [changex_network]
+    restart: unless-stopped
+networks: { changex_network: { driver: bridge } }
+volumes: { mongo_data_primary: , mongo_data_secondary: , mongo_data_arbiter: , redis_data: }
