@@ -2,7 +2,7 @@
 // FILE: src/services/PaymentService.ts (unchanged)
 // ============================================
 import Stripe from 'stripe';
-import Paystack from '@paystack/paystack-sdk';
+import Paystack from 'paystack';
 import { config } from '../config';
 import { User, IUser } from '../models/User';
 import { Transaction } from '../models/Transaction';
