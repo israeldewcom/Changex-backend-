@@ -1,7 +1,7 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --omit=dev   # changed from npm ci
+RUN npm ci                     # install all deps (including dev)
 COPY . .
 RUN npm run build
 
@@ -9,9 +9,8 @@ FROM node:20-alpine
 RUN apk add --no-cache tini
 WORKDIR /app
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
-ENV NODE_ENV=production PORT=3000
+RUN npm ci --omit=dev          # install only production deps
 EXPOSE 3000
 USER node
 ENTRYPOINT ["/sbin/tini", "--"]
