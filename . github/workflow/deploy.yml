@@ -1,6 +1,3 @@
-// ============================================
-// FILE: .github/workflows/deploy.yml (unchanged)
-// ============================================
 name: Deploy to Production
 on:
   push: { branches: [main] }
