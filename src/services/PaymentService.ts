@@ -4,17 +4,14 @@ import { Transaction } from '../models/Transaction';
 import { Course } from '../models/Course';
 import { Enrollment } from '../models/Enrollment';
 import { logger } from '../utils/logger';
-import { QueueService } from './QueueService';
 import { EarningEngine } from './EarningEngine';
 import mongoose from 'mongoose';
 
 export class PaymentService {
   private static instance: PaymentService;
-  private queueService: QueueService;
   private earningEngine: EarningEngine;
 
   private constructor() {
-    this.queueService = QueueService.getInstance();
     this.earningEngine = EarningEngine.getInstance();
   }
 
@@ -23,20 +20,6 @@ export class PaymentService {
       PaymentService.instance = new PaymentService();
     }
     return PaymentService.instance;
-  }
-
-  // Stripe methods – disabled
-  async createStripePaymentIntent(userId: string, amount: number, currency: string, metadata: Record<string, any>): Promise<{ clientSecret: string; paymentIntentId: string }> {
-    throw new Error('Stripe payments are disabled. Use wallet instead.');
-  }
-
-  // Paystack methods – disabled
-  async createPaystackPaymentUrl(userId: string, amount: number, email: string, metadata: Record<string, any>): Promise<string> {
-    throw new Error('Paystack payments are disabled. Use wallet instead.');
-  }
-
-  async verifyPaystackPayment(reference: string): Promise<{ status: string; amount: number; metadata: any }> {
-    throw new Error('Paystack payments are disabled.');
   }
 
   async processCoursePurchase(userId: string, courseId: string, paymentMethod: 'stripe' | 'paystack' | 'wallet', paymentReference?: string): Promise<Enrollment> {
@@ -91,7 +74,8 @@ export class PaymentService {
       await this.earningEngine.distributeCourseCommission(userId, courseId, price, transaction._id, session);
       await session.commitTransaction();
 
-      await this.queueService.addJob('award-xp', { userId, amount: course.xpReward, reason: 'course_enrollment', metadata: { courseId: course._id.toString() } });
+      // XP award – we can call EarningEngine directly instead of queue
+      await this.earningEngine.addCourseCompletionReward(userId, courseId, course.xpReward, 0);
       return enrollment;
     } catch (error) {
       await session.abortTransaction();
@@ -101,7 +85,8 @@ export class PaymentService {
     }
   }
 
-  async processWithdrawal(userId: string, amount: number, bankDetails: { bankName: string; accountNumber: string; accountName: string; bankCode: string }): Promise<Transaction> {
+  async processWithdrawal(userId: string, amount: number, bankDetails: any): Promise<Transaction> {
+    // Simplified – no queue, just mark as pending
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
@@ -124,7 +109,7 @@ export class PaymentService {
       user.pendingWithdrawal += amount;
       await user.save({ session });
       await session.commitTransaction();
-      await this.queueService.addJob('process-withdrawal', { transactionId: transaction._id.toString(), userId, amount, bankDetails });
+      logger.info(`Withdrawal request created for user ${userId}, amount ${amount}`);
       return transaction;
     } catch (error) {
       await session.abortTransaction();
@@ -134,13 +119,21 @@ export class PaymentService {
     }
   }
 
-  // Webhook stubs (to satisfy existing imports)
-  async processStripeWebhook(payload: Buffer, signature: string): Promise<void> {
-    logger.warn('Stripe webhook called but Stripe is disabled');
+  // Stubs for Stripe/Paystack (to satisfy existing imports)
+  async createStripePaymentIntent(userId: string, amount: number, currency: string, metadata: any): Promise<any> {
+    throw new Error('Stripe payments disabled');
   }
-
+  async createPaystackPaymentUrl(userId: string, amount: number, email: string, metadata: any): Promise<string> {
+    throw new Error('Paystack payments disabled');
+  }
+  async verifyPaystackPayment(reference: string): Promise<any> {
+    throw new Error('Paystack payments disabled');
+  }
+  async processStripeWebhook(payload: Buffer, signature: string): Promise<void> {
+    logger.warn('Stripe webhook ignored');
+  }
   async processPaystackWebhook(body: any, signature: string): Promise<void> {
-    logger.warn('Paystack webhook called but Paystack is disabled');
+    logger.warn('Paystack webhook ignored');
   }
 
   private generateReference(): string {
