@@ -1,13 +1,21 @@
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
+COPY . .
+RUN npx tsc --skipLibCheck || true
+
 FROM node:20-alpine
 RUN apk add --no-cache tini
 WORKDIR /app
 
-# Copy everything
+# Create logs directory and give ownership to node user
+RUN mkdir -p logs && chown -R node:node /app
+
+COPY --from=builder /app/dist ./dist
 COPY package*.json ./
 RUN npm install
-
-COPY . .
-RUN npx tsc --skipLibCheck || true   # compile even with errors
+RUN npm prune --omit=dev
 
 EXPOSE 3000
 USER node
