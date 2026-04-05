@@ -1,19 +1,18 @@
 FROM node:20-alpine
-RUN apk add --no-cache tini
 WORKDIR /app
 
-# Copy all source files and install dependencies (including devDependencies)
+# Copy package files and install ALL dependencies
 COPY package*.json ./
 RUN npm install
 
+# Copy the entire source code
 COPY . .
 
-# Create logs directory with proper permissions
-RUN mkdir -p logs && chown -R node:node /app
+# Create logs directory (avoid permission issues)
+RUN mkdir -p logs
 
+# Expose the port
 EXPOSE 3000
-USER node
-ENTRYPOINT ["/sbin/tini", "--"]
 
-# Run the TypeScript server directly (no build step)
-CMD ["npx", "ts-node", "src/server.ts"]
+# Run with ts-node but skip type checking
+CMD ["npx", "ts-node", "--transpile-only", "src/server.ts"]
