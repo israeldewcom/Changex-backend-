@@ -10,6 +10,7 @@ export { Post, Comment } from './Post';
 export { Notification } from './Notification';
 export { Badge, UserBadge } from './Badge';
 export { AuditLog } from './AuditLog';
-export { Coupon } from './Coupon';
-export { Conversation, ChatMessage } from './Chat';
-export { Review } from './Review';
+// Optional models – comment out if files are missing:
+// export { Coupon } from './Coupon';
+// export { Conversation, ChatMessage } from './Chat';
+// export { Review } from './Review';
