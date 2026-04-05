@@ -1,8 +1,9 @@
 // ============================================
-// FILE: src/services/PaymentService.ts (unchanged)
+// FILE: src/services/PaymentService.ts (Paystack removed)
 // ============================================
 import Stripe from 'stripe';
-import Paystack from 'paystack';
+// import Paystack from 'paystack';  // REMOVED – Paystack not used
+import crypto from 'crypto';          // ADDED – required for webhook signature
 import { config } from '../config';
 import { User, IUser } from '../models/User';
 import { Transaction } from '../models/Transaction';
@@ -16,13 +17,13 @@ import mongoose from 'mongoose';
 export class PaymentService {
   private static instance: PaymentService;
   private stripe: Stripe;
-  private paystack: any;
+  // private paystack: any;          // REMOVED
   private queueService: QueueService;
   private earningEngine: EarningEngine;
 
   private constructor() {
     this.stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2023-10-16' });
-    this.paystack = Paystack;
+    // this.paystack = Paystack;     // REMOVED
     this.queueService = QueueService.getInstance();
     this.earningEngine = EarningEngine.getInstance();
   }
@@ -58,6 +59,10 @@ export class PaymentService {
     return { clientSecret: paymentIntent.client_secret!, paymentIntentId: paymentIntent.id };
   }
 
+  // ----------------------------------------------------------------------
+  // PAYSTACK METHODS – COMMENTED OUT (remove if you later add Paystack)
+  // ----------------------------------------------------------------------
+  /*
   async createPaystackPaymentUrl(userId: string, amount: number, email: string, metadata: Record<string, any>): Promise<string> {
     const response = await this.paystack.transaction.initialize({
       amount: amount * 100,
@@ -72,6 +77,7 @@ export class PaymentService {
     const response = await this.paystack.transaction.verify({ reference });
     return { status: response.data.status, amount: response.data.amount / 100, metadata: response.data.metadata };
   }
+  */
 
   async processCoursePurchase(userId: string, courseId: string, paymentMethod: 'stripe' | 'paystack' | 'wallet', paymentReference?: string): Promise<Enrollment> {
     const session = await mongoose.startSession();
@@ -83,11 +89,16 @@ export class PaymentService {
       const existingEnrollment = await Enrollment.findOne({ user: userId, course: courseId }).session(session);
       if (existingEnrollment) throw new Error('Already enrolled');
       const price = course.discountPrice || course.price;
+      
       if (paymentMethod === 'wallet') {
         if (user.walletBalance < price) throw new Error('Insufficient wallet balance');
         user.walletBalance -= price;
         await user.save({ session });
+      } else if (paymentMethod === 'paystack') {
+        // Paystack temporarily disabled – reject or fallback
+        throw new Error('Paystack payments are currently disabled. Please use Stripe or wallet.');
       }
+
       const transaction = new Transaction({
         user: userId,
         type: 'purchase',
@@ -97,7 +108,7 @@ export class PaymentService {
         status: 'completed',
         description: `Purchase of course: ${course.title}`,
         reference: this.generateReference(),
-        paymentMethod: paymentMethod === 'wallet' ? 'wallet' : (paymentMethod === 'stripe' ? 'stripe' : 'paystack'),
+        paymentMethod: paymentMethod === 'wallet' ? 'wallet' : 'stripe',  // paystack case removed
         paymentGatewayReference: paymentReference,
         courseId: course._id,
         completedAt: new Date(),
@@ -106,7 +117,7 @@ export class PaymentService {
       const enrollment = new Enrollment({
         user: userId,
         course: courseId,
-        paymentMethod,
+        paymentMethod: paymentMethod === 'paystack' ? 'stripe' : paymentMethod, // fallback
         amountPaid: price,
         currency: course.currency,
         transactionId: transaction._id,
@@ -174,6 +185,10 @@ export class PaymentService {
     }
   }
 
+  // ----------------------------------------------------------------------
+  // PAYSTACK WEBHOOK – DISABLED
+  // ----------------------------------------------------------------------
+  /*
   async processPaystackWebhook(body: any, signature: string): Promise<void> {
     const hash = crypto.createHmac('sha512', config.paystack.webhookSecret).update(JSON.stringify(body)).digest('hex');
     if (hash !== signature) throw new Error('Invalid webhook signature');
@@ -185,6 +200,7 @@ export class PaymentService {
       case 'transfer.failed': await this.handleTransferFailed(data); break;
     }
   }
+  */
 
   private async handleSuccessfulPayment(paymentIntent: Stripe.PaymentIntent): Promise<void> {
     const metadata = paymentIntent.metadata;
@@ -218,6 +234,10 @@ export class PaymentService {
     }
   }
 
+  // ----------------------------------------------------------------------
+  // PAYSTACK EVENT HANDLERS – DISABLED
+  // ----------------------------------------------------------------------
+  /*
   private async handlePaystackChargeSuccess(data: any): Promise<void> {
     const metadata = data.metadata;
     if (metadata.type === 'course_purchase') {
@@ -256,6 +276,7 @@ export class PaymentService {
       }
     }
   }
+  */
 
   private generateReference(): string {
     return `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
