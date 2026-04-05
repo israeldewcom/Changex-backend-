@@ -3,14 +3,14 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 COPY . .
-RUN npx tsc --skipLibCheck || true   
+RUN npx tsc --skipLibCheck || true  
 
 FROM node:20-alpine
 RUN apk add --no-cache tini
 WORKDIR /app
 COPY --from=builder /app/dist ./dist
-COPY package*.json ./
-RUN npm install --omit=dev
+COPY --from=builder /app/node_modules ./node_modules  
+COPY package*.json ./                                  
 EXPOSE 3000
 USER node
 ENTRYPOINT ["/sbin/tini", "--"]
