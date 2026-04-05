@@ -10,7 +10,7 @@ RUN apk add --no-cache tini
 WORKDIR /app
 COPY --from=builder /app/dist ./dist
 COPY package*.json ./
-RUN npm ci --omit=dev   # or `npm install --omit=dev` if no lockfile
+RUN npm install --omit=dev    # changed: npm ci -> npm install
 EXPOSE 3000
 USER node
 ENTRYPOINT ["/sbin/tini", "--"]
