@@ -1,7 +1,7 @@
 import rateLimit from 'express-rate-limit';
 import { config } from '../config';
 
-// Use memory store (no Redis)
+// Use memory store (no Redis) – works without Redis
 export const generalRateLimit = rateLimit({
   windowMs: config.rateLimit.windowMs,
   max: config.rateLimit.max,
