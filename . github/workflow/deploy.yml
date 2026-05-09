@@ -17,7 +17,7 @@ jobs:
     - run: npm test
       env:
         NODE_ENV: test
-        MONGODB_URI: mongodb+srv://loismotion6_db_user:ugTKBAiJ2eZRGtUc@rawwealthy.tf616kg.mongodb.net/raw_wealthy_prod?retryWrites=true&w=majority&appName=rawwealthy
+        MONGODB_URI: mongodb+srv://visionmindaisale_db_user:0RK9Ve8WuVKEMNxP@changex.7jcu43i.mongodb.net/changex?retryWrites=true&w=majority
         REDIS_HOST: localhost
         JWT_ACCESS_SECRET: test_secret
         JWT_REFRESH_SECRET: test_refresh_secret
