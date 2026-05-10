@@ -35,10 +35,10 @@ app.use((req, res, next) => {
   }
   next();
 });
-app.use((req, res, next) => {
-  if (req.path.includes('/webhooks') || req.method === 'GET') return next();
-  simpleCsrf(req, res, next);
-});
+//app.use((req, res, next) => {
+//  if (req.path.includes('/webhooks') || req.method === 'GET') return next();
+//  simpleCsrf(req, res, next);
+//});
 app.use(generalRateLimit);
 app.use('/api', routes);
 app.use('/certificates', express.static('public/certificates'));
