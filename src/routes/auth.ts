@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/routes/auth.ts
+// ============================================
 import { Router } from 'express';
 import { AuthController } from '../controllers/AuthController';
 import { authenticate } from '../middleware/auth';
@@ -7,7 +10,8 @@ import { validateRegistration, validateLogin, validateResetPassword, validatePas
 const router = Router();
 const authController = new AuthController();
 
-router.post('/register', authRateLimit, validateRegistration, authController.register);
+// Registration – authRateLimit disabled for now (commented out)
+router.post('/register', /* authRateLimit */ validateRegistration, authController.register);
 router.post('/login', authRateLimit, validateLogin, authController.login);
 router.post('/refresh-token', authController.refreshToken);
 router.post('/logout', authenticate, authController.logout);
