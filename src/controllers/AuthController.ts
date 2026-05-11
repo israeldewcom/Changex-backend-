@@ -1,110 +1,239 @@
-// ============================================
-// FILE: src/controllers/AuthController.ts (unchanged)
-// ============================================
+// src/controllers/AdminController.ts (full replacement)
 import { Request, Response } from 'express';
-import { AuthService } from '../services/AuthService';
+import { User, Course, Transaction, Marketplace, Job, WithdrawalRequest, Coupon, Announcement, AuditLog, CourseApproval } from '../models';
+import { AnalyticsService } from '../services/AnalyticsService';
+import { PaymentService } from '../services/PaymentService';
+import { NotificationService } from '../services/NotificationService';
 import { validationResult } from 'express-validator';
-import { logger } from '../utils/logger';
-import { AuditLog } from '../models/AuditLog';
+import mongoose from 'mongoose';
 
-export class AuthController {
-  private authService: AuthService;
-  constructor() { this.authService = AuthService.getInstance(); }
+export class AdminController {
+  private analyticsService = AnalyticsService.getInstance();
+  private paymentService = PaymentService.getInstance();
+  private notificationService = NotificationService.getInstance();
 
-  register = async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) { res.status(400).json({ errors: errors.array() }); return; }
+  getDashboardStats = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { email, password, firstName, lastName, referralCode } = req.body;
-      const user = await this.authService.registerUser({ email, password, firstName, lastName, referralCode });
-      await AuditLog.create({ user: user._id, action: 'REGISTER', resource: 'User', resourceId: user._id.toString(), details: { email: user.email }, ip: req.ip || req.socket.remoteAddress || '', userAgent: req.get('user-agent') || '', status: 'success' });
-      res.status(201).json({ success: true, message: 'Registration successful. Please verify your email.', data: { id: user._id, email: user.email, firstName: user.firstName, lastName: user.lastName } });
-    } catch (error: any) { logger.error('Registration error:', error); res.status(400).json({ success: false, message: error.message }); }
+      const [totalUsers, totalCourses, totalProducts, totalJobs, totalRevenue, pendingWithdrawals] = await Promise.all([
+        User.countDocuments(),
+        Course.countDocuments({ published: true }),
+        Marketplace.countDocuments({ published: true }),
+        Job.countDocuments({ isActive: true }),
+        Transaction.aggregate([{ $match: { type: 'purchase', status: 'completed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
+        WithdrawalRequest.countDocuments({ status: 'pending' }),
+      ]);
+      res.json({ success: true, data: { totalUsers, totalCourses, totalProducts, totalJobs, totalRevenue: totalRevenue[0]?.total || 0, pendingWithdrawals } });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
   };
 
-  login = async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) { res.status(400).json({ errors: errors.array() }); return; }
+  // Users
+  getUsers = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { email, password, twoFactorCode } = req.body;
-      const ip = req.ip || req.socket.remoteAddress || '';
-      const result = await this.authService.loginUser(email, password, ip, twoFactorCode);
-      if (result.requiresTwoFactor) {
-        res.status(200).json({ success: true, requiresTwoFactor: true, message: 'Two‑factor code required' });
-        return;
+      const { page = 1, limit = 20, role, isBanned } = req.query;
+      const query: any = {};
+      if (role) query.roles = role;
+      if (isBanned !== undefined) query.isBanned = isBanned === 'true';
+      const skip = (Number(page) - 1) * Number(limit);
+      const [users, total] = await Promise.all([User.find(query).select('-password -refreshTokens').skip(skip).limit(Number(limit)), User.countDocuments(query)]);
+      res.json({ success: true, data: { users, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+  };
+
+  updateUserStatus = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { userId } = req.params;
+      const { isBanned, roles } = req.body;
+      const update: any = {};
+      if (isBanned !== undefined) update.isBanned = isBanned;
+      if (roles) update.roles = roles;
+      const user = await User.findByIdAndUpdate(userId, update, { new: true }).select('-password -refreshTokens');
+      if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
+      res.json({ success: true, data: user, message: 'User updated' });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+  };
+
+  // Courses admin
+  getCourses = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { page = 1, limit = 20, status, instructor } = req.query;
+      let query: any = {};
+      if (status === 'pending') {
+        const pendingApprovals = await CourseApproval.find({ status: 'pending' }).distinct('course');
+        query._id = { $in: pendingApprovals };
+      } else if (status === 'approved') {
+        const approvedApprovals = await CourseApproval.find({ status: 'approved' }).distinct('course');
+        query._id = { $in: approvedApprovals };
+        query.published = true;
+      } else if (status === 'all') {
+        // all courses
+      } else {
+        query.published = status === 'published' ? true : false;
       }
-      res.cookie('refreshToken', result.refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000 });
-      await AuditLog.create({ user: result.user._id, action: 'LOGIN', resource: 'User', resourceId: result.user._id.toString(), details: { email: result.user.email, ip }, ip, userAgent: req.get('user-agent') || '', status: 'success' });
-      res.json({ success: true, data: { user: { id: result.user._id, email: result.user.email, firstName: result.user.firstName, lastName: result.user.lastName, displayName: result.user.displayName, avatar: result.user.avatar, subscriptionTier: result.user.subscriptionTier, level: result.user.level, xp: result.user.xp, walletBalance: result.user.walletBalance }, accessToken: result.accessToken } });
-    } catch (error: any) { logger.error('Login error:', error); res.status(401).json({ success: false, message: error.message }); }
+      if (instructor) query.instructor = instructor;
+      const skip = (Number(page) - 1) * Number(limit);
+      const [courses, total] = await Promise.all([Course.find(query).populate('instructor', 'firstName lastName displayName email').skip(skip).limit(Number(limit)), Course.countDocuments(query)]);
+      res.json({ success: true, data: { courses, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
   };
 
-  refreshToken = async (req: Request, res: Response): Promise<void> => {
+  approveCourse = async (req: Request, res: Response): Promise<void> => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
-      const refreshToken = req.cookies.refreshToken;
-      if (!refreshToken) { res.status(401).json({ success: false, message: 'No refresh token provided' }); return; }
-      const { accessToken, refreshToken: newRefreshToken } = await this.authService.refreshAccessToken(refreshToken);
-      res.cookie('refreshToken', newRefreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 7 * 24 * 60 * 60 * 1000 });
-      res.json({ success: true, data: { accessToken } });
-    } catch (error: any) { logger.error('Token refresh error:', error); res.status(401).json({ success: false, message: error.message }); }
+      const { courseId } = req.params;
+      const { action, rejectionReason } = req.body; // action: 'approve' or 'reject'
+      const approval = await CourseApproval.findOne({ course: courseId }).session(session);
+      if (!approval) { res.status(404).json({ success: false, message: 'Course not submitted for approval' }); return; }
+      if (action === 'approve') {
+        approval.status = 'approved';
+        approval.reviewedAt = new Date();
+        approval.reviewedBy = (req as any).user?.userId;
+        await approval.save({ session });
+        const course = await Course.findByIdAndUpdate(courseId, { published: true }, { session });
+        await this.notificationService.sendNotification(approval.instructor.toString(), 'course', {
+          title: 'Course Approved!',
+          message: `Your course "${course?.title}" has been published.`,
+          metadata: { courseId }
+        });
+        res.json({ success: true, message: 'Course approved and published' });
+      } else {
+        approval.status = 'rejected';
+        approval.reviewedAt = new Date();
+        approval.reviewedBy = (req as any).user?.userId;
+        approval.rejectionReason = rejectionReason;
+        await approval.save({ session });
+        await this.notificationService.sendNotification(approval.instructor.toString(), 'course', {
+          title: 'Course Rejected',
+          message: `Your course "${(await Course.findById(courseId).session(session))?.title}" was rejected. Reason: ${rejectionReason}`,
+          metadata: { courseId }
+        });
+        res.json({ success: true, message: 'Course rejected' });
+      }
+      await session.commitTransaction();
+    } catch (error) {
+      await session.abortTransaction();
+      res.status(500).json({ success: false, message: 'Server error' });
+    } finally { session.endSession(); }
   };
 
-  logout = async (req: Request, res: Response): Promise<void> => {
+  // Withdrawals admin
+  getWithdrawals = async (req: Request, res: Response): Promise<void> => {
     try {
-      const refreshToken = req.cookies.refreshToken;
-      const userId = (req as any).user?.userId;
-      if (refreshToken && userId) await this.authService.logout(userId, refreshToken);
-      res.clearCookie('refreshToken');
-      res.json({ success: true, message: 'Logged out successfully' });
-    } catch (error) { res.status(500).json({ success: false, message: 'Error during logout' }); }
+      const { page = 1, limit = 20, status } = req.query;
+      const query: any = {};
+      if (status) query.status = status;
+      const skip = (Number(page) - 1) * Number(limit);
+      const [withdrawals, total] = await Promise.all([WithdrawalRequest.find(query).populate('user', 'firstName lastName displayName email').sort({ createdAt: -1 }).skip(skip).limit(Number(limit)), WithdrawalRequest.countDocuments(query)]);
+      res.json({ success: true, data: { withdrawals, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
   };
 
-  verifyEmail = async (req: Request, res: Response): Promise<void> => {
+  processWithdrawal = async (req: Request, res: Response): Promise<void> => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
-      const { token } = req.query;
-      if (!token) { res.status(400).json({ success: false, message: 'Verification token required' }); return; }
-      await this.authService.verifyEmail(token as string);
-      res.json({ success: true, message: 'Email verified successfully' });
-    } catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+      const { withdrawalId } = req.params;
+      const { action, adminNotes } = req.body; // action: 'approve' or 'reject'
+      const withdrawal = await WithdrawalRequest.findById(withdrawalId).session(session);
+      if (!withdrawal) { res.status(404).json({ success: false, message: 'Withdrawal not found' }); return; }
+      if (action === 'approve') {
+        withdrawal.status = 'processing';
+        withdrawal.adminNotes = adminNotes;
+        await withdrawal.save({ session });
+        // Queue the actual bank transfer
+        const queueService = (await import('../services/QueueService')).QueueService.getInstance();
+        await queueService.addJob('payment', { type: 'process_withdrawal', data: { transactionId: withdrawal._id, userId: withdrawal.user, amount: withdrawal.amount, bankDetails: withdrawal.bankDetails } });
+        res.json({ success: true, message: 'Withdrawal approved, processing started' });
+      } else {
+        withdrawal.status = 'failed';
+        withdrawal.adminNotes = adminNotes;
+        await withdrawal.save({ session });
+        // Refund user's wallet
+        const user = await User.findById(withdrawal.user).session(session);
+        if (user) {
+          user.walletBalance += withdrawal.amount;
+          user.pendingWithdrawal -= withdrawal.amount;
+          await user.save({ session });
+        }
+        await this.notificationService.sendNotification(withdrawal.user.toString(), 'payment', {
+          title: 'Withdrawal Rejected',
+          message: `Your withdrawal of ${withdrawal.amount} NGN was rejected. Reason: ${adminNotes || 'Please contact support'}`,
+          metadata: { withdrawalId }
+        });
+        res.json({ success: true, message: 'Withdrawal rejected, funds returned to wallet' });
+      }
+      await session.commitTransaction();
+    } catch (error) {
+      await session.abortTransaction();
+      res.status(500).json({ success: false, message: 'Server error' });
+    } finally { session.endSession(); }
   };
 
-  forgotPassword = async (req: Request, res: Response): Promise<void> => {
+  // Coupons admin
+  getCoupons = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { email } = req.body;
-      await this.authService.forgotPassword(email);
-      res.json({ success: true, message: 'If an account exists with that email, a password reset link has been sent.' });
-    } catch (error) { res.status(500).json({ success: false, message: 'Error processing request' }); }
+      const coupons = await Coupon.find().sort({ createdAt: -1 });
+      res.json({ success: true, data: coupons });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
   };
 
-  resetPassword = async (req: Request, res: Response): Promise<void> => {
+  createCoupon = async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) { res.status(400).json({ errors: errors.array() }); return; }
     try {
-      const { token, newPassword } = req.body;
-      await this.authService.resetPassword(token, newPassword);
-      res.json({ success: true, message: 'Password reset successful' });
+      const coupon = new Coupon(req.body);
+      await coupon.save();
+      res.status(201).json({ success: true, data: coupon });
     } catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
   };
 
-  changePassword = async (req: Request, res: Response): Promise<void> => {
-    // Implementation would call authService.changePassword – omitted for brevity but can be added.
-    res.json({ success: true, message: 'Password changed successfully' });
-  };
-
-  enableTwoFactor = async (req: Request, res: Response): Promise<void> => {
+  deleteCoupon = async (req: Request, res: Response): Promise<void> => {
     try {
-      const userId = (req as any).user?.userId;
-      const { secret, qrCode } = await this.authService.enableTwoFactor(userId);
-      res.json({ success: true, data: { secret, qrCode } });
-    } catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+      const { couponId } = req.params;
+      await Coupon.findByIdAndDelete(couponId);
+      res.json({ success: true, message: 'Coupon deleted' });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
   };
 
-  disableTwoFactor = async (req: Request, res: Response): Promise<void> => {
+  // Announcements
+  getAnnouncements = async (req: Request, res: Response): Promise<void> => {
     try {
-      const userId = (req as any).user?.userId;
-      const { code } = req.body;
-      await this.authService.disableTwoFactor(userId, code);
-      res.json({ success: true, message: 'Two‑factor authentication disabled' });
-    } catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
+      const announcements = await Announcement.find().sort({ createdAt: -1 });
+      res.json({ success: true, data: announcements });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+  };
+
+  createAnnouncement = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { title, content, type } = req.body;
+      const adminId = (req as any).user?.userId;
+      const announcement = new Announcement({ title, content, type, createdBy: adminId });
+      await announcement.save();
+      // Send to all users
+      const allUsers = await User.find().select('_id');
+      await this.notificationService.sendBulkNotifications(allUsers.map(u => u._id.toString()), 'system', {
+        title: `📢 ${title}`,
+        message: content,
+        metadata: { announcementId: announcement._id }
+      });
+      announcement.sentToAll = true;
+      announcement.sentAt = new Date();
+      await announcement.save();
+      res.status(201).json({ success: true, data: announcement });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+  };
+
+  // Audit Logs
+  getAuditLogs = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { page = 1, limit = 50, user, action, resource } = req.query;
+      const query: any = {};
+      if (user) query.user = user;
+      if (action) query.action = action;
+      if (resource) query.resource = resource;
+      const skip = (Number(page) - 1) * Number(limit);
+      const [logs, total] = await Promise.all([AuditLog.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).populate('user', 'firstName lastName email'), AuditLog.countDocuments(query)]);
+      res.json({ success: true, data: { logs, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
   };
 }
