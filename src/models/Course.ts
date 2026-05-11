@@ -1,6 +1,4 @@
-// ============================================
-// FILE: src/models/Course.ts (unchanged)
-// ============================================
+// src/models/Course.ts – COMPLETE (original + approval fields)
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ILesson extends Document {
@@ -67,16 +65,18 @@ export interface ICourse extends Document {
   lastUpdated: Date;
   version: number;
   
-  // Monetization
   creatorCommission: number;
   affiliateCommission: number;
   platformFee: number;
   
-  // Analytics
   totalRevenue: number;
   totalEnrollments: number;
   completionRate: number;
   averageRating: number;
+  
+  // ✅ NEW – course approval workflow
+  approvalStatus: 'pending' | 'approved' | 'rejected';
+  submittedAt?: Date;
   
   createdAt: Date;
   updatedAt: Date;
@@ -158,18 +158,20 @@ const CourseSchema = new Schema<ICourse>(
     totalEnrollments: { type: Number, default: 0 },
     completionRate: { type: Number, default: 0 },
     averageRating: { type: Number, default: 0 },
+    
+    // ✅ NEW
+    approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    submittedAt: { type: Date },
   },
   { timestamps: true }
 );
 
-// Indexes
 CourseSchema.index({ title: 'text', description: 'text', tags: 'text' });
 CourseSchema.index({ category: 1, level: 1, price: 1 });
 CourseSchema.index({ enrollmentCount: -1 });
 CourseSchema.index({ rating: -1 });
 CourseSchema.index({ createdAt: -1 });
 
-// Pre-save middleware to calculate totals
 CourseSchema.pre('save', function(next) {
   this.totalLessons = this.lessons.length;
   this.totalQuizzes = this.quizzes.length;
