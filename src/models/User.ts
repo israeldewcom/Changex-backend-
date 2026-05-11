@@ -1,6 +1,4 @@
-// ============================================
-// FILE: src/models/User.ts (unchanged, plus 2FA fields added)
-// ============================================
+// src/models/User.ts – COMPLETE (original + isApprovedInstructor)
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
@@ -13,7 +11,6 @@ export interface IUser extends Document {
   avatar?: string;
   bio?: string;
   
-  // Subscription
   subscriptionTier: 'free' | 'premium' | 'elite';
   subscriptionStatus: 'active' | 'canceled' | 'expired' | 'trialing';
   subscriptionId?: string;
@@ -21,40 +18,34 @@ export interface IUser extends Document {
   stripeCustomerId?: string;
   paystackCustomerCode?: string;
   
-  // Wallet
   walletBalance: number;
   totalEarned: number;
   totalWithdrawn: number;
   pendingWithdrawal: number;
   
-  // Gamification
   xp: number;
   level: number;
   streak: number;
   lastActiveAt: Date;
   badges: string[];
   
-  // Referrals
   referralCode: string;
   referredBy?: mongoose.Types.ObjectId;
   referrals: mongoose.Types.ObjectId[];
   referralEarnings: number;
   referralLevel: number;
   
-  // Stats
   coursesEnrolled: mongoose.Types.ObjectId[];
   coursesCompleted: mongoose.Types.ObjectId[];
   lessonsCompleted: number;
   certificatesEarned: mongoose.Types.ObjectId[];
   totalSpent: number;
   
-  // Settings
   emailNotifications: boolean;
   twoFactorEnabled: boolean;
   twoFactorSecret?: string;
   preferredCurrency: string;
   
-  // Security
   refreshTokens: string[];
   passwordResetToken?: string;
   passwordResetExpires?: Date;
@@ -64,12 +55,13 @@ export interface IUser extends Document {
   isBanned: boolean;
   roles: ('user' | 'creator' | 'admin' | 'moderator')[];
   
-  // Timestamps
+  // ✅ NEW – instructor approval flag
+  isApprovedInstructor: boolean;
+  
   createdAt: Date;
   updatedAt: Date;
   lastLoginAt: Date;
   
-  // Methods
   comparePassword(candidatePassword: string): Promise<boolean>;
   canAccessPremium(): boolean;
   calculateLevel(): number;
@@ -129,31 +121,30 @@ const UserSchema = new Schema<IUser>(
     isBanned: { type: Boolean, default: false },
     roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
     
+    // ✅ NEW
+    isApprovedInstructor: { type: Boolean, default: false },
+    
     lastLoginAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
-// Indexes for performance
 UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 UserSchema.index({ 'subscriptionExpiresAt': 1 });
 UserSchema.index({ xp: -1 });
 UserSchema.index({ roles: 1 });
 UserSchema.index({ createdAt: -1 });
 
-// Hash password before save
 UserSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
-// Compare password method
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Check premium access
 UserSchema.methods.canAccessPremium = function(): boolean {
   if (this.subscriptionTier === 'free') return false;
   if (this.subscriptionStatus !== 'active') return false;
@@ -161,9 +152,7 @@ UserSchema.methods.canAccessPremium = function(): boolean {
   return true;
 };
 
-// Calculate level based on XP
 UserSchema.methods.calculateLevel = function(): number {
-  // Level 1: 0 XP, Level 2: 200 XP, Level 3: 500 XP, etc.
   return Math.floor(Math.pow(this.xp / 100, 0.5)) + 1;
 };
 
