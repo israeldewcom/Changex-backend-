@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/services/AuthService.ts
-// ============================================
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import speakeasy from 'speakeasy';
@@ -38,6 +35,17 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
+  private async generateUniqueReferralCode(): Promise<string> {
+    let code: string;
+    let exists = true;
+    while (exists) {
+      code = crypto.randomBytes(6).toString('hex').toUpperCase();
+      const user = await User.findOne({ referralCode: code });
+      if (!user) exists = false;
+    }
+    return code!;
+  }
+
   async registerUser(userData: {
     email: string;
     password: string;
@@ -45,57 +53,37 @@ export class AuthService {
     lastName: string;
     referralCode?: string;
   }): Promise<IUser> {
-    // Check for existing user
-    const existingUser = await User.findOne({ email: userData.email });
-    if (existingUser) throw new Error('User already exists');
-
-    // Generate referral code
-    const referralCode = this.generateReferralCode();
-
-    // Create new user
-    const user = new User({
-      ...userData,
-      displayName: `${userData.firstName} ${userData.lastName}`,
-      referralCode,
-      emailVerificationToken: crypto.randomBytes(32).toString('hex'),
-    });
-
-    await user.save();
-
-    // Process referral if a code was provided
-    if (userData.referralCode) {
-      const referrer = await User.findOne({ referralCode: userData.referralCode });
-      if (referrer) {
-        const { Referral } = require('../models/Referral');
-        const referral = new Referral({
-          referrer: referrer._id,
-          referred: user._id,
-          level: 1,
-          referralCode,
-          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        });
-        await referral.save();
-        await User.findByIdAndUpdate(user._id, { referredBy: referrer._id, referralLevel: 1 });
-        await User.findByIdAndUpdate(referrer._id, { $push: { referrals: user._id } });
-      }
-    }
-
-    // Try to send verification email – if it fails, registration still succeeds
+    const session = await User.startSession();
+    session.startTransaction();
     try {
+      const existingUser = await User.findOne({ email: userData.email }).session(session);
+      if (existingUser) throw new Error('User already exists');
+      
+      const referralCode = await this.generateUniqueReferralCode();
+      const user = new User({
+        ...userData,
+        displayName: `${userData.firstName} ${userData.lastName}`,
+        referralCode,
+        emailVerificationToken: crypto.randomBytes(32).toString('hex'),
+      });
+      await user.save({ session });
+      
+      if (userData.referralCode) {
+        await this.processReferral(userData.referralCode, user._id, session);
+      }
+      
       await this.emailService.sendVerificationEmail(user.email, user.emailVerificationToken!);
+      await session.commitTransaction();
+      return user;
     } catch (error) {
-      logger.error('Failed to send verification email (non‑fatal):', error);
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      session.endSession();
     }
-
-    return user;
   }
 
-  async loginUser(
-    email: string,
-    password: string,
-    ipAddress: string,
-    twoFactorCode?: string
-  ): Promise<{
+  async loginUser(email: string, password: string, ipAddress: string, twoFactorCode?: string): Promise<{
     user: IUser;
     accessToken: string;
     refreshToken: string;
@@ -104,7 +92,7 @@ export class AuthService {
     const user = await User.findOne({ email }).select('+password');
     if (!user) throw new Error('Invalid credentials');
     if (user.isBanned) throw new Error('Account has been banned');
-
+    
     const isValidPassword = await user.comparePassword(password);
     if (!isValidPassword) throw new Error('Invalid credentials');
 
@@ -122,14 +110,11 @@ export class AuthService {
 
     user.lastLoginAt = new Date();
     await user.save();
-
     const { accessToken, refreshToken } = this.generateTokens(user._id.toString());
     user.refreshTokens.push(refreshToken);
     if (user.refreshTokens.length > 5) user.refreshTokens.shift();
     await user.save();
-
     await this.redis.setex(`user:${user._id}:session`, 3600 * 24, refreshToken);
-
     return { user, accessToken, refreshToken, requiresTwoFactor: false };
   }
 
@@ -138,7 +123,6 @@ export class AuthService {
       const decoded = jwt.verify(refreshToken, config.jwt.refreshSecret) as { userId: string };
       const user = await User.findById(decoded.userId);
       if (!user || !user.refreshTokens.includes(refreshToken)) throw new Error('Invalid refresh token');
-
       user.refreshTokens = user.refreshTokens.filter(t => t !== refreshToken);
       const tokens = this.generateTokens(user._id.toString());
       user.refreshTokens.push(tokens.refreshToken);
@@ -168,7 +152,7 @@ export class AuthService {
 
   async forgotPassword(email: string): Promise<void> {
     const user = await User.findOne({ email });
-    if (!user) return; // silently ignore – don't reveal if email exists
+    if (!user) return;
     const resetToken = crypto.randomBytes(32).toString('hex');
     user.passwordResetToken = resetToken;
     user.passwordResetExpires = new Date(Date.now() + 3600000);
@@ -185,6 +169,15 @@ export class AuthService {
     user.password = newPassword;
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
+    await user.save();
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+    const user = await User.findById(userId).select('+password');
+    if (!user) throw new Error('User not found');
+    const isValid = await user.comparePassword(currentPassword);
+    if (!isValid) throw new Error('Current password is incorrect');
+    user.password = newPassword;
     await user.save();
   }
 
@@ -213,7 +206,35 @@ export class AuthService {
     await user.save();
   }
 
-  private generateReferralCode(): string {
-    return crypto.randomBytes(6).toString('hex').toUpperCase();
+  private async processReferral(referralCode: string, newUserId: string, session: any): Promise<void> {
+    const referrer = await User.findOne({ referralCode }).session(session);
+    if (!referrer) return;
+    
+    let level = 1;
+    let currentReferrer = referrer;
+    while (currentReferrer.referredBy && level < 3) {
+      level++;
+      currentReferrer = await User.findById(currentReferrer.referredBy).session(session);
+      if (!currentReferrer) break;
+    }
+    
+    const { Referral } = require('../models/Referral');
+    const referral = new Referral({
+      referrer: referrer._id,
+      referred: newUserId,
+      level,
+      referralCode,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+    await referral.save({ session });
+    await User.findByIdAndUpdate(newUserId, { referredBy: referrer._id, referralLevel: level }, { session });
+    await User.findByIdAndUpdate(referrer._id, { $push: { referrals: newUserId } }, { session });
+  }
+
+  async oAuthCallback(user: IUser, res: any): Promise<void> {
+    const { accessToken, refreshToken } = this.generateTokens(user._id.toString());
+    user.refreshTokens.push(refreshToken);
+    await user.save();
+    res.redirect(`${config.frontendUrl}?token=${accessToken}&refreshToken=${refreshToken}`);
   }
 }
