@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/services/EarningEngine.ts (unchanged)
-// ============================================
 import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { Transaction } from '../models/Transaction';
@@ -29,16 +26,44 @@ export class EarningEngine {
     return EarningEngine.instance;
   }
 
-  async distributeCourseCommission(buyerId: string, courseId: string, amount: number, transactionId: mongoose.Types.ObjectId, session: mongoose.ClientSession): Promise<void> {
+  /** Public method to add XP to a user */
+  async addXP(userId: string, amount: number, session?: mongoose.ClientSession): Promise<void> {
+    const user = await User.findById(userId).session(session || null);
+    if (!user) throw new Error('User not found');
+    user.xp += amount;
+    const newLevel = user.calculateLevel();
+    if (newLevel > user.level) {
+      user.level = newLevel;
+      const levelBonus = newLevel * 100;
+      user.xp += levelBonus;
+      await this.queueService.addJob('send-notification', {
+        userId,
+        type: 'level_up',
+        data: { oldLevel: user.level - newLevel + newLevel, newLevel, bonus: levelBonus }
+      });
+    }
+    await user.save({ session });
+  }
+
+  async distributeCourseCommission(
+    buyerId: string,
+    courseId: string,
+    amount: number,
+    transactionId: mongoose.Types.ObjectId,
+    session: mongoose.ClientSession
+  ): Promise<void> {
     try {
       const course = await Course.findById(courseId).session(session);
       if (!course) throw new Error('Course not found');
       const creator = await User.findById(course.instructor).session(session);
       if (!creator) throw new Error('Creator not found');
+
       const creatorAmount = amount * this.COURSE_CREATOR_COMMISSION;
       const platformAmount = amount * this.PLATFORM_FEE;
       let remainingForAffiliates = amount - creatorAmount - platformAmount;
+
       await this.addToWallet(creator._id.toString(), creatorAmount, 'commission', { type: 'course_sale', courseId: course._id.toString(), transactionId: transactionId.toString() }, session);
+
       const buyer = await User.findById(buyerId).session(session);
       if (buyer && buyer.referredBy) {
         const referrals = await Referral.find({ referred: buyerId, status: 'active' }).session(session);
@@ -59,6 +84,7 @@ export class EarningEngine {
           }
         }
       }
+
       await this.addToWallet('platform', platformAmount, 'platform_fee', { type: 'platform_fee', courseId: course._id.toString(), transactionId: transactionId.toString() }, session);
       logger.info('Commission distributed', { courseId, amount, creatorAmount, platformAmount, affiliateAmount: amount - creatorAmount - platformAmount - remainingForAffiliates });
     } catch (error) {
@@ -169,30 +195,17 @@ export class EarningEngine {
     }
   }
 
-  private async addXP(userId: string, amount: number, session: mongoose.ClientSession): Promise<void> {
-    const user = await User.findById(userId).session(session);
-    if (!user) throw new Error('User not found');
-    user.xp += amount;
-    const newLevel = user.calculateLevel();
-    if (newLevel > user.level) {
-      user.level = newLevel;
-      const levelBonus = newLevel * 100;
-      user.xp += levelBonus;
-      await this.queueService.addJob('send-notification', { userId, type: 'level_up', data: { oldLevel: user.level - newLevel + newLevel, newLevel, bonus: levelBonus } });
-    }
-    await user.save({ session });
-  }
-
-  private async addToWallet(userId: string, amount: number, type: string, metadata: Record<string, any>, session: mongoose.ClientSession): Promise<void> {
+  async addToWallet(userId: string, amount: number, type: string, metadata: Record<string, any>, session?: mongoose.ClientSession): Promise<void> {
     if (userId === 'platform') {
       await this.queueService.addJob('update-platform-wallet', { amount, type, metadata });
       return;
     }
-    const user = await User.findById(userId).session(session);
+    const user = await User.findById(userId).session(session || null);
     if (!user) throw new Error('User not found');
     user.walletBalance += amount;
     user.totalEarned += amount;
     await user.save({ session });
+
     const transaction = new Transaction({
       user: userId,
       type: 'commission',
