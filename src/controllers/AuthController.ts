@@ -1,239 +1,405 @@
-// src/controllers/AdminController.ts (full replacement)
-import { Request, Response } from 'express';
-import { User, Course, Transaction, Marketplace, Job, WithdrawalRequest, Coupon, Announcement, AuditLog, CourseApproval } from '../models';
-import { AnalyticsService } from '../services/AnalyticsService';
-import { PaymentService } from '../services/PaymentService';
-import { NotificationService } from '../services/NotificationService';
-import { validationResult } from 'express-validator';
-import mongoose from 'mongoose';
+import { Request, Response, NextFunction } from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { User, IUser } from '../models/User';
+import { config } from '../config';
+import { logger } from '../utils/logger';
+import { sendEmail } from '../services/EmailService';
 
-export class AdminController {
-  private analyticsService = AnalyticsService.getInstance();
-  private paymentService = PaymentService.getInstance();
-  private notificationService = NotificationService.getInstance();
-
-  getDashboardStats = async (req: Request, res: Response): Promise<void> => {
+export class AuthController {
+  /**
+   * POST /api/v1/auth/register
+   */
+  register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const [totalUsers, totalCourses, totalProducts, totalJobs, totalRevenue, pendingWithdrawals] = await Promise.all([
-        User.countDocuments(),
-        Course.countDocuments({ published: true }),
-        Marketplace.countDocuments({ published: true }),
-        Job.countDocuments({ isActive: true }),
-        Transaction.aggregate([{ $match: { type: 'purchase', status: 'completed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-        WithdrawalRequest.countDocuments({ status: 'pending' }),
-      ]);
-      res.json({ success: true, data: { totalUsers, totalCourses, totalProducts, totalJobs, totalRevenue: totalRevenue[0]?.total || 0, pendingWithdrawals } });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
-  };
+      const { firstName, lastName, email, password, phone, referralCode } = req.body;
 
-  // Users
-  getUsers = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { page = 1, limit = 20, role, isBanned } = req.query;
-      const query: any = {};
-      if (role) query.roles = role;
-      if (isBanned !== undefined) query.isBanned = isBanned === 'true';
-      const skip = (Number(page) - 1) * Number(limit);
-      const [users, total] = await Promise.all([User.find(query).select('-password -refreshTokens').skip(skip).limit(Number(limit)), User.countDocuments(query)]);
-      res.json({ success: true, data: { users, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
-  };
-
-  updateUserStatus = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { userId } = req.params;
-      const { isBanned, roles } = req.body;
-      const update: any = {};
-      if (isBanned !== undefined) update.isBanned = isBanned;
-      if (roles) update.roles = roles;
-      const user = await User.findByIdAndUpdate(userId, update, { new: true }).select('-password -refreshTokens');
-      if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
-      res.json({ success: true, data: user, message: 'User updated' });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
-  };
-
-  // Courses admin
-  getCourses = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { page = 1, limit = 20, status, instructor } = req.query;
-      let query: any = {};
-      if (status === 'pending') {
-        const pendingApprovals = await CourseApproval.find({ status: 'pending' }).distinct('course');
-        query._id = { $in: pendingApprovals };
-      } else if (status === 'approved') {
-        const approvedApprovals = await CourseApproval.find({ status: 'approved' }).distinct('course');
-        query._id = { $in: approvedApprovals };
-        query.published = true;
-      } else if (status === 'all') {
-        // all courses
-      } else {
-        query.published = status === 'published' ? true : false;
+      // Check if user exists
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        res.status(400).json({ success: false, message: 'Email already registered' });
+        return;
       }
-      if (instructor) query.instructor = instructor;
-      const skip = (Number(page) - 1) * Number(limit);
-      const [courses, total] = await Promise.all([Course.find(query).populate('instructor', 'firstName lastName displayName email').skip(skip).limit(Number(limit)), Course.countDocuments(query)]);
-      res.json({ success: true, data: { courses, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
-  };
 
-  approveCourse = async (req: Request, res: Response): Promise<void> => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      const { courseId } = req.params;
-      const { action, rejectionReason } = req.body; // action: 'approve' or 'reject'
-      const approval = await CourseApproval.findOne({ course: courseId }).session(session);
-      if (!approval) { res.status(404).json({ success: false, message: 'Course not submitted for approval' }); return; }
-      if (action === 'approve') {
-        approval.status = 'approved';
-        approval.reviewedAt = new Date();
-        approval.reviewedBy = (req as any).user?.userId;
-        await approval.save({ session });
-        const course = await Course.findByIdAndUpdate(courseId, { published: true }, { session });
-        await this.notificationService.sendNotification(approval.instructor.toString(), 'course', {
-          title: 'Course Approved!',
-          message: `Your course "${course?.title}" has been published.`,
-          metadata: { courseId }
-        });
-        res.json({ success: true, message: 'Course approved and published' });
-      } else {
-        approval.status = 'rejected';
-        approval.reviewedAt = new Date();
-        approval.reviewedBy = (req as any).user?.userId;
-        approval.rejectionReason = rejectionReason;
-        await approval.save({ session });
-        await this.notificationService.sendNotification(approval.instructor.toString(), 'course', {
-          title: 'Course Rejected',
-          message: `Your course "${(await Course.findById(courseId).session(session))?.title}" was rejected. Reason: ${rejectionReason}`,
-          metadata: { courseId }
-        });
-        res.json({ success: true, message: 'Course rejected' });
-      }
-      await session.commitTransaction();
-    } catch (error) {
-      await session.abortTransaction();
-      res.status(500).json({ success: false, message: 'Server error' });
-    } finally { session.endSession(); }
-  };
-
-  // Withdrawals admin
-  getWithdrawals = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { page = 1, limit = 20, status } = req.query;
-      const query: any = {};
-      if (status) query.status = status;
-      const skip = (Number(page) - 1) * Number(limit);
-      const [withdrawals, total] = await Promise.all([WithdrawalRequest.find(query).populate('user', 'firstName lastName displayName email').sort({ createdAt: -1 }).skip(skip).limit(Number(limit)), WithdrawalRequest.countDocuments(query)]);
-      res.json({ success: true, data: { withdrawals, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
-  };
-
-  processWithdrawal = async (req: Request, res: Response): Promise<void> => {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      const { withdrawalId } = req.params;
-      const { action, adminNotes } = req.body; // action: 'approve' or 'reject'
-      const withdrawal = await WithdrawalRequest.findById(withdrawalId).session(session);
-      if (!withdrawal) { res.status(404).json({ success: false, message: 'Withdrawal not found' }); return; }
-      if (action === 'approve') {
-        withdrawal.status = 'processing';
-        withdrawal.adminNotes = adminNotes;
-        await withdrawal.save({ session });
-        // Queue the actual bank transfer
-        const queueService = (await import('../services/QueueService')).QueueService.getInstance();
-        await queueService.addJob('payment', { type: 'process_withdrawal', data: { transactionId: withdrawal._id, userId: withdrawal.user, amount: withdrawal.amount, bankDetails: withdrawal.bankDetails } });
-        res.json({ success: true, message: 'Withdrawal approved, processing started' });
-      } else {
-        withdrawal.status = 'failed';
-        withdrawal.adminNotes = adminNotes;
-        await withdrawal.save({ session });
-        // Refund user's wallet
-        const user = await User.findById(withdrawal.user).session(session);
-        if (user) {
-          user.walletBalance += withdrawal.amount;
-          user.pendingWithdrawal -= withdrawal.amount;
-          await user.save({ session });
+      // Handle referral
+      let referredBy = null;
+      if (referralCode) {
+        const referrer = await User.findOne({ referralCode });
+        if (referrer) {
+          referredBy = referrer._id;
         }
-        await this.notificationService.sendNotification(withdrawal.user.toString(), 'payment', {
-          title: 'Withdrawal Rejected',
-          message: `Your withdrawal of ${withdrawal.amount} NGN was rejected. Reason: ${adminNotes || 'Please contact support'}`,
-          metadata: { withdrawalId }
-        });
-        res.json({ success: true, message: 'Withdrawal rejected, funds returned to wallet' });
       }
-      await session.commitTransaction();
-    } catch (error) {
-      await session.abortTransaction();
-      res.status(500).json({ success: false, message: 'Server error' });
-    } finally { session.endSession(); }
-  };
 
-  // Coupons admin
-  getCoupons = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const coupons = await Coupon.find().sort({ createdAt: -1 });
-      res.json({ success: true, data: coupons });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
-  };
-
-  createCoupon = async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) { res.status(400).json({ errors: errors.array() }); return; }
-    try {
-      const coupon = new Coupon(req.body);
-      await coupon.save();
-      res.status(201).json({ success: true, data: coupon });
-    } catch (error: any) { res.status(400).json({ success: false, message: error.message }); }
-  };
-
-  deleteCoupon = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { couponId } = req.params;
-      await Coupon.findByIdAndDelete(couponId);
-      res.json({ success: true, message: 'Coupon deleted' });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
-  };
-
-  // Announcements
-  getAnnouncements = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const announcements = await Announcement.find().sort({ createdAt: -1 });
-      res.json({ success: true, data: announcements });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
-  };
-
-  createAnnouncement = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { title, content, type } = req.body;
-      const adminId = (req as any).user?.userId;
-      const announcement = new Announcement({ title, content, type, createdBy: adminId });
-      await announcement.save();
-      // Send to all users
-      const allUsers = await User.find().select('_id');
-      await this.notificationService.sendBulkNotifications(allUsers.map(u => u._id.toString()), 'system', {
-        title: `📢 ${title}`,
-        message: content,
-        metadata: { announcementId: announcement._id }
+      // Create user (password hashed by pre-save hook)
+      const user = new User({
+        firstName,
+        lastName,
+        email,
+        password,
+        phone,
+        displayName: `${firstName} ${lastName}`,
+        referredBy,
+        referralCode: await this.generateUniqueReferralCode(),
+        roles: ['user'],
       });
-      announcement.sentToAll = true;
-      announcement.sentAt = new Date();
-      await announcement.save();
-      res.status(201).json({ success: true, data: announcement });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+
+      await user.save();
+
+      // Update referrer's referrals list
+      if (referredBy) {
+        await User.findByIdAndUpdate(referredBy, {
+          $push: { referrals: user._id },
+        });
+      }
+
+      // Generate tokens
+      const accessToken = this.generateAccessToken(user);
+      const refreshToken = this.generateRefreshToken(user);
+
+      // Store refresh token in user document
+      user.refreshTokens.push(refreshToken);
+      await user.save();
+
+      const userData = this.sanitizeUser(user);
+
+      res.status(201).json({
+        success: true,
+        accessToken,
+        refreshToken,
+        user: userData,
+      });
+    } catch (error) {
+      logger.error('Register error:', error);
+      res.status(500).json({ success: false, message: 'Registration failed' });
+    }
   };
 
-  // Audit Logs
-  getAuditLogs = async (req: Request, res: Response): Promise<void> => {
+  /**
+   * POST /api/v1/auth/login
+   */
+  login = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const { page = 1, limit = 50, user, action, resource } = req.query;
-      const query: any = {};
-      if (user) query.user = user;
-      if (action) query.action = action;
-      if (resource) query.resource = resource;
-      const skip = (Number(page) - 1) * Number(limit);
-      const [logs, total] = await Promise.all([AuditLog.find(query).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).populate('user', 'firstName lastName email'), AuditLog.countDocuments(query)]);
-      res.json({ success: true, data: { logs, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+      const { email, password } = req.body;
+
+      const user = await User.findOne({ email }).select('+password');
+      if (!user) {
+        res.status(401).json({ success: false, message: 'Invalid email or password' });
+        return;
+      }
+
+      const isMatch = await user.comparePassword(password);
+      if (!isMatch) {
+        res.status(401).json({ success: false, message: 'Invalid email or password' });
+        return;
+      }
+
+      // Update last login
+      user.lastLoginAt = new Date();
+      await user.save();
+
+      // Generate tokens
+      const accessToken = this.generateAccessToken(user);
+      const refreshToken = this.generateRefreshToken(user);
+
+      // Store refresh token
+      user.refreshTokens.push(refreshToken);
+      await user.save();
+
+      const userData = this.sanitizeUser(user);
+
+      res.json({
+        success: true,
+        accessToken,
+        refreshToken,
+        user: userData,
+      });
+    } catch (error) {
+      logger.error('Login error:', error);
+      res.status(500).json({ success: false, message: 'Login failed' });
+    }
   };
+
+  /**
+   * POST /api/v1/auth/refresh-token
+   */
+  refreshToken = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { refreshToken } = req.body;
+      if (!refreshToken) {
+        res.status(400).json({ success: false, message: 'Refresh token is required' });
+        return;
+      }
+
+      // Verify token
+      let decoded: any;
+      try {
+        decoded = jwt.verify(refreshToken, config.jwt.refreshSecret);
+      } catch (err) {
+        res.status(401).json({ success: false, message: 'Invalid refresh token' });
+        return;
+      }
+
+      const user = await User.findById(decoded.userId);
+      if (!user || !user.refreshTokens.includes(refreshToken)) {
+        res.status(401).json({ success: false, message: 'Token not recognized' });
+        return;
+      }
+
+      // Rotate refresh token
+      user.refreshTokens = user.refreshTokens.filter(t => t !== refreshToken);
+
+      const newAccessToken = this.generateAccessToken(user);
+      const newRefreshToken = this.generateRefreshToken(user);
+
+      user.refreshTokens.push(newRefreshToken);
+      await user.save();
+
+      res.json({
+        success: true,
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+      });
+    } catch (error) {
+      logger.error('Refresh token error:', error);
+      res.status(500).json({ success: false, message: 'Token refresh failed' });
+    }
+  };
+
+  /**
+   * POST /api/v1/auth/logout
+   */
+  logout = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { refreshToken } = req.body;
+      // Remove the refresh token from the user's document if present
+      if (refreshToken && (req as any).user) {
+        await User.findByIdAndUpdate((req as any).user.userId, {
+          $pull: { refreshTokens: refreshToken },
+        });
+      }
+      res.json({ success: true, message: 'Logged out successfully' });
+    } catch (error) {
+      logger.error('Logout error:', error);
+      res.status(500).json({ success: false, message: 'Logout failed' });
+    }
+  };
+
+  /**
+   * POST /api/v1/auth/forgot-password
+   */
+  forgotPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { email } = req.body;
+      const user = await User.findOne({ email });
+      if (!user) {
+        // For security, don't reveal if email exists
+        res.json({ success: true, message: 'If the email exists, a reset link has been sent' });
+        return;
+      }
+
+      // Generate reset token
+      const resetToken = jwt.sign({ userId: user._id }, config.jwt.accessSecret, { expiresIn: '1h' });
+      user.passwordResetToken = resetToken;
+      user.passwordResetExpires = new Date(Date.now() + 3600000);
+      await user.save();
+
+      // Send email (implement your email service)
+      const resetUrl = `${config.frontendUrl}/reset-password?token=${resetToken}`;
+      await sendEmail({
+        to: user.email,
+        subject: 'Password Reset Request',
+        html: `Click <a href="${resetUrl}">here</a> to reset your password. This link expires in 1 hour.`,
+      });
+
+      res.json({ success: true, message: 'Password reset link sent to email' });
+    } catch (error) {
+      logger.error('Forgot password error:', error);
+      res.status(500).json({ success: false, message: 'Failed to send reset email' });
+    }
+  };
+
+  /**
+   * POST /api/v1/auth/reset-password
+   */
+  resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { token, newPassword } = req.body;
+      let decoded: any;
+      try {
+        decoded = jwt.verify(token, config.jwt.accessSecret);
+      } catch (err) {
+        res.status(400).json({ success: false, message: 'Invalid or expired token' });
+        return;
+      }
+
+      const user = await User.findOne({
+        _id: decoded.userId,
+        passwordResetToken: token,
+        passwordResetExpires: { $gt: new Date() },
+      });
+
+      if (!user) {
+        res.status(400).json({ success: false, message: 'Invalid or expired token' });
+        return;
+      }
+
+      user.password = newPassword; // pre-save hook will hash
+      user.passwordResetToken = undefined;
+      user.passwordResetExpires = undefined;
+      await user.save();
+
+      res.json({ success: true, message: 'Password reset successfully' });
+    } catch (error) {
+      logger.error('Reset password error:', error);
+      res.status(500).json({ success: false, message: 'Password reset failed' });
+    }
+  };
+
+  /**
+   * GET /api/v1/auth/google
+   * Initiates Google OAuth (frontend redirects here)
+   */
+  googleAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    // This is handled by Passport.js or custom OAuth flow.
+    // For simplicity, we assume a callback is handled elsewhere.
+    // In a real implementation, you'd redirect to Google's consent screen.
+    res.redirect(`${config.googleAuthUrl}`);
+  };
+
+  /**
+   * GET /api/v1/auth/google/callback
+   * Handles Google OAuth callback
+   */
+  googleCallback = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      // User data from Google (handled by Passport)
+      const profile = (req as any).user;
+      if (!profile) {
+        res.redirect(`${config.frontendUrl}/login?error=oauth_failed`);
+        return;
+      }
+
+      let user = await User.findOne({ email: profile.email });
+      if (!user) {
+        // Create new user
+        user = new User({
+          firstName: profile.givenName,
+          lastName: profile.familyName,
+          email: profile.email,
+          displayName: profile.displayName,
+          avatar: profile.picture,
+          referralCode: await this.generateUniqueReferralCode(),
+          roles: ['user'],
+        });
+        await user.save();
+      }
+
+      const accessToken = this.generateAccessToken(user);
+      const refreshToken = this.generateRefreshToken(user);
+      user.refreshTokens.push(refreshToken);
+      await user.save();
+
+      res.redirect(`${config.frontendUrl}?token=${accessToken}&refreshToken=${refreshToken}`);
+    } catch (error) {
+      logger.error('Google callback error:', error);
+      res.redirect(`${config.frontendUrl}/login?error=oauth_failed`);
+    }
+  };
+
+  /**
+   * GET /api/v1/auth/github
+   */
+  githubAuth = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    res.redirect(`${config.githubAuthUrl}`);
+  };
+
+  /**
+   * GET /api/v1/auth/github/callback
+   */
+  githubCallback = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const profile = (req as any).user;
+      if (!profile) {
+        res.redirect(`${config.frontendUrl}/login?error=oauth_failed`);
+        return;
+      }
+
+      let user = await User.findOne({ email: profile.email });
+      if (!user) {
+        user = new User({
+          firstName: profile.displayName?.split(' ')[0],
+          lastName: profile.displayName?.split(' ')[1] || '',
+          email: profile.email,
+          displayName: profile.displayName,
+          avatar: profile.avatar_url,
+          referralCode: await this.generateUniqueReferralCode(),
+          roles: ['user'],
+        });
+        await user.save();
+      }
+
+      const accessToken = this.generateAccessToken(user);
+      const refreshToken = this.generateRefreshToken(user);
+      user.refreshTokens.push(refreshToken);
+      await user.save();
+
+      res.redirect(`${config.frontendUrl}?token=${accessToken}&refreshToken=${refreshToken}`);
+    } catch (error) {
+      logger.error('GitHub callback error:', error);
+      res.redirect(`${config.frontendUrl}/login?error=oauth_failed`);
+    }
+  };
+
+  // -------------------- Helpers --------------------
+
+  private generateAccessToken(user: IUser): string {
+    return jwt.sign(
+      { userId: user._id, email: user.email, roles: user.roles },
+      config.jwt.accessSecret,
+      { expiresIn: config.jwt.accessExpiresIn || '15m' }
+    );
+  }
+
+  private generateRefreshToken(user: IUser): string {
+    return jwt.sign(
+      { userId: user._id },
+      config.jwt.refreshSecret,
+      { expiresIn: config.jwt.refreshExpiresIn || '7d' }
+    );
+  }
+
+  private sanitizeUser(user: IUser) {
+    return {
+      _id: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      phone: user.phone,
+      bio: user.bio,
+      avatar: user.avatar,
+      roles: user.roles,
+      subscriptionTier: user.subscriptionTier,
+      walletBalance: user.walletBalance,
+      xp: user.xp,
+      level: user.level,
+      referralCode: user.referralCode,
+      streaks: user.streak,
+      setupDone: user.isApprovedInstructor !== undefined, // or your own field
+      createdAt: user.createdAt,
+    };
+  }
+
+  private async generateUniqueReferralCode(): Promise<string> {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code = '';
+    for (let i = 0; i < 8; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    // Ensure uniqueness
+    const existing = await User.findOne({ referralCode: code });
+    if (existing) return this.generateUniqueReferralCode();
+    return code;
+  }
 }
+
+export default AuthController;
