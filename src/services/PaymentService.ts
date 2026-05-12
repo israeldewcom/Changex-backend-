@@ -1,21 +1,44 @@
-// src/services/PaymentService.ts – COMPLETE (with WithdrawalRequest)
 import Stripe from 'stripe';
-// ... all original imports ...
-import { WithdrawalRequest } from '../models/WithdrawalRequest'; // ✅ NEW
+import mongoose from 'mongoose';
+import { User } from '../models/User';
+import { Transaction } from '../models/Transaction';
+import { WithdrawalRequest } from '../models/WithdrawalRequest';
+import { config } from '../config';
 
 export class PaymentService {
-  // ... original code (constructor, stripe, paystack) remains unchanged ...
+  private static instance: PaymentService;
+  private stripe: Stripe;
 
-  async processWithdrawal(userId: string, amount: number, bankDetails: { bankName: string; accountNumber: string; accountName: string; bankCode: string }): Promise<WithdrawalRequest> {
+  private constructor() {
+    this.stripe = new Stripe(config.stripeSecretKey || '', {
+      apiVersion: '2023-10-16',
+    });
+  }
+
+  static getInstance(): PaymentService {
+    if (!PaymentService.instance) {
+      PaymentService.instance = new PaymentService();
+    }
+    return PaymentService.instance;
+  }
+
+  /**
+   * Create a new withdrawal request (admin approval flow)
+   */
+  async processWithdrawal(
+    userId: string,
+    amount: number,
+    bankDetails: { bankName: string; accountNumber: string; accountName: string; bankCode: string }
+  ) {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
       const user = await User.findById(userId).session(session);
       if (!user) throw new Error('User not found');
       if (user.walletBalance < amount) throw new Error('Insufficient balance');
-      if (amount < 1000) throw new Error('Minimum withdrawal amount is ₦1,000');
+      if (amount < 1000) throw new Error('Minimum withdrawal is ₦1,000');
 
-      // ✅ NEW – create WithdrawalRequest instead of directly creating a transaction
+      // Create withdrawal request
       const withdrawalRequest = new WithdrawalRequest({
         user: userId,
         amount,
@@ -25,6 +48,7 @@ export class PaymentService {
       });
       await withdrawalRequest.save({ session });
 
+      // Create transaction record
       const transaction = new Transaction({
         user: userId,
         type: 'withdrawal',
@@ -32,9 +56,8 @@ export class PaymentService {
         currency: 'NGN',
         status: 'pending',
         description: `Withdrawal request #${withdrawalRequest._id}`,
-        reference: this.generateReference(),
-        withdrawalDetails: bankDetails,
-        metadata: { withdrawalRequestId: withdrawalRequest._id }
+        reference: `WD-${Date.now()}`,
+        metadata: { withdrawalRequestId: withdrawalRequest._id },
       });
       await transaction.save({ session });
 
@@ -47,10 +70,7 @@ export class PaymentService {
 
       await session.commitTransaction();
 
-      // Queue the withdrawal for processing (admin will approve later)
-      const queueService = QueueService.getInstance();
-      await queueService.addJob('payment', { type: 'withdrawal_request', data: { withdrawalRequestId: withdrawalRequest._id, userId, amount, bankDetails } });
-
+      // (Optional) queue job to notify admin
       return withdrawalRequest;
     } catch (error) {
       await session.abortTransaction();
@@ -60,5 +80,31 @@ export class PaymentService {
     }
   }
 
-  // ... rest of the original file unchanged (webhook handlers, etc.) ...
+  /**
+   * Create Stripe payment intent
+   */
+  async createPaymentIntent(amount: number, currency: string = 'ngn') {
+    return this.stripe.paymentIntents.create({
+      amount: Math.round(amount * 100),
+      currency,
+    });
+  }
+
+  /**
+   * Confirm a transaction (e.g., after webhook)
+   */
+  async confirmTransaction(transactionId: string) {
+    return Transaction.findByIdAndUpdate(transactionId, { status: 'completed' }, { new: true });
+  }
+
+  /**
+   * Generate unique reference
+   */
+  private generateReference(): string {
+    return `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  // Add other payment methods as needed...
 }
+
+export default PaymentService;
