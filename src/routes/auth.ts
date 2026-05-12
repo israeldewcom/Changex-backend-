@@ -1,23 +1,18 @@
 import { Router } from 'express';
 import { AuthController } from '../controllers/AuthController';
-import { authenticate } from '../middleware/auth';
-import { validateRegistration, validateLogin, validatePasswordReset } from '../middleware/validation';
 
 const router = Router();
-const authController = new AuthController();
+const ctrl = new AuthController();
 
-// ── Public routes ──
-router.post('/register', validateRegistration, authController.register);
-router.post('/login', validateLogin, authController.login);
-router.post('/refresh-token', authController.refreshToken);
-router.post('/forgot-password', authController.forgotPassword);
-router.post('/reset-password', validatePasswordReset, authController.resetPassword);
-router.post('/logout', authenticate, authController.logout);
-
-// ── OAuth routes ──
-router.get('/google', authController.googleAuth);
-router.get('/google/callback', authController.googleCallback);
-router.get('/github', authController.githubAuth);
-router.get('/github/callback', authController.githubCallback);
+router.post('/register', ctrl.register);
+router.post('/login', ctrl.login);
+router.post('/refresh-token', ctrl.refreshToken);
+router.post('/forgot-password', ctrl.forgotPassword);
+router.post('/reset-password', ctrl.resetPassword);
+router.post('/logout', ctrl.logout);
+router.get('/google', ctrl.googleAuth);
+router.get('/google/callback', ctrl.googleCallback);
+router.get('/github', ctrl.githubAuth);
+router.get('/github/callback', ctrl.githubCallback);
 
 export default router;
