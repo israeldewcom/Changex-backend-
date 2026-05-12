@@ -1,9 +1,7 @@
-// src/controllers/InstructorController.ts
 import { Request, Response } from 'express';
 import { Course, Enrollment, User, CourseApproval, CourseQuestion, CourseAnswer } from '../models';
 import { FileUploadService } from '../services/FileUploadService';
 import { NotificationService } from '../services/NotificationService';
-import { validationResult } from 'express-validator';
 import mongoose from 'mongoose';
 
 export class InstructorController {
@@ -12,7 +10,7 @@ export class InstructorController {
 
   getDashboardStats = async (req: Request, res: Response): Promise<void> => {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).user.userId;
       const courses = await Course.find({ instructor: userId });
       const courseIds = courses.map(c => c._id);
       const enrollments = await Enrollment.aggregate([
@@ -20,10 +18,14 @@ export class InstructorController {
         { $group: { _id: null, totalStudents: { $sum: 1 }, completed: { $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] } } } }
       ]);
       const totalRevenue = courses.reduce((sum, c) => sum + (c.totalRevenue || 0), 0);
-      const totalStudents = enrollments[0]?.totalStudents || 0;
-      const completedStudents = enrollments[0]?.completed || 0;
       const pendingQuestions = await CourseQuestion.countDocuments({ course: { $in: courseIds }, isAnswered: false });
-      res.json({ success: true, data: { totalCourses: courses.length, totalStudents, completedStudents, totalRevenue, pendingQuestions } });
+      res.json({ success: true, data: {
+        totalCourses: courses.length,
+        totalStudents: enrollments[0]?.totalStudents || 0,
+        completedStudents: enrollments[0]?.completed || 0,
+        totalRevenue,
+        pendingQuestions
+      } });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -33,11 +35,13 @@ export class InstructorController {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).user.userId;
       const { courseId } = req.params;
       const course = await Course.findOne({ _id: courseId, instructor: userId }).session(session);
       if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
       if (course.lessons.length < 20) { res.status(400).json({ success: false, message: 'Minimum 20 lessons required' }); return; }
+      if (!course.thumbnail) { res.status(400).json({ success: false, message: 'Course thumbnail is required' }); return; }
+      
       let approval = await CourseApproval.findOne({ course: courseId }).session(session);
       if (!approval) {
         approval = new CourseApproval({ course: courseId, instructor: userId, status: 'pending', submittedAt: new Date() });
@@ -48,10 +52,12 @@ export class InstructorController {
         approval.rejectionReason = undefined;
       }
       await approval.save({ session });
-      course.published = false; // unpublished until approved
+      course.published = false;
+      course.approvalStatus = 'pending';
+      course.submittedAt = new Date();
       await course.save({ session });
       await session.commitTransaction();
-      // Notify admins
+
       const admins = await User.find({ roles: 'admin' }).select('_id');
       for (const admin of admins) {
         await this.notificationService.sendNotification(admin._id.toString(), 'system', {
@@ -69,7 +75,7 @@ export class InstructorController {
 
   uploadCourseMedia = async (req: Request, res: Response): Promise<void> => {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).user.userId;
       const { courseId, type } = req.params;
       const course = await Course.findOne({ _id: courseId, instructor: userId });
       if (!course) { res.status(403).json({ success: false, message: 'Not authorized' }); return; }
@@ -87,11 +93,13 @@ export class InstructorController {
 
   getCourseQuestions = async (req: Request, res: Response): Promise<void> => {
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).user.userId;
       const { courseId } = req.params;
       const course = await Course.findOne({ _id: courseId, instructor: userId });
       if (!course) { res.status(403).json({ success: false, message: 'Not authorized' }); return; }
-      const questions = await CourseQuestion.find({ course: courseId }).populate('user', 'firstName lastName displayName avatar').populate('answers');
+      const questions = await CourseQuestion.find({ course: courseId })
+        .populate('user', 'firstName lastName displayName avatar')
+        .populate({ path: 'answers', populate: { path: 'user', select: 'firstName lastName displayName avatar roles' } });
       res.json({ success: true, data: questions });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Server error' });
@@ -102,7 +110,7 @@ export class InstructorController {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-      const userId = (req as any).user?.userId;
+      const userId = (req as any).user.userId;
       const { questionId } = req.params;
       const { answer } = req.body;
       const question = await CourseQuestion.findById(questionId).populate('course');
