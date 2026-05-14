@@ -13,17 +13,13 @@ const PORT = config.port;
 
 async function startServer() {
   try {
-    // Connect to MongoDB
     await DatabaseConnection.getInstance().connect();
     logger.info('Database connected');
 
-    // Connect to Redis (optional, will warn if missing)
     RedisConnection.getInstance();
     logger.info('Redis client initialised');
 
-    // ============================================================
-    // ✅ AUTO-CREATE ADMIN USER (ONLY IF NOT EXISTS)
-    // ============================================================
+    // Auto‑create admin if missing
     const ensureAdmin = async () => {
       try {
         const adminExists = await User.findOne({ email: 'admin@changexacademy.com' });
@@ -35,7 +31,7 @@ async function startServer() {
             firstName: 'Admin',
             lastName: 'User',
             displayName: 'Admin User',
-            referralCode: 'ADMIN123',
+            referralCode: 'ADMIN' + Date.now(),
             roles: ['admin'],
             isApprovedInstructor: true,
             emailVerified: true,
@@ -58,15 +54,10 @@ async function startServer() {
       }
     };
     await ensureAdmin();
-    // ============================================================
 
-    // Create HTTP server and attach Socket.io
     const httpServer = createServer(app);
     const io = new SocketServer(httpServer, {
-      cors: {
-        origin: config.frontendUrl || 'http://localhost:3000',
-        credentials: true,
-      },
+      cors: { origin: config.frontendUrl || 'http://localhost:3000', credentials: true },
     });
 
     NotificationService.getInstance().setSocketServer(io);
@@ -85,20 +76,18 @@ async function startServer() {
       });
     });
 
-    // Start server
     httpServer.listen(PORT, () => {
       logger.info(`Server running on port ${PORT} in ${config.env} mode`);
     });
 
-    // Graceful shutdown
     const gracefulShutdown = async () => {
-      logger.info('Received shutdown signal, closing gracefully...');
+      logger.info('Shutting down gracefully...');
       httpServer.close(async () => {
         await DatabaseConnection.getInstance().disconnect();
         process.exit(0);
       });
       setTimeout(() => {
-        logger.error('Could not close connections in time, forcefully shutting down');
+        logger.error('Forceful shutdown');
         process.exit(1);
       }, 10000);
     };
