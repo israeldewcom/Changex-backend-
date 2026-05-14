@@ -79,6 +79,7 @@ export class CourseController {
     }
   };
 
+  // UPDATED: Allows Premium active users to create courses
   createCourse = async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -88,10 +89,28 @@ export class CourseController {
     try {
       const userId = (req as any).user?.userId;
       const user = await User.findById(userId);
-      if (!user || (!user.roles.includes('creator') && !user.isApprovedInstructor && !user.roles.includes('admin'))) {
-        res.status(403).json({ success: false, message: 'Not authorized to create courses. Become an approved instructor first.' });
+      if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
         return;
       }
+
+      // Check if user is admin
+      const isAdmin = user.roles.includes('admin');
+      // Check if user is a legacy approved instructor
+      const isApprovedInstructor = user.roles.includes('creator') && user.isApprovedInstructor === true;
+      // Check if user has an active premium subscription
+      const isPremiumActive = (user.subscriptionTier === 'premium' || user.subscriptionTier === 'elite') &&
+                              user.subscriptionStatus === 'active' &&
+                              (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
+
+      if (!isAdmin && !isApprovedInstructor && !isPremiumActive) {
+        res.status(403).json({
+          success: false,
+          message: 'Not authorized to create courses. Please upgrade to Premium or get approved as an instructor.'
+        });
+        return;
+      }
+
       const courseData = {
         ...req.body,
         instructor: userId,
