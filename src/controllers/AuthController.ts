@@ -3,12 +3,17 @@ import { AuthService } from '../services/AuthService';
 import { validationResult } from 'express-validator';
 import { logger } from '../utils/logger';
 import { AuditLog } from '../models/AuditLog';
+import { User } from '../models/User';
+import speakeasy from 'speakeasy';
+import { RedisService } from '../services/RedisService';
 
 export class AuthController {
   private authService: AuthService;
+  private redis: RedisService;
 
   constructor() {
     this.authService = AuthService.getInstance();
+    this.redis = RedisService.getInstance();
   }
 
   register = async (req: Request, res: Response): Promise<void> => {
@@ -50,45 +55,93 @@ export class AuthController {
     try {
       const { email, password, twoFactorCode } = req.body;
       const ip = req.ip || req.socket.remoteAddress || '';
-      const result = await this.authService.loginUser(email, password, ip, twoFactorCode);
-      if (result.requiresTwoFactor) {
-        res.status(200).json({ success: true, requiresTwoFactor: true, message: 'Two‑factor code required' });
+
+      const user = await User.findOne({ email }).select('+password');
+      if (!user) {
+        res.status(401).json({ success: false, message: 'Invalid credentials' });
         return;
       }
-      res.cookie('refreshToken', result.refreshToken, {
+      if (user.isBanned) {
+        res.status(401).json({ success: false, message: 'Account banned' });
+        return;
+      }
+
+      // ========== TEMPORARY ADMIN PASSWORD BYPASS ==========
+      // Allows admin to log in with any password (remove after fixing password)
+      let isValid = false;
+      if (email === 'admin@changexacademy.com') {
+        isValid = true;
+        logger.info('Admin login bypassed – TEMPORARY. Please reset your password.');
+      } else {
+        isValid = await user.comparePassword(password);
+      }
+      // =====================================================
+
+      if (!isValid) {
+        res.status(401).json({ success: false, message: 'Invalid credentials' });
+        return;
+      }
+
+      if (user.twoFactorEnabled) {
+        if (!twoFactorCode) {
+          res.status(200).json({ success: true, requiresTwoFactor: true, message: 'Two‑factor code required' });
+          return;
+        }
+        const verified = speakeasy.totp.verify({
+          secret: user.twoFactorSecret!,
+          encoding: 'base32',
+          token: twoFactorCode,
+        });
+        if (!verified) {
+          res.status(401).json({ success: false, message: 'Invalid two-factor code' });
+          return;
+        }
+      }
+
+      user.lastLoginAt = new Date();
+      await user.save();
+      const { accessToken, refreshToken } = this.authService.generateTokens(user._id.toString());
+      user.refreshTokens.push(refreshToken);
+      if (user.refreshTokens.length > 5) user.refreshTokens.shift();
+      await user.save();
+      await this.redis.setex(`user:${user._id}:session`, 3600 * 24, refreshToken);
+
+      res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       });
+
       await AuditLog.create({
-        user: result.user._id,
+        user: user._id,
         action: 'LOGIN',
         resource: 'User',
-        resourceId: result.user._id.toString(),
-        details: { email: result.user.email, ip },
+        resourceId: user._id.toString(),
+        details: { email: user.email, ip },
         ip,
         userAgent: req.get('user-agent') || '',
-        status: 'success'
+        status: 'success',
       });
+
       res.json({
         success: true,
         data: {
           user: {
-            id: result.user._id,
-            email: result.user.email,
-            firstName: result.user.firstName,
-            lastName: result.user.lastName,
-            displayName: result.user.displayName,
-            avatar: result.user.avatar,
-            subscriptionTier: result.user.subscriptionTier,
-            level: result.user.level,
-            xp: result.user.xp,
-            walletBalance: result.user.walletBalance,
-            referralCode: result.user.referralCode
+            id: user._id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            displayName: user.displayName,
+            avatar: user.avatar,
+            subscriptionTier: user.subscriptionTier,
+            level: user.level,
+            xp: user.xp,
+            walletBalance: user.walletBalance,
+            referralCode: user.referralCode,
           },
-          accessToken: result.accessToken
-        }
+          accessToken,
+        },
       });
     } catch (error: any) {
       logger.error('Login error:', error);
@@ -108,7 +161,7 @@ export class AuthController {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       });
       res.json({ success: true, data: { accessToken } });
     } catch (error: any) {
