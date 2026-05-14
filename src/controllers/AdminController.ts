@@ -39,7 +39,7 @@ export class AdminController {
       const skip = (Number(page) - 1) * Number(limit);
       const [users, total] = await Promise.all([
         User.find(query).select('-password -refreshTokens').skip(skip).limit(Number(limit)),
-        User.countDocuments(query),
+        User.countDocuments(query)
       ]);
       res.json({
         success: true,
@@ -97,7 +97,6 @@ export class AdminController {
       course.published = true;
       course.publishedAt = new Date();
       await course.save({ session });
-
       let approval = await CourseApproval.findOne({ course: courseId }).session(session);
       if (approval) {
         approval.status = 'approved';
@@ -105,20 +104,17 @@ export class AdminController {
         approval.reviewedBy = adminId;
         await approval.save({ session });
       }
-
       await this.notificationService.sendNotification(course.instructor.toString(), 'system', {
         title: 'Course Approved! 🎉',
         message: `Your course "${course.title}" has been approved and is now live.`,
-        metadata: { courseId },
+        metadata: { courseId }
       });
       await session.commitTransaction();
       res.json({ success: true, message: 'Course approved and published' });
     } catch (error) {
       await session.abortTransaction();
       res.status(500).json({ success: false, message: 'Server error' });
-    } finally {
-      session.endSession();
-    }
+    } finally { session.endSession(); }
   };
 
   rejectCourse = async (req: Request, res: Response): Promise<void> => {
@@ -135,7 +131,6 @@ export class AdminController {
       }
       course.approvalStatus = 'rejected';
       await course.save({ session });
-
       let approval = await CourseApproval.findOne({ course: courseId }).session(session);
       if (approval) {
         approval.status = 'rejected';
@@ -144,20 +139,17 @@ export class AdminController {
         approval.rejectionReason = reason;
         await approval.save({ session });
       }
-
       await this.notificationService.sendNotification(course.instructor.toString(), 'system', {
         title: 'Course Rejected',
         message: `Your course "${course.title}" was rejected. Reason: ${reason || 'Not specified'}`,
-        metadata: { courseId },
+        metadata: { courseId }
       });
       await session.commitTransaction();
       res.json({ success: true, message: 'Course rejected' });
     } catch (error) {
       await session.abortTransaction();
       res.status(500).json({ success: false, message: 'Server error' });
-    } finally {
-      session.endSession();
-    }
+    } finally { session.endSession(); }
   };
 
   getPendingWithdrawals = async (req: Request, res: Response): Promise<void> => {
@@ -182,25 +174,22 @@ export class AdminController {
         res.status(404).json({ success: false, message: 'Withdrawal not found' });
         return;
       }
-
       if (action === 'approve') {
         withdrawal.status = 'completed';
         withdrawal.processedAt = new Date();
         withdrawal.processedBy = adminId;
         await withdrawal.save({ session });
         await Transaction.findByIdAndUpdate(withdrawal.transactionId, { status: 'completed', completedAt: new Date() }, { session });
-
         const user = await User.findById(withdrawal.user).session(session);
         if (user) {
           user.pendingWithdrawal -= withdrawal.amount;
           user.totalWithdrawn += withdrawal.amount;
           await user.save({ session });
         }
-
         await this.notificationService.sendNotification(withdrawal.user.toString(), 'payment', {
           title: 'Withdrawal Successful',
           message: `₦${withdrawal.amount.toLocaleString()} has been sent to your bank account.`,
-          metadata: { withdrawalId },
+          metadata: { withdrawalId }
         });
       } else if (action === 'reject') {
         withdrawal.status = 'failed';
@@ -209,18 +198,16 @@ export class AdminController {
         withdrawal.processedBy = adminId;
         await withdrawal.save({ session });
         await Transaction.findByIdAndUpdate(withdrawal.transactionId, { status: 'failed' }, { session });
-
         const user = await User.findById(withdrawal.user).session(session);
         if (user) {
           user.walletBalance += withdrawal.amount;
           user.pendingWithdrawal -= withdrawal.amount;
           await user.save({ session });
         }
-
         await this.notificationService.sendNotification(withdrawal.user.toString(), 'payment', {
           title: 'Withdrawal Rejected',
           message: `Your withdrawal of ₦${withdrawal.amount.toLocaleString()} was rejected. Reason: ${reason || 'Not specified'}`,
-          metadata: { withdrawalId },
+          metadata: { withdrawalId }
         });
       }
       await session.commitTransaction();
@@ -228,9 +215,7 @@ export class AdminController {
     } catch (error) {
       await session.abortTransaction();
       res.status(500).json({ success: false, message: 'Server error' });
-    } finally {
-      session.endSession();
-    }
+    } finally { session.endSession(); }
   };
 
   getCoupons = async (req: Request, res: Response): Promise<void> => {
