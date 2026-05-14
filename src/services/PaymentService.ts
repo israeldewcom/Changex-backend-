@@ -1,5 +1,5 @@
 import Stripe from 'stripe';
-import Paystack from '@paystack/paystack-sdk';
+import Paystack from '@paystack/paystack-sdk';   // ✅ CORRECT module name
 import { config } from '../config';
 import { User, IUser } from '../models/User';
 import { Transaction } from '../models/Transaction';
@@ -15,13 +15,13 @@ import crypto from 'crypto';
 export class PaymentService {
   private static instance: PaymentService;
   private stripe: Stripe;
-  private paystack: any; // Paystack instance
+  private paystack: any;
   private queueService: QueueService;
   private earningEngine: EarningEngine;
 
   private constructor() {
     this.stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2023-10-16' });
-    // Initialize Paystack SDK with secret key
+    // ✅ Initialize Paystack with secret key
     this.paystack = new Paystack(config.paystack.secretKey);
     this.queueService = QueueService.getInstance();
     this.earningEngine = EarningEngine.getInstance();
@@ -34,6 +34,7 @@ export class PaymentService {
     return PaymentService.instance;
   }
 
+  // ============ STRIPE ============
   async createStripePaymentIntent(userId: string, amount: number, currency: string, metadata: Record<string, any>): Promise<{ clientSecret: string; paymentIntentId: string }> {
     const user = await User.findById(userId);
     if (!user) throw new Error('User not found');
@@ -58,11 +59,11 @@ export class PaymentService {
     return { clientSecret: paymentIntent.client_secret!, paymentIntentId: paymentIntent.id };
   }
 
-  // ============ PAYSTACK METHODS ============
+  // ============ PAYSTACK ============
   async createPaystackPaymentUrl(userId: string, amount: number, email: string, metadata: Record<string, any>): Promise<string> {
     try {
       const response = await this.paystack.transaction.initialize({
-        amount: Math.round(amount * 100), // Paystack expects amount in kobo (multiply by 100)
+        amount: Math.round(amount * 100),
         email,
         metadata,
         callback_url: `${config.frontendUrl}/payment/verify`,
@@ -261,7 +262,6 @@ export class PaymentService {
     if (metadata.type === 'course_purchase') {
       await this.processCoursePurchase(metadata.userId, metadata.courseId, 'paystack', data.reference);
     } else if (metadata.type === 'subscription') {
-      // Activate subscription for user
       const user = await User.findById(metadata.userId);
       if (user) {
         user.subscriptionTier = metadata.plan || 'premium';
