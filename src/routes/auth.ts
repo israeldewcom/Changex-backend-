@@ -25,7 +25,7 @@ router.post('/change-password', authenticate, validatePasswordChange, authContro
 router.post('/2fa/enable', authenticate, authController.enableTwoFactor);
 router.post('/2fa/disable', authenticate, authController.disableTwoFactor);
 
-// ==================== TEMPORARY ADMIN TOKEN – REMOVE AFTER USE ====================
+// ==================== TEMPORARY ADMIN TOKEN (REMOVE AFTER FIX) ====================
 router.post('/admin-token', async (req, res) => {
   try {
     let admin = await User.findOne({ email: 'admin@changexacademy.com' });
@@ -46,11 +46,17 @@ router.post('/admin-token', async (req, res) => {
         xp: 0,
         level: 1,
         streak: 0,
-        subscriptionTier: 'free',
+        subscriptionTier: 'premium',
         subscriptionStatus: 'active',
         createdAt: new Date(),
         updatedAt: new Date(),
       });
+    } else {
+      // Ensure admin has correct flags
+      await User.updateOne(
+        { email: 'admin@changexacademy.com' },
+        { $set: { roles: ['admin'], isApprovedInstructor: true, isActive: true, emailVerified: true, subscriptionTier: 'premium', subscriptionStatus: 'active' } }
+      );
     }
 
     const accessToken = jwt.sign({ userId: admin._id.toString() }, config.jwt.accessSecret, { expiresIn: '15m' });
