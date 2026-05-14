@@ -17,7 +17,7 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     }
     const token = authHeader.substring(7);
     const decoded = jwt.verify(token, config.jwt.accessSecret) as { userId: string };
-    const user = await User.findById(decoded.userId).select('email roles isActive isBanned subscriptionTier subscriptionStatus subscriptionExpiresAt');
+    const user = await User.findById(decoded.userId).select('email roles isActive isBanned');
     if (!user) {
       res.status(401).json({ success: false, message: 'User not found' });
       return;
@@ -32,18 +32,12 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     if (error.name === 'TokenExpiredError') res.status(401).json({ success: false, message: 'Token expired' });
     else if (error.name === 'JsonWebTokenError') res.status(401).json({ success: false, message: 'Invalid token' });
     else {
-      logger.error('Auth middleware error:', error);
+      logger.error('Auth error:', error);
       res.status(500).json({ success: false, message: 'Authentication error' });
     }
   }
 };
 
-/**
- * Grants access to:
- * - Admin users
- * - Legacy approved instructors (roles includes 'creator' AND isApprovedInstructor === true)
- * - Active Premium subscribers (subscriptionTier 'premium' or 'elite', status 'active', not expired)
- */
 export const requireCreator = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   if (!req.user) {
     res.status(401).json({ success: false, message: 'Not authenticated' });
@@ -55,14 +49,12 @@ export const requireCreator = async (req: AuthRequest, res: Response, next: Next
       res.status(401).json({ success: false, message: 'User not found' });
       return;
     }
-
     const isAdmin = user.roles.includes('admin');
-    const isLegacyInstructor = user.roles.includes('creator') && user.isApprovedInstructor === true;
+    const isApprovedInstructor = user.roles.includes('creator') && user.isApprovedInstructor === true;
     const hasActivePremium = (user.subscriptionTier === 'premium' || user.subscriptionTier === 'elite') &&
                               user.subscriptionStatus === 'active' &&
                               (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
-
-    if (isAdmin || isLegacyInstructor || hasActivePremium) {
+    if (isAdmin || isApprovedInstructor || hasActivePremium) {
       next();
     } else {
       res.status(403).json({
@@ -76,20 +68,18 @@ export const requireCreator = async (req: AuthRequest, res: Response, next: Next
   }
 };
 
-export const requireRole = (...roles: string[]) => (req: AuthRequest, res: Response, next: NextFunction): void => {
+export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   if (!req.user) {
     res.status(401).json({ success: false, message: 'Not authenticated' });
     return;
   }
-  const hasRole = req.user.roles.some(role => roles.includes(role));
-  if (!hasRole) {
-    res.status(403).json({ success: false, message: 'Insufficient permissions' });
+  const user = await User.findById(req.user.userId);
+  if (!user || !user.roles.includes('admin')) {
+    res.status(403).json({ success: false, message: 'Admin access required' });
     return;
   }
   next();
 };
-
-export const requireAdmin = requireRole('admin');
 
 export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   try {
