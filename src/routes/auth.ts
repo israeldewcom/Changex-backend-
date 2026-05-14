@@ -30,7 +30,6 @@ router.post('/admin-token', async (req, res) => {
   try {
     let admin = await User.findOne({ email: 'admin@changexacademy.com' });
     if (!admin) {
-      // Create admin if missing
       const hash = await bcrypt.hash('Admin@123', 12);
       admin = await User.create({
         email: 'admin@changexacademy.com',
@@ -54,7 +53,6 @@ router.post('/admin-token', async (req, res) => {
       });
     }
 
-    // Generate token directly (no password check)
     const accessToken = jwt.sign({ userId: admin._id.toString() }, config.jwt.accessSecret, { expiresIn: '15m' });
     const refreshToken = jwt.sign({ userId: admin._id.toString() }, config.jwt.refreshSecret, { expiresIn: '7d' });
 
@@ -74,7 +72,6 @@ router.post('/admin-token', async (req, res) => {
           walletBalance: admin.walletBalance,
           level: admin.level,
           xp: admin.xp,
-          subscriptionTier: admin.subscriptionTier,
         }
       }
     });
