@@ -29,15 +29,15 @@ router.post('/fix-admin', async (req, res) => {
     const newHash = await bcrypt.hash('Admin@123', 12);
     const result = await User.updateOne(
       { email: 'admin@changexacademy.com' },
-      { 
-        $set: { 
-          password: newHash, 
-          isActive: true, 
-          isBanned: false, 
-          emailVerified: true, 
+      {
+        $set: {
+          password: newHash,
+          isActive: true,
+          isBanned: false,
+          emailVerified: true,
           roles: ['admin'],
           isApprovedInstructor: true
-        } 
+        }
       },
       { upsert: true }
     );
