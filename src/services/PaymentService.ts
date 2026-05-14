@@ -1,7 +1,8 @@
 import Stripe from 'stripe';
-import Paystack from '@paystack/paystack-sdk';   // ✅ CORRECT module name
+// Paystack SDK – CommonJS import (fixes MODULE_NOT_FOUND)
+const Paystack = require('@paystack/paystack-sdk');
 import { config } from '../config';
-import { User, IUser } from '../models/User';
+import { User } from '../models/User';
 import { Transaction } from '../models/Transaction';
 import { Course } from '../models/Course';
 import { Enrollment } from '../models/Enrollment';
@@ -21,7 +22,7 @@ export class PaymentService {
 
   private constructor() {
     this.stripe = new Stripe(config.stripe.secretKey, { apiVersion: '2023-10-16' });
-    // ✅ Initialize Paystack with secret key
+    // Initialise Paystack with secret key
     this.paystack = new Paystack(config.paystack.secretKey);
     this.queueService = QueueService.getInstance();
     this.earningEngine = EarningEngine.getInstance();
@@ -35,7 +36,12 @@ export class PaymentService {
   }
 
   // ============ STRIPE ============
-  async createStripePaymentIntent(userId: string, amount: number, currency: string, metadata: Record<string, any>): Promise<{ clientSecret: string; paymentIntentId: string }> {
+  async createStripePaymentIntent(
+    userId: string,
+    amount: number,
+    currency: string,
+    metadata: Record<string, any>
+  ): Promise<{ clientSecret: string; paymentIntentId: string }> {
     const user = await User.findById(userId);
     if (!user) throw new Error('User not found');
     let customerId = user.stripeCustomerId;
@@ -60,10 +66,15 @@ export class PaymentService {
   }
 
   // ============ PAYSTACK ============
-  async createPaystackPaymentUrl(userId: string, amount: number, email: string, metadata: Record<string, any>): Promise<string> {
+  async createPaystackPaymentUrl(
+    userId: string,
+    amount: number,
+    email: string,
+    metadata: Record<string, any>
+  ): Promise<string> {
     try {
       const response = await this.paystack.transaction.initialize({
-        amount: Math.round(amount * 100),
+        amount: Math.round(amount * 100), // Paystack expects kobo (multiply by 100)
         email,
         metadata,
         callback_url: `${config.frontendUrl}/payment/verify`,
@@ -95,7 +106,12 @@ export class PaymentService {
     }
   }
 
-  async processCoursePurchase(userId: string, courseId: string, paymentMethod: 'stripe' | 'paystack' | 'wallet', paymentReference?: string): Promise<Enrollment> {
+  async processCoursePurchase(
+    userId: string,
+    courseId: string,
+    paymentMethod: 'stripe' | 'paystack' | 'wallet',
+    paymentReference?: string
+  ): Promise<Enrollment> {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
@@ -139,7 +155,12 @@ export class PaymentService {
       await course.save({ session });
       await this.earningEngine.distributeCourseCommission(userId, courseId, price, transaction._id, session);
       await session.commitTransaction();
-      await this.queueService.addJob('award-xp', { userId, amount: course.xpReward, reason: 'course_enrollment', metadata: { courseId: course._id.toString() } });
+      await this.queueService.addJob('award-xp', {
+        userId,
+        amount: course.xpReward,
+        reason: 'course_enrollment',
+        metadata: { courseId: course._id.toString() },
+      });
       return enrollment;
     } catch (error) {
       await session.abortTransaction();
@@ -149,7 +170,11 @@ export class PaymentService {
     }
   }
 
-  async processWithdrawal(userId: string, amount: number, bankDetails: { bankName: string; accountNumber: string; accountName: string; bankCode: string }): Promise<WithdrawalRequest> {
+  async processWithdrawal(
+    userId: string,
+    amount: number,
+    bankDetails: { bankName: string; accountNumber: string; accountName: string; bankCode: string }
+  ): Promise<WithdrawalRequest> {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
@@ -176,7 +201,7 @@ export class PaymentService {
         description: `Withdrawal request #${withdrawalRequest._id}`,
         reference: this.generateReference(),
         withdrawalDetails: bankDetails,
-        metadata: { withdrawalRequestId: withdrawalRequest._id }
+        metadata: { withdrawalRequestId: withdrawalRequest._id },
       });
       await transaction.save({ session });
 
@@ -188,7 +213,10 @@ export class PaymentService {
       await user.save({ session });
 
       await session.commitTransaction();
-      await this.queueService.addJob('payment', { type: 'withdrawal_request', data: { withdrawalRequestId: withdrawalRequest._id, userId, amount, bankDetails } });
+      await this.queueService.addJob('payment', {
+        type: 'withdrawal_request',
+        data: { withdrawalRequestId: withdrawalRequest._id, userId, amount, bankDetails },
+      });
       return withdrawalRequest;
     } catch (error) {
       await session.abortTransaction();
@@ -198,6 +226,7 @@ export class PaymentService {
     }
   }
 
+  // ============ WEBHOOK HANDLERS ============
   async processStripeWebhook(payload: Buffer, signature: string): Promise<void> {
     let event;
     try {
@@ -206,9 +235,16 @@ export class PaymentService {
       throw new Error(`Webhook signature verification failed: ${err.message}`);
     }
     switch (event.type) {
-      case 'payment_intent.succeeded': await this.handleSuccessfulPayment(event.data.object); break;
-      case 'customer.subscription.created': case 'customer.subscription.updated': await this.handleSubscriptionUpdate(event.data.object); break;
-      case 'customer.subscription.deleted': await this.handleSubscriptionCancellation(event.data.object); break;
+      case 'payment_intent.succeeded':
+        await this.handleSuccessfulPayment(event.data.object);
+        break;
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+        await this.handleSubscriptionUpdate(event.data.object);
+        break;
+      case 'customer.subscription.deleted':
+        await this.handleSubscriptionCancellation(event.data.object);
+        break;
     }
   }
 
@@ -218,9 +254,15 @@ export class PaymentService {
     const event = body.event;
     const data = body.data;
     switch (event) {
-      case 'charge.success': await this.handlePaystackChargeSuccess(data); break;
-      case 'transfer.success': await this.handleTransferSuccess(data); break;
-      case 'transfer.failed': await this.handleTransferFailed(data); break;
+      case 'charge.success':
+        await this.handlePaystackChargeSuccess(data);
+        break;
+      case 'transfer.success':
+        await this.handleTransferSuccess(data);
+        break;
+      case 'transfer.failed':
+        await this.handleTransferFailed(data);
+        break;
     }
   }
 
