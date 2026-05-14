@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/server.ts (unchanged + metrics)
-// ============================================
 import app from './app';
 import { config } from './config';
 import { DatabaseConnection } from './config/database';
@@ -9,41 +6,109 @@ import { logger } from './utils/logger';
 import { createServer } from 'http';
 import { Server as SocketServer } from 'socket.io';
 import { NotificationService } from './services/NotificationService';
-import client from 'prom-client';
+import { User } from './models/User';
+import bcrypt from 'bcryptjs';
 
 const PORT = config.port;
 
 async function startServer() {
   try {
+    // Connect to MongoDB
     await DatabaseConnection.getInstance().connect();
     logger.info('Database connected');
+
+    // Connect to Redis (optional, will warn if missing)
     RedisConnection.getInstance();
-    logger.info('Redis connected');
+    logger.info('Redis client initialised');
+
+    // ============================================================
+    // ✅ AUTO-CREATE ADMIN USER (ONLY IF NOT EXISTS)
+    // ============================================================
+    const ensureAdmin = async () => {
+      try {
+        const adminExists = await User.findOne({ email: 'admin@changexacademy.com' });
+        if (!adminExists) {
+          const hashedPassword = await bcrypt.hash('Admin@123', 12);
+          await User.create({
+            email: 'admin@changexacademy.com',
+            password: hashedPassword,
+            firstName: 'Admin',
+            lastName: 'User',
+            displayName: 'Admin User',
+            referralCode: 'ADMIN123',
+            roles: ['admin'],
+            isApprovedInstructor: true,
+            emailVerified: true,
+            isActive: true,
+            walletBalance: 0,
+            xp: 0,
+            level: 1,
+            streak: 0,
+            subscriptionTier: 'free',
+            subscriptionStatus: 'active',
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          });
+          logger.info('✅ Admin user created – email: admin@changexacademy.com, password: Admin@123');
+        } else {
+          logger.info('Admin user already exists');
+        }
+      } catch (err) {
+        logger.error('Failed to ensure admin user:', err);
+      }
+    };
+    await ensureAdmin();
+    // ============================================================
+
+    // Create HTTP server and attach Socket.io
     const httpServer = createServer(app);
-    const io = new SocketServer(httpServer, { cors: { origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true } });
+    const io = new SocketServer(httpServer, {
+      cors: {
+        origin: config.frontendUrl || 'http://localhost:3000',
+        credentials: true,
+      },
+    });
+
     NotificationService.getInstance().setSocketServer(io);
+
     io.on('connection', (socket) => {
       const userId = socket.handshake.auth.userId;
-      if (userId) { socket.join(`user:${userId}`); logger.info(`User ${userId} connected to socket`); }
-      socket.on('disconnect', () => { if (userId) { socket.leave(`user:${userId}`); logger.info(`User ${userId} disconnected from socket`); } });
+      if (userId) {
+        socket.join(`user:${userId}`);
+        logger.info(`User ${userId} connected to socket`);
+      }
+      socket.on('disconnect', () => {
+        if (userId) {
+          socket.leave(`user:${userId}`);
+          logger.info(`User ${userId} disconnected from socket`);
+        }
+      });
     });
-    if (config.env === 'production') {
-      const collectDefaultMetrics = client.collectDefaultMetrics;
-      collectDefaultMetrics({ prefix: 'changex_' });
-      app.get('/metrics', async (req, res) => { res.set('Content-Type', client.register.contentType); res.end(await client.register.metrics()); });
-    }
-    httpServer.listen(PORT, () => { logger.info(`Server running on port ${PORT} in ${config.env} mode`); });
+
+    // Start server
+    httpServer.listen(PORT, () => {
+      logger.info(`Server running on port ${PORT} in ${config.env} mode`);
+    });
+
+    // Graceful shutdown
     const gracefulShutdown = async () => {
       logger.info('Received shutdown signal, closing gracefully...');
       httpServer.close(async () => {
         await DatabaseConnection.getInstance().disconnect();
         process.exit(0);
       });
-      setTimeout(() => { logger.error('Could not close connections in time, forcefully shutting down'); process.exit(1); }, 10000);
+      setTimeout(() => {
+        logger.error('Could not close connections in time, forcefully shutting down');
+        process.exit(1);
+      }, 10000);
     };
+
     process.on('SIGTERM', gracefulShutdown);
     process.on('SIGINT', gracefulShutdown);
-  } catch (error) { logger.error('Failed to start server:', error); process.exit(1); }
+  } catch (error) {
+    logger.error('Failed to start server:', error);
+    process.exit(1);
+  }
 }
 
 startServer();
