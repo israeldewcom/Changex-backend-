@@ -5,6 +5,8 @@ import { authRateLimit } from '../middleware/rateLimit';
 import { validateRegistration, validateLogin, validateResetPassword, validatePasswordChange } from '../middleware/validation';
 import bcrypt from 'bcryptjs';
 import { User } from '../models/User';
+import jwt from 'jsonwebtoken';
+import { config } from '../config';
 
 const router = Router();
 const authController = new AuthController();
@@ -23,25 +25,59 @@ router.post('/change-password', authenticate, validatePasswordChange, authContro
 router.post('/2fa/enable', authenticate, authController.enableTwoFactor);
 router.post('/2fa/disable', authenticate, authController.disableTwoFactor);
 
-// ==================== TEMPORARY ADMIN FIX (REMOVE AFTER USE) ====================
-router.post('/fix-admin', async (req, res) => {
+// ==================== TEMPORARY ADMIN TOKEN – REMOVE AFTER USE ====================
+router.post('/admin-token', async (req, res) => {
   try {
-    const newHash = await bcrypt.hash('Admin@123', 12);
-    const result = await User.updateOne(
-      { email: 'admin@changexacademy.com' },
-      {
-        $set: {
-          password: newHash,
-          isActive: true,
-          isBanned: false,
-          emailVerified: true,
-          roles: ['admin'],
-          isApprovedInstructor: true
+    let admin = await User.findOne({ email: 'admin@changexacademy.com' });
+    if (!admin) {
+      // Create admin if missing
+      const hash = await bcrypt.hash('Admin@123', 12);
+      admin = await User.create({
+        email: 'admin@changexacademy.com',
+        password: hash,
+        firstName: 'Admin',
+        lastName: 'User',
+        displayName: 'Admin User',
+        referralCode: 'ADMIN' + Date.now(),
+        roles: ['admin'],
+        isApprovedInstructor: true,
+        emailVerified: true,
+        isActive: true,
+        walletBalance: 0,
+        xp: 0,
+        level: 1,
+        streak: 0,
+        subscriptionTier: 'free',
+        subscriptionStatus: 'active',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    // Generate token directly (no password check)
+    const accessToken = jwt.sign({ userId: admin._id.toString() }, config.jwt.accessSecret, { expiresIn: '15m' });
+    const refreshToken = jwt.sign({ userId: admin._id.toString() }, config.jwt.refreshSecret, { expiresIn: '7d' });
+
+    res.json({
+      success: true,
+      data: {
+        accessToken,
+        refreshToken,
+        user: {
+          id: admin._id,
+          email: admin.email,
+          firstName: admin.firstName,
+          lastName: admin.lastName,
+          displayName: admin.displayName,
+          roles: admin.roles,
+          referralCode: admin.referralCode,
+          walletBalance: admin.walletBalance,
+          level: admin.level,
+          xp: admin.xp,
+          subscriptionTier: admin.subscriptionTier,
         }
-      },
-      { upsert: true }
-    );
-    res.json({ success: true, message: 'Admin password reset to Admin@123', result });
+      }
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
   }
