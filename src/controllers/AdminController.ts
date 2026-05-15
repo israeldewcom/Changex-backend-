@@ -115,7 +115,9 @@ export class AdminController {
     } catch (error) {
       await session.abortTransaction();
       res.status(500).json({ success: false, message: 'Failed to approve course' });
-    } finally { session.endSession(); }
+    } finally {
+      session.endSession();
+    }
   };
 
   rejectCourse = async (req: Request, res: Response): Promise<void> => {
@@ -150,7 +152,9 @@ export class AdminController {
     } catch (error) {
       await session.abortTransaction();
       res.status(500).json({ success: false, message: 'Failed to reject course' });
-    } finally { session.endSession(); }
+    } finally {
+      session.endSession();
+    }
   };
 
   getPendingWithdrawals = async (req: Request, res: Response): Promise<void> => {
@@ -216,7 +220,9 @@ export class AdminController {
     } catch (error) {
       await session.abortTransaction();
       res.status(500).json({ success: false, message: 'Failed to process withdrawal' });
-    } finally { session.endSession(); }
+    } finally {
+      session.endSession();
+    }
   };
 
   getCoupons = async (req: Request, res: Response): Promise<void> => {
