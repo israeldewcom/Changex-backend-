@@ -1,4 +1,3 @@
-// src/routes/instructor.ts
 import { Router } from 'express';
 import { InstructorController } from '../controllers/InstructorController';
 import { authenticate, requireCreator } from '../middleware/auth';
@@ -10,6 +9,7 @@ const instructorController = new InstructorController();
 const fileUpload = FileUploadService.getInstance().upload;
 
 router.use(authenticate, requireCreator);
+
 router.get('/dashboard', instructorController.getDashboardStats);
 router.post('/courses/:courseId/submit', auditLog('SUBMIT_COURSE', 'Course'), instructorController.submitCourseForApproval);
 router.post('/courses/:courseId/media/:type', fileUpload.single('file'), auditLog('UPLOAD_COURSE_MEDIA', 'Course'), instructorController.uploadCourseMedia);
