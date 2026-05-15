@@ -15,7 +15,16 @@ export class AdminController {
         WithdrawalRequest.countDocuments({ status: 'pending' }),
         Transaction.aggregate([{ $match: { type: 'purchase', status: 'completed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }])
       ]);
-      res.json({ success: true, data: { totalUsers, totalCourses, pendingCourses, pendingWithdrawals, totalRevenue: totalRevenue[0]?.total || 0 } });
+      res.json({
+        success: true,
+        data: {
+          totalUsers,
+          totalCourses,
+          pendingCourses,
+          pendingWithdrawals,
+          totalRevenue: totalRevenue[0]?.total || 0,
+        },
+      });
     } catch (error) {
       console.error('Dashboard error:', error);
       res.status(500).json({ success: false, message: 'Failed to load dashboard stats' });
@@ -33,7 +42,13 @@ export class AdminController {
         User.find(query).select('-password -refreshTokens').skip(skip).limit(Number(limit)),
         User.countDocuments(query)
       ]);
-      res.json({ success: true, data: { users, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
+      res.json({
+        success: true,
+        data: {
+          users,
+          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
+        },
+      });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load users' });
     }
@@ -48,7 +63,10 @@ export class AdminController {
       if (roles) update.roles = roles;
       if (isApprovedInstructor !== undefined) update.isApprovedInstructor = isApprovedInstructor;
       const user = await User.findByIdAndUpdate(userId, update, { new: true }).select('-password -refreshTokens');
-      if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
+      if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
       res.json({ success: true, data: user, message: 'User updated' });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to update user' });
@@ -57,7 +75,8 @@ export class AdminController {
 
   getPendingCourses = async (req: Request, res: Response): Promise<void> => {
     try {
-      const courses = await Course.find({ approvalStatus: 'pending', published: false }).populate('instructor', 'firstName lastName email');
+      const courses = await Course.find({ approvalStatus: 'pending', published: false })
+        .populate('instructor', 'firstName lastName email');
       res.json({ success: true, data: courses });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load pending courses' });
@@ -71,7 +90,10 @@ export class AdminController {
       const { courseId } = req.params;
       const adminId = (req as any).user.userId;
       const course = await Course.findById(courseId).session(session);
-      if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
+      if (!course) {
+        res.status(404).json({ success: false, message: 'Course not found' });
+        return;
+      }
       course.approvalStatus = 'approved';
       course.published = true;
       course.publishedAt = new Date();
@@ -104,7 +126,10 @@ export class AdminController {
       const { reason } = req.body;
       const adminId = (req as any).user.userId;
       const course = await Course.findById(courseId).session(session);
-      if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
+      if (!course) {
+        res.status(404).json({ success: false, message: 'Course not found' });
+        return;
+      }
       course.approvalStatus = 'rejected';
       await course.save({ session });
       let approval = await CourseApproval.findOne({ course: courseId }).session(session);
@@ -130,7 +155,8 @@ export class AdminController {
 
   getPendingWithdrawals = async (req: Request, res: Response): Promise<void> => {
     try {
-      const withdrawals = await WithdrawalRequest.find({ status: 'pending' }).populate('user', 'firstName lastName email');
+      const withdrawals = await WithdrawalRequest.find({ status: 'pending' })
+        .populate('user', 'firstName lastName email');
       res.json({ success: true, data: withdrawals });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load withdrawals' });
@@ -145,7 +171,10 @@ export class AdminController {
       const { action, reason } = req.body;
       const adminId = (req as any).user.userId;
       const withdrawal = await WithdrawalRequest.findById(withdrawalId).session(session);
-      if (!withdrawal) { res.status(404).json({ success: false, message: 'Withdrawal not found' }); return; }
+      if (!withdrawal) {
+        res.status(404).json({ success: false, message: 'Withdrawal not found' });
+        return;
+      }
       if (action === 'approve') {
         withdrawal.status = 'completed';
         withdrawal.processedAt = new Date();
@@ -201,7 +230,6 @@ export class AdminController {
 
   createCoupon = async (req: Request, res: Response): Promise<void> => {
     try {
-      // Ensure required fields have defaults
       const couponData = {
         ...req.body,
         description: req.body.description || 'Discount coupon',
@@ -253,7 +281,13 @@ export class AdminController {
       const skip = (Number(page) - 1) * Number(limit);
       const logs = await AuditLog.find().sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).populate('user', 'firstName lastName email');
       const total = await AuditLog.countDocuments();
-      res.json({ success: true, data: { logs, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
+      res.json({
+        success: true,
+        data: {
+          logs,
+          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
+        },
+      });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load audit logs' });
     }
