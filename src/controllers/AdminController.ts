@@ -15,18 +15,9 @@ export class AdminController {
         WithdrawalRequest.countDocuments({ status: 'pending' }),
         Transaction.aggregate([{ $match: { type: 'purchase', status: 'completed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }])
       ]);
-      res.json({
-        success: true,
-        data: {
-          totalUsers,
-          totalCourses,
-          pendingCourses,
-          pendingWithdrawals,
-          totalRevenue: totalRevenue[0]?.total || 0,
-        },
-      });
+      res.json({ success: true, data: { totalUsers, totalCourses, pendingCourses, pendingWithdrawals, totalRevenue: totalRevenue[0]?.total || 0 } });
     } catch (error) {
-      console.error('Dashboard stats error:', error);
+      console.error('Dashboard error:', error);
       res.status(500).json({ success: false, message: 'Failed to load dashboard stats' });
     }
   };
@@ -42,10 +33,7 @@ export class AdminController {
         User.find(query).select('-password -refreshTokens').skip(skip).limit(Number(limit)),
         User.countDocuments(query)
       ]);
-      res.json({
-        success: true,
-        data: { users, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } },
-      });
+      res.json({ success: true, data: { users, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load users' });
     }
@@ -69,8 +57,7 @@ export class AdminController {
 
   getPendingCourses = async (req: Request, res: Response): Promise<void> => {
     try {
-      const courses = await Course.find({ approvalStatus: 'pending', published: false })
-        .populate('instructor', 'firstName lastName email');
+      const courses = await Course.find({ approvalStatus: 'pending', published: false }).populate('instructor', 'firstName lastName email');
       res.json({ success: true, data: courses });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load pending courses' });
@@ -143,8 +130,7 @@ export class AdminController {
 
   getPendingWithdrawals = async (req: Request, res: Response): Promise<void> => {
     try {
-      const withdrawals = await WithdrawalRequest.find({ status: 'pending' })
-        .populate('user', 'firstName lastName email');
+      const withdrawals = await WithdrawalRequest.find({ status: 'pending' }).populate('user', 'firstName lastName email');
       res.json({ success: true, data: withdrawals });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load withdrawals' });
@@ -215,7 +201,14 @@ export class AdminController {
 
   createCoupon = async (req: Request, res: Response): Promise<void> => {
     try {
-      const coupon = new Coupon(req.body);
+      // Ensure required fields have defaults
+      const couponData = {
+        ...req.body,
+        description: req.body.description || 'Discount coupon',
+        validFrom: req.body.validFrom || new Date(),
+        validUntil: req.body.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      };
+      const coupon = new Coupon(couponData);
       await coupon.save();
       res.status(201).json({ success: true, data: coupon });
     } catch (error: any) {
@@ -260,10 +253,7 @@ export class AdminController {
       const skip = (Number(page) - 1) * Number(limit);
       const logs = await AuditLog.find().sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).populate('user', 'firstName lastName email');
       const total = await AuditLog.countDocuments();
-      res.json({
-        success: true,
-        data: { logs, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } },
-      });
+      res.json({ success: true, data: { logs, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load audit logs' });
     }
