@@ -19,17 +19,7 @@ export class InstructorController {
       ]);
       const totalRevenue = courses.reduce((sum, c) => sum + (c.totalRevenue || 0), 0);
       const pendingQuestions = await CourseQuestion.countDocuments({ course: { $in: courseIds }, isAnswered: false });
-      res.json({
-        success: true,
-        data: {
-          totalCourses: courses.length,
-          totalStudents: enrollments[0]?.totalStudents || 0,
-          completedStudents: enrollments[0]?.completed || 0,
-          totalRevenue,
-          pendingQuestions,
-          courses: courses  // ✅ important: include courses array for frontend table
-        }
-      });
+      res.json({ success: true, data: { totalCourses: courses.length, totalStudents: enrollments[0]?.totalStudents || 0, completedStudents: enrollments[0]?.completed || 0, totalRevenue, pendingQuestions, courses } });
     } catch (error) {
       console.error('Instructor dashboard error:', error);
       res.status(500).json({ success: false, message: 'Server error' });
@@ -47,14 +37,8 @@ export class InstructorController {
       if (course.lessons.length < 20) { res.status(400).json({ success: false, message: 'Minimum 20 lessons required' }); return; }
       if (!course.thumbnail) { res.status(400).json({ success: false, message: 'Course thumbnail required' }); return; }
       let approval = await CourseApproval.findOne({ course: courseId }).session(session);
-      if (!approval) {
-        approval = new CourseApproval({ course: courseId, instructor: userId, status: 'pending', submittedAt: new Date() });
-      } else {
-        approval.status = 'pending';
-        approval.submittedAt = new Date();
-        approval.reviewedAt = undefined;
-        approval.rejectionReason = undefined;
-      }
+      if (!approval) { approval = new CourseApproval({ course: courseId, instructor: userId, status: 'pending', submittedAt: new Date() }); }
+      else { approval.status = 'pending'; approval.submittedAt = new Date(); approval.reviewedAt = undefined; approval.rejectionReason = undefined; }
       await approval.save({ session });
       course.published = false;
       course.approvalStatus = 'pending';
@@ -63,11 +47,7 @@ export class InstructorController {
       await session.commitTransaction();
       const admins = await User.find({ roles: 'admin' }).select('_id');
       for (const admin of admins) {
-        await this.notificationService.sendNotification(admin._id.toString(), 'system', {
-          title: 'New Course Submitted',
-          message: `${course.title} has been submitted for approval`,
-          metadata: { courseId, instructorId: userId }
-        });
+        await this.notificationService.sendNotification(admin._id.toString(), 'system', { title: 'New Course Submitted', message: `${course.title} has been submitted for approval`, metadata: { courseId, instructorId: userId } });
       }
       res.json({ success: true, message: 'Course submitted for approval' });
     } catch (error) {
@@ -87,7 +67,8 @@ export class InstructorController {
       if (type === 'thumbnail') { course.thumbnail = url; await course.save(); }
       res.json({ success: true, data: { url }, message: `${type} uploaded` });
     } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
+      console.error('Media upload error:', error);
+      res.status(500).json({ success: false, message: error.message || 'Upload failed' });
     }
   };
 
@@ -97,13 +78,9 @@ export class InstructorController {
       const { courseId } = req.params;
       const course = await Course.findOne({ _id: courseId, instructor: userId });
       if (!course) { res.status(403).json({ success: false, message: 'Not authorized' }); return; }
-      const questions = await CourseQuestion.find({ course: courseId })
-        .populate('user', 'firstName lastName displayName avatar')
-        .populate({ path: 'answers', populate: { path: 'user', select: 'firstName lastName displayName avatar roles' } });
+      const questions = await CourseQuestion.find({ course: courseId }).populate('user', 'firstName lastName displayName avatar').populate({ path: 'answers', populate: { path: 'user', select: 'firstName lastName displayName avatar roles' } });
       res.json({ success: true, data: questions });
-    } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
-    }
+    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
   };
 
   answerQuestion = async (req: Request, res: Response): Promise<void> => {
@@ -122,11 +99,7 @@ export class InstructorController {
       question.answers.push(newAnswer._id);
       question.isAnswered = true;
       await question.save({ session });
-      await this.notificationService.sendNotification(question.user.toString(), 'course', {
-        title: 'Your question has been answered',
-        message: `Instructor replied to "${question.question.substring(0, 50)}..."`,
-        metadata: { courseId: course._id, questionId }
-      });
+      await this.notificationService.sendNotification(question.user.toString(), 'course', { title: 'Your question has been answered', message: `Instructor replied to "${question.question.substring(0, 50)}..."`, metadata: { courseId: course._id, questionId } });
       await session.commitTransaction();
       res.json({ success: true, data: newAnswer });
     } catch (error) {
