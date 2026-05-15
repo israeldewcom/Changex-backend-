@@ -56,16 +56,4 @@ export class FileUploadService {
       throw error;
     }
   }
-
-  async uploadAvatar(file: Express.Multer.File, userId: string): Promise<string> {
-    try {
-      const fileBuffer = fs.readFileSync(file.path);
-      const url = await this.storageService.uploadImage(fileBuffer, `users/${userId}/avatar`);
-      fs.unlinkSync(file.path);
-      return url;
-    } catch (error) {
-      logger.error('Avatar upload failed:', error);
-      throw error;
-    }
-  }
 }
