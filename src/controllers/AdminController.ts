@@ -26,7 +26,8 @@ export class AdminController {
         },
       });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      console.error('Dashboard stats error:', error);
+      res.status(500).json({ success: false, message: 'Failed to load dashboard stats' });
     }
   };
 
@@ -43,13 +44,10 @@ export class AdminController {
       ]);
       res.json({
         success: true,
-        data: {
-          users,
-          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
-        },
+        data: { users, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } },
       });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to load users' });
     }
   };
 
@@ -62,13 +60,10 @@ export class AdminController {
       if (roles) update.roles = roles;
       if (isApprovedInstructor !== undefined) update.isApprovedInstructor = isApprovedInstructor;
       const user = await User.findByIdAndUpdate(userId, update, { new: true }).select('-password -refreshTokens');
-      if (!user) {
-        res.status(404).json({ success: false, message: 'User not found' });
-        return;
-      }
+      if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
       res.json({ success: true, data: user, message: 'User updated' });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to update user' });
     }
   };
 
@@ -78,7 +73,7 @@ export class AdminController {
         .populate('instructor', 'firstName lastName email');
       res.json({ success: true, data: courses });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to load pending courses' });
     }
   };
 
@@ -89,10 +84,7 @@ export class AdminController {
       const { courseId } = req.params;
       const adminId = (req as any).user.userId;
       const course = await Course.findById(courseId).session(session);
-      if (!course) {
-        res.status(404).json({ success: false, message: 'Course not found' });
-        return;
-      }
+      if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
       course.approvalStatus = 'approved';
       course.published = true;
       course.publishedAt = new Date();
@@ -113,7 +105,7 @@ export class AdminController {
       res.json({ success: true, message: 'Course approved and published' });
     } catch (error) {
       await session.abortTransaction();
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to approve course' });
     } finally { session.endSession(); }
   };
 
@@ -125,10 +117,7 @@ export class AdminController {
       const { reason } = req.body;
       const adminId = (req as any).user.userId;
       const course = await Course.findById(courseId).session(session);
-      if (!course) {
-        res.status(404).json({ success: false, message: 'Course not found' });
-        return;
-      }
+      if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
       course.approvalStatus = 'rejected';
       await course.save({ session });
       let approval = await CourseApproval.findOne({ course: courseId }).session(session);
@@ -148,7 +137,7 @@ export class AdminController {
       res.json({ success: true, message: 'Course rejected' });
     } catch (error) {
       await session.abortTransaction();
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to reject course' });
     } finally { session.endSession(); }
   };
 
@@ -158,7 +147,7 @@ export class AdminController {
         .populate('user', 'firstName lastName email');
       res.json({ success: true, data: withdrawals });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to load withdrawals' });
     }
   };
 
@@ -170,10 +159,7 @@ export class AdminController {
       const { action, reason } = req.body;
       const adminId = (req as any).user.userId;
       const withdrawal = await WithdrawalRequest.findById(withdrawalId).session(session);
-      if (!withdrawal) {
-        res.status(404).json({ success: false, message: 'Withdrawal not found' });
-        return;
-      }
+      if (!withdrawal) { res.status(404).json({ success: false, message: 'Withdrawal not found' }); return; }
       if (action === 'approve') {
         withdrawal.status = 'completed';
         withdrawal.processedAt = new Date();
@@ -214,7 +200,7 @@ export class AdminController {
       res.json({ success: true, message: `Withdrawal ${action}d` });
     } catch (error) {
       await session.abortTransaction();
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to process withdrawal' });
     } finally { session.endSession(); }
   };
 
@@ -223,7 +209,7 @@ export class AdminController {
       const coupons = await Coupon.find().sort({ createdAt: -1 });
       res.json({ success: true, data: coupons });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to load coupons' });
     }
   };
 
@@ -242,7 +228,7 @@ export class AdminController {
       await Coupon.findByIdAndDelete(req.params.id);
       res.json({ success: true, message: 'Coupon deleted' });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to delete coupon' });
     }
   };
 
@@ -251,7 +237,7 @@ export class AdminController {
       const announcements = await Announcement.find().sort({ createdAt: -1 }).populate('createdBy', 'firstName lastName');
       res.json({ success: true, data: announcements });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to load announcements' });
     }
   };
 
@@ -276,13 +262,10 @@ export class AdminController {
       const total = await AuditLog.countDocuments();
       res.json({
         success: true,
-        data: {
-          logs,
-          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
-        },
+        data: { logs, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } },
       });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      res.status(500).json({ success: false, message: 'Failed to load audit logs' });
     }
   };
 }
