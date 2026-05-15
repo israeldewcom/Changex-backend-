@@ -38,36 +38,6 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
   }
 };
 
-export const requireCreator = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
-  if (!req.user) {
-    res.status(401).json({ success: false, message: 'Not authenticated' });
-    return;
-  }
-  try {
-    const user = await User.findById(req.user.userId);
-    if (!user) {
-      res.status(401).json({ success: false, message: 'User not found' });
-      return;
-    }
-    const isAdmin = user.roles.includes('admin');
-    const isApprovedInstructor = user.roles.includes('creator') && user.isApprovedInstructor === true;
-    const hasActivePremium = (user.subscriptionTier === 'premium' || user.subscriptionTier === 'elite') &&
-                              user.subscriptionStatus === 'active' &&
-                              (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
-    if (isAdmin || isApprovedInstructor || hasActivePremium) {
-      next();
-    } else {
-      res.status(403).json({
-        success: false,
-        message: 'Insufficient permissions. You need an active Premium subscription or be an approved instructor to create courses.'
-      });
-    }
-  } catch (error) {
-    logger.error('requireCreator error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-
 export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
   if (!req.user) {
     res.status(401).json({ success: false, message: 'Not authenticated' });
@@ -75,10 +45,36 @@ export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFu
   }
   const user = await User.findById(req.user.userId);
   if (!user || !user.roles.includes('admin')) {
+    logger.warn(`Admin access denied for user ${req.user.userId} – roles: ${user?.roles}`);
     res.status(403).json({ success: false, message: 'Admin access required' });
     return;
   }
   next();
+};
+
+export const requireCreator = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: 'Not authenticated' });
+    return;
+  }
+  const user = await User.findById(req.user.userId);
+  if (!user) {
+    res.status(401).json({ success: false, message: 'User not found' });
+    return;
+  }
+  const isAdmin = user.roles.includes('admin');
+  const isApprovedInstructor = user.roles.includes('creator') && user.isApprovedInstructor === true;
+  const hasActivePremium = (user.subscriptionTier === 'premium' || user.subscriptionTier === 'elite') &&
+                            user.subscriptionStatus === 'active' &&
+                            (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
+  if (isAdmin || isApprovedInstructor || hasActivePremium) {
+    next();
+  } else {
+    res.status(403).json({
+      success: false,
+      message: 'Insufficient permissions. You need an active Premium subscription or be an approved instructor to create courses.'
+    });
+  }
 };
 
 export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
