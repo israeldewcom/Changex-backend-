@@ -45,7 +45,7 @@ export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFu
   }
   const user = await User.findById(req.user.userId);
   if (!user || !user.roles.includes('admin')) {
-    logger.warn(`Admin access denied for user ${req.user.userId} – roles: ${user?.roles}`);
+    logger.warn(`Admin access denied for ${req.user.userId} – roles: ${user?.roles}`);
     res.status(403).json({ success: false, message: 'Admin access required' });
     return;
   }
