@@ -83,6 +83,32 @@ export class AdminController {
     }
   };
 
+  // ✅ NEW: List all courses (for admin courses tab)
+  getCourses = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { page = 1, limit = 20, status } = req.query;
+      const query: any = {};
+      if (status === 'pending') query.approvalStatus = 'pending';
+      else if (status === 'approved') query.approvalStatus = 'approved';
+      else query.approvalStatus = { $in: ['approved', 'pending', 'rejected'] };
+      const skip = (Number(page) - 1) * Number(limit);
+      const courses = await Course.find(query)
+        .skip(skip)
+        .limit(Number(limit))
+        .populate('instructor', 'firstName lastName email');
+      const total = await Course.countDocuments(query);
+      res.json({
+        success: true,
+        data: {
+          courses,
+          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) }
+        }
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Failed to load courses' });
+    }
+  };
+
   approveCourse = async (req: Request, res: Response): Promise<void> => {
     const session = await mongoose.startSession();
     session.startTransaction();
