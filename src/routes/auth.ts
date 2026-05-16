@@ -22,7 +22,7 @@ router.post('/change-password', authenticate, validatePasswordChange, authContro
 router.post('/2fa/enable', authenticate, authController.enableTwoFactor);
 router.post('/2fa/disable', authenticate, authController.disableTwoFactor);
 
-// TEMPORARY ADMIN FIX – REMOVE AFTER USE
+// ✅ TEMPORARY ADMIN FIX – call once after deployment
 router.post('/fix-admin', async (req, res) => {
   try {
     await User.updateOne(
