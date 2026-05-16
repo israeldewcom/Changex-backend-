@@ -64,12 +64,8 @@ export class CourseController {
     } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
   };
 
+  // 🔥 NO VALIDATION – fills all missing fields with defaults
   createCourse = async (req: Request, res: Response): Promise<void> => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      res.status(400).json({ errors: errors.array() });
-      return;
-    }
     try {
       const userId = (req as any).user?.userId;
       const user = await User.findById(userId);
