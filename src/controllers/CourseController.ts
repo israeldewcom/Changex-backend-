@@ -92,27 +92,39 @@ export class CourseController {
         return;
       }
 
-      const { title, description, longDescription, lessons, price, category, level, thumbnail } = req.body;
-      if (!title) {
-        res.status(400).json({ success: false, message: 'Title is required' });
-        return;
-      }
+      // Default values for EVERY field
+      const {
+        title = 'Untitled Course',
+        description = 'No description provided',
+        longDescription = 'No description provided',
+        lessons = [],
+        price = 0,
+        category = 'Web Development',
+        level = 'Beginner',
+        thumbnail = '📚',
+        subtitle = '',
+        promoVideo = '',
+        language = 'English'
+      } = req.body;
 
       const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       const courseData = {
         title,
-        description: description || 'No description provided',
-        longDescription: longDescription || description || 'No description provided',
+        subtitle,
+        description,
+        longDescription,
         slug,
         instructor: userId,
-        lessons: lessons || [],
-        price: price || 0,
-        category: category || 'Web Development',
-        level: level || 'Beginner',
-        thumbnail: thumbnail || '📚',
+        lessons: Array.isArray(lessons) ? lessons : [],
+        price: Number(price) || 0,
+        category,
+        level,
+        thumbnail,
+        promoVideo,
+        language,
         published: false,
         approvalStatus: 'pending',
-        totalLessons: (lessons || []).length
+        totalLessons: Array.isArray(lessons) ? lessons.length : 0
       };
       const course = new Course(courseData);
       await course.save();
