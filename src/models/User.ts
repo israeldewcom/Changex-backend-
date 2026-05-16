@@ -1,4 +1,3 @@
-// src/models/User.ts – COMPLETE (original + isApprovedInstructor)
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
@@ -35,6 +34,12 @@ export interface IUser extends Document {
   referralEarnings: number;
   referralLevel: number;
   
+  affiliateLinks: Array<{
+    courseId: mongoose.Types.ObjectId;
+    link: string;
+    createdAt: Date;
+  }>;
+  
   coursesEnrolled: mongoose.Types.ObjectId[];
   coursesCompleted: mongoose.Types.ObjectId[];
   lessonsCompleted: number;
@@ -55,7 +60,6 @@ export interface IUser extends Document {
   isBanned: boolean;
   roles: ('user' | 'creator' | 'admin' | 'moderator')[];
   
-  // ✅ NEW – instructor approval flag
   isApprovedInstructor: boolean;
   
   createdAt: Date;
@@ -101,6 +105,12 @@ const UserSchema = new Schema<IUser>(
     referralEarnings: { type: Number, default: 0 },
     referralLevel: { type: Number, default: 0 },
     
+    affiliateLinks: [{
+      courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
+      link: { type: String },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    
     coursesEnrolled: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
     coursesCompleted: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
     lessonsCompleted: { type: Number, default: 0 },
@@ -121,7 +131,6 @@ const UserSchema = new Schema<IUser>(
     isBanned: { type: Boolean, default: false },
     roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
     
-    // ✅ NEW
     isApprovedInstructor: { type: Boolean, default: false },
     
     lastLoginAt: { type: Date, default: Date.now },
@@ -130,7 +139,7 @@ const UserSchema = new Schema<IUser>(
 );
 
 UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
-UserSchema.index({ 'subscriptionExpiresAt': 1 });
+UserSchema.index({ subscriptionExpiresAt: 1 });
 UserSchema.index({ xp: -1 });
 UserSchema.index({ roles: 1 });
 UserSchema.index({ createdAt: -1 });
