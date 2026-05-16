@@ -213,12 +213,7 @@ export class AdminController {
 
   createCoupon = async (req: Request, res: Response): Promise<void> => {
     try {
-      const couponData = {
-        ...req.body,
-        description: req.body.description || 'Discount coupon',
-        validFrom: req.body.validFrom || new Date(),
-        validUntil: req.body.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-      };
+      const couponData = { ...req.body, description: req.body.description || 'Discount coupon', validFrom: req.body.validFrom || new Date(), validUntil: req.body.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) };
       const coupon = new Coupon(couponData);
       await coupon.save();
       res.status(201).json({ success: true, data: coupon });
