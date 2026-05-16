@@ -1,4 +1,3 @@
-// src/models/Course.ts – COMPLETE (original + approval fields)
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ILesson extends Document {
@@ -64,29 +63,24 @@ export interface ICourse extends Document {
   language: string;
   lastUpdated: Date;
   version: number;
-  
   creatorCommission: number;
   affiliateCommission: number;
   platformFee: number;
-  
   totalRevenue: number;
   totalEnrollments: number;
   completionRate: number;
   averageRating: number;
-  
-  // ✅ NEW – course approval workflow
   approvalStatus: 'pending' | 'approved' | 'rejected';
   submittedAt?: Date;
-  
   createdAt: Date;
   updatedAt: Date;
 }
 
 const LessonSchema = new Schema<ILesson>({
   title: { type: String, required: true },
-  description: { type: String, required: true },
+  description: { type: String, default: 'Lesson description' },   // ✅ default added
   type: { type: String, enum: ['video', 'text', 'quiz', 'code', 'assignment'], required: true },
-  content: { type: String, required: true },
+  content: { type: String, default: '' },                         // ✅ default added
   videoUrl: { type: String },
   duration: { type: Number, required: true },
   order: { type: Number, required: true },
@@ -122,7 +116,12 @@ const CourseSchema = new Schema<ICourse>(
     longDescription: { type: String, required: true },
     category: { type: String, required: true, index: true },
     subcategory: { type: String },
-    level: { type: String, enum: ['beginner', 'intermediate', 'advanced'], required: true },
+    level: {
+      type: String,
+      enum: ['beginner', 'intermediate', 'advanced'],
+      required: true,
+      set: (val: string) => val.toLowerCase()   // ✅ converts "Beginner" → "beginner"
+    },
     price: { type: Number, required: true, min: 0 },
     discountPrice: { type: Number, min: 0 },
     currency: { type: String, default: 'NGN' },
@@ -158,8 +157,6 @@ const CourseSchema = new Schema<ICourse>(
     totalEnrollments: { type: Number, default: 0 },
     completionRate: { type: Number, default: 0 },
     averageRating: { type: Number, default: 0 },
-    
-    // ✅ NEW
     approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     submittedAt: { type: Date },
   },
