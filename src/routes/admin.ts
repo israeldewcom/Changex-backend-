@@ -12,6 +12,7 @@ router.get('/dashboard', adminController.getDashboardStats);
 router.get('/users', adminController.getUsers);
 router.patch('/users/:userId', adminController.updateUserStatus);
 router.get('/courses/pending', adminController.getPendingCourses);
+router.get('/courses', adminController.getCourses);  // ✅ ADD THIS LINE
 router.post('/courses/:courseId/approve', auditLog('APPROVE_COURSE', 'Course'), adminController.approveCourse);
 router.post('/courses/:courseId/reject', auditLog('REJECT_COURSE', 'Course'), adminController.rejectCourse);
 router.get('/withdrawals/pending', adminController.getPendingWithdrawals);
