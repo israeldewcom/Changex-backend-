@@ -22,8 +22,8 @@ export class AdminController {
           totalCourses,
           pendingCourses,
           pendingWithdrawals,
-          totalRevenue: totalRevenue[0]?.total || 0,
-        },
+          totalRevenue: totalRevenue[0]?.total || 0
+        }
       });
     } catch (error) {
       console.error('Dashboard error:', error);
@@ -46,8 +46,8 @@ export class AdminController {
         success: true,
         data: {
           users,
-          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
-        },
+          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) }
+        }
       });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load users' });
@@ -83,7 +83,6 @@ export class AdminController {
     }
   };
 
-  // ✅ NEW: List all courses (for admin courses tab)
   getCourses = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, status } = req.query;
@@ -188,6 +187,27 @@ export class AdminController {
       const withdrawals = await WithdrawalRequest.find({ status: 'pending' })
         .populate('user', 'firstName lastName email');
       res.json({ success: true, data: withdrawals });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Failed to load pending withdrawals' });
+    }
+  };
+
+  getWithdrawals = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { page = 1, limit = 20 } = req.query;
+      const skip = (Number(page) - 1) * Number(limit);
+      const withdrawals = await WithdrawalRequest.find()
+        .skip(skip)
+        .limit(Number(limit))
+        .populate('user', 'firstName lastName email');
+      const total = await WithdrawalRequest.countDocuments();
+      res.json({
+        success: true,
+        data: {
+          withdrawals,
+          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) }
+        }
+      });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load withdrawals' });
     }
@@ -317,8 +337,8 @@ export class AdminController {
         success: true,
         data: {
           logs,
-          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
-        },
+          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) }
+        }
       });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load audit logs' });
