@@ -64,7 +64,6 @@ export class AdminController {
     }
   };
 
-  // ✅ NEW – list all courses for admin
   getCourses = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, status } = req.query;
@@ -146,7 +145,6 @@ export class AdminController {
     }
   };
 
-  // ✅ NEW – list all withdrawals
   getWithdrawals = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20 } = req.query;
@@ -215,7 +213,12 @@ export class AdminController {
 
   createCoupon = async (req: Request, res: Response): Promise<void> => {
     try {
-      const couponData = { ...req.body, description: req.body.description || 'Discount coupon', validFrom: req.body.validFrom || new Date(), validUntil: req.body.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) };
+      const couponData = {
+        ...req.body,
+        description: req.body.description || 'Discount coupon',
+        validFrom: req.body.validFrom || new Date(),
+        validUntil: req.body.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      };
       const coupon = new Coupon(couponData);
       await coupon.save();
       res.status(201).json({ success: true, data: coupon });
