@@ -1,16 +1,10 @@
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { StorageService } from './StorageService';
 import { logger } from '../utils/logger';
 
 export class FileUploadService {
   private static instance: FileUploadService;
-  private storageService: StorageService;
-
-  private constructor() {
-    this.storageService = StorageService.getInstance();
-  }
 
   static getInstance(): FileUploadService {
     if (!FileUploadService.instance) {
@@ -48,7 +42,12 @@ export class FileUploadService {
       if (type === 'thumbnail') folder += '/thumbnails';
       else if (type === 'video') folder += '/videos';
       else folder += '/resources';
-      const url = await this.storageService.uploadImage(fileBuffer, folder);
+      const uploadDir = path.join(__dirname, '../../uploads', folder);
+      if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+      const filename = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}-${file.originalname}`;
+      const filepath = path.join(uploadDir, filename);
+      fs.writeFileSync(filepath, fileBuffer);
+      const url = `${process.env.BACKEND_URL || 'https://changex-backend-etfk.onrender.com'}/uploads/${folder}/${filename}`;
       fs.unlinkSync(file.path);
       return url;
     } catch (error) {
