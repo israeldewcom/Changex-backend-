@@ -18,6 +18,7 @@ export class CourseController {
     this.notificationService = NotificationService.getInstance();
   }
 
+  // ==================== PUBLIC ROUTES ====================
   getAllCourses = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, category, level, priceMin, priceMax, search, sortBy = 'createdAt', sortOrder = 'desc', featured, instructor } = req.query;
@@ -64,6 +65,7 @@ export class CourseController {
     } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
   };
 
+  // ==================== PROTECTED ROUTES ====================
   createCourse = async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -73,7 +75,10 @@ export class CourseController {
     try {
       const userId = (req as any).user?.userId;
       const user = await User.findById(userId);
-      if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
+      if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
 
       const isAdmin = user.roles.includes('admin');
       const isApprovedInstructor = user.roles.includes('creator') && user.isApprovedInstructor === true;
@@ -82,11 +87,14 @@ export class CourseController {
                               (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
 
       if (!isAdmin && !isApprovedInstructor && !isPremiumActive) {
-        res.status(403).json({ success: false, message: 'Not authorized to create courses. Please upgrade to Premium or get approved as an instructor.' });
+        res.status(403).json({
+          success: false,
+          message: 'Not authorized to create courses. Please upgrade to Premium or get approved as an instructor.'
+        });
         return;
       }
 
-      const { title, description, lessons, price, category, level, thumbnail, subtitle, longDescription } = req.body;
+      const { title, description, lessons, price, category, level, thumbnail } = req.body;
       if (!title) {
         res.status(400).json({ success: false, message: 'Title is required' });
         return;
@@ -95,9 +103,7 @@ export class CourseController {
       const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       const courseData = {
         title,
-        subtitle: subtitle || '',
-        description: description || '',
-        longDescription: longDescription || description || '',
+        description: description || 'No description provided', // ✅ DEFAULT FALLBACK
         slug,
         instructor: userId,
         lessons: lessons || [],
@@ -106,8 +112,7 @@ export class CourseController {
         level: level || 'Beginner',
         thumbnail: thumbnail || '📚',
         published: false,
-        approvalStatus: 'pending',
-        totalLessons: lessons?.length || 0
+        approvalStatus: 'pending'
       };
       const course = new Course(courseData);
       await course.save();
