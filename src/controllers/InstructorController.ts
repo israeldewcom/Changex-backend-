@@ -34,12 +34,16 @@ export class InstructorController {
         return;
       }
       if (course.lessons.length < 20) {
-        res.status(400).json({ success: false, message: 'Minimum 20 lessons required' });
+        res.status(400).json({ success: false, message: 'Minimum 20 lessons required. You have ' + course.lessons.length });
+        return;
+      }
+      if (!course.thumbnail || course.thumbnail === '📚') {
+        res.status(400).json({ success: false, message: 'Please upload a course thumbnail first' });
         return;
       }
       course.approvalStatus = 'pending';
       await course.save();
-      res.json({ success: true, message: 'Course submitted for approval' });
+      res.json({ success: true, message: 'Course submitted for admin approval' });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -72,7 +76,8 @@ export class InstructorController {
       fs.writeFileSync(filepath, req.file.buffer);
 
       // Generate URL
-      const url = `${process.env.BACKEND_URL || 'https://changex-backend-etfk.onrender.com'}/uploads/courses/${courseId}/${type}/${filename}`;
+      const baseUrl = process.env.BACKEND_URL || 'https://changex-backend-etfk.onrender.com';
+      const url = `${baseUrl}/uploads/courses/${courseId}/${type}/${filename}`;
 
       // If thumbnail, update course thumbnail
       if (type === 'thumbnail') {
@@ -80,7 +85,7 @@ export class InstructorController {
         await course.save();
       }
 
-      res.json({ success: true, data: { url }, message: `${type} uploaded` });
+      res.json({ success: true, data: { url }, message: `${type} uploaded successfully` });
     } catch (error: any) {
       console.error('Upload error:', error);
       res.status(500).json({ success: false, message: error.message });
