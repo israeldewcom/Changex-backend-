@@ -5,7 +5,7 @@ import { authenticate } from '../middleware/auth';
 const router = Router();
 const contactController = new ContactController();
 
-router.post('/', contactController.submit);                    // contact form
-router.post('/feedback', authenticate, contactController.sendFeedback);  // ✅ feedback
+router.post('/', contactController.submit);
+router.post('/feedback', authenticate, contactController.sendFeedback);
 
 export default router;
