@@ -34,11 +34,29 @@ export const requireCreator = async (req: AuthRequest, res: Response, next: Next
     return;
   }
   const user = await User.findById(req.user.userId);
-  const isAdmin = user?.roles.includes('admin');
+  const isAdmin = user?.roles?.includes('admin');
   const isPremium = user?.subscriptionTier === 'premium' && user?.subscriptionStatus === 'active';
-  if (isAdmin || isPremium || user?.isApprovedInstructor) {
+  const isApprovedInstructor = user?.isApprovedInstructor === true;
+  
+  if (isAdmin || isPremium || isApprovedInstructor) {
     next();
   } else {
-    res.status(403).json({ success: false, message: 'Premium subscription required to create courses' });
+    res.status(403).json({ 
+      success: false, 
+      message: 'Premium subscription or instructor approval required to create courses' 
+    });
   }
+};
+
+export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ success: false, message: 'Not authenticated' });
+    return;
+  }
+  const user = await User.findById(req.user.userId);
+  if (!user?.roles?.includes('admin')) {
+    res.status(403).json({ success: false, message: 'Admin access required' });
+    return;
+  }
+  next();
 };
