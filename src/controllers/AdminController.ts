@@ -99,6 +99,18 @@ export class AdminController {
         approval.reviewedBy = adminId;
         await approval.save({ session });
       }
+
+      // ✅ Broadcast affiliate offer to ALL online users via Socket.io
+      const io = req.app.get('io');
+      if (io && course.hasAffiliate && course.affiliateCommission > 0) {
+        io.emit('affiliate-offer', {
+          courseId: course._id,
+          title: course.title,
+          affiliatePercent: course.affiliateCommission,
+          thumbnail: course.thumbnail
+        });
+      }
+
       await this.notificationService.sendNotification(course.instructor.toString(), 'system', { title: 'Course Approved! 🎉', message: `Your course "${course.title}" has been approved and is now live.`, metadata: { courseId } });
       await session.commitTransaction();
       res.json({ success: true, message: 'Course approved and published' });
