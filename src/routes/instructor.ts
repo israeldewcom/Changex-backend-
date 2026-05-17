@@ -7,6 +7,7 @@ const router = Router();
 const instructorController = new InstructorController();
 const upload = multer({ storage: multer.memoryStorage() });
 
+// All instructor routes require authentication and creator/premium access
 router.use(authenticate, requireCreator);
 
 router.get('/dashboard', instructorController.getDashboardStats);
