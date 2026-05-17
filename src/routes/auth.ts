@@ -5,12 +5,12 @@ import { authRateLimit } from '../middleware/rateLimit';
 import { validateRegistration, validateLogin, validateResetPassword, validatePasswordChange } from '../middleware/validation';
 import bcrypt from 'bcryptjs';
 import { User } from '../models/User';
-import jwt from 'jsonwebtoken';
-import { config } from '../config';
+import passport from '../config/passport';
 
 const router = Router();
 const authController = new AuthController();
 
+// Existing routes...
 router.post('/register', authRateLimit, validateRegistration, authController.register);
 router.post('/login', authRateLimit, validateLogin, authController.login);
 router.post('/refresh-token', authController.refreshToken);
@@ -22,7 +22,19 @@ router.post('/change-password', authenticate, validatePasswordChange, authContro
 router.post('/2fa/enable', authenticate, authController.enableTwoFactor);
 router.post('/2fa/disable', authenticate, authController.disableTwoFactor);
 
-// TEMPORARY – call once after deployment, then remove
+// OAuth routes
+router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+router.get('/google/callback', passport.authenticate('google', { session: false }), (req, res) => {
+  const { token } = (req.user as any);
+  res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
+});
+router.get('/github', passport.authenticate('github', { scope: ['user:email'] }));
+router.get('/github/callback', passport.authenticate('github', { session: false }), (req, res) => {
+  const { token } = (req.user as any);
+  res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
+});
+
+// Temporary admin fix (optional)
 router.post('/fix-admin', async (req, res) => {
   try {
     await User.updateOne(
@@ -34,7 +46,8 @@ router.post('/fix-admin', async (req, res) => {
           isActive: true,
           emailVerified: true,
           subscriptionTier: 'premium',
-          subscriptionStatus: 'active'
+          subscriptionStatus: 'active',
+          setupDone: true
         }
       },
       { upsert: true }
@@ -53,6 +66,7 @@ router.post('/fix-admin', async (req, res) => {
         isApprovedInstructor: true,
         emailVerified: true,
         isActive: true,
+        setupDone: true,
         walletBalance: 0,
         xp: 0,
         level: 1,
