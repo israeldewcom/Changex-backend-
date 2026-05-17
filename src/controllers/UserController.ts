@@ -38,7 +38,7 @@ export class UserController {
     }
     try {
       const userId = (req as any).user?.userId;
-      const { firstName, lastName, bio, emailNotifications, preferredCurrency, location, phone } = req.body;
+      const { firstName, lastName, bio, emailNotifications, preferredCurrency, location, phone, setupDone } = req.body;
       const updateData: any = {};
       if (firstName) updateData.firstName = firstName;
       if (lastName) updateData.lastName = lastName;
@@ -47,6 +47,7 @@ export class UserController {
       if (preferredCurrency) updateData.preferredCurrency = preferredCurrency;
       if (location) updateData.location = location;
       if (phone) updateData.phone = phone;
+      if (setupDone !== undefined) updateData.setupDone = setupDone;
       if (firstName || lastName) {
         const user = await User.findById(userId);
         updateData.displayName = `${firstName || user?.firstName} ${lastName || user?.lastName}`;
@@ -118,7 +119,6 @@ export class UserController {
     }
   };
 
-  // ✅ NEW: Store affiliate link
   createAffiliateLink = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user.userId;
@@ -193,7 +193,7 @@ export class UserController {
   getDashboardStats = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
-      const user = await User.findById(userId).select('xp level streak walletBalance totalEarned').populate('coursesEnrolled', 'title thumbnail progress').populate('certificatesEarned', 'certificateId issueDate');
+      const user = await User.findById(userId).select('xp level streak walletBalance totalEarned setupDone').populate('coursesEnrolled', 'title thumbnail progress').populate('certificatesEarned', 'certificateId issueDate');
       if (!user) {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
@@ -205,7 +205,15 @@ export class UserController {
       const recentTransactions = await Transaction.find({ user: userId }).sort({ createdAt: -1 }).limit(10);
       const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
       const weeklyXP = await Transaction.aggregate([{ $match: { user: new mongoose.Types.ObjectId(userId), createdAt: { $gte: weekAgo }, type: 'reward' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
-      res.json({ success: true, data: { profile: { level: user.level, xp: user.xp, xpToNextLevel, xpProgress, streak: user.streak }, wallet: { balance: user.walletBalance, totalEarned: user.totalEarned }, learning: { enrolledCourses: user.coursesEnrolled, certificates: user.certificatesEarned, weeklyXP: weeklyXP[0]?.total || 0 }, recentActivity: recentTransactions } });
+      res.json({
+        success: true,
+        data: {
+          profile: { level: user.level, xp: user.xp, xpToNextLevel, xpProgress, streak: user.streak, setupDone: user.setupDone },
+          wallet: { balance: user.walletBalance, totalEarned: user.totalEarned },
+          learning: { enrolledCourses: user.coursesEnrolled, certificates: user.certificatesEarned, weeklyXP: weeklyXP[0]?.total || 0 },
+          recentActivity: recentTransactions
+        }
+      });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Server error' });
     }
