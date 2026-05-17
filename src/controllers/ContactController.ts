@@ -29,7 +29,6 @@ export class ContactController {
     }
   };
 
-  // ✅ NEW: Feedback endpoint
   sendFeedback = async (req: Request, res: Response): Promise<void> => {
     try {
       const { message, email, userId, url } = req.body;
