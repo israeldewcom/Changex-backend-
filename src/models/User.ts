@@ -61,7 +61,6 @@ export interface IUser extends Document {
   roles: ('user' | 'creator' | 'admin' | 'moderator')[];
   
   isApprovedInstructor: boolean;
-  setupDone: boolean;
   
   createdAt: Date;
   updatedAt: Date;
@@ -133,7 +132,6 @@ const UserSchema = new Schema<IUser>(
     roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
     
     isApprovedInstructor: { type: Boolean, default: false },
-    setupDone: { type: Boolean, default: false },
     
     lastLoginAt: { type: Date, default: Date.now },
   },
