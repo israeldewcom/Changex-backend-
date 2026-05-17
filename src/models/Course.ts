@@ -33,29 +33,43 @@ export interface ICourse extends Document {
   title: string;
   slug: string;
   description: string;
+  longDescription: string;
   category: string;
   level: string;
   price: number;
+  discountPrice?: number;
   thumbnail: string;
   instructor: mongoose.Types.ObjectId;
   lessons: ILesson[];
   published: boolean;
   approvalStatus: 'pending' | 'approved' | 'rejected';
+  hasAffiliate: boolean;
+  affiliateCommission: number;
+  totalRevenue: number;
+  enrollmentCount: number;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const CourseSchema = new Schema<ICourse>(
   {
     title: { type: String, required: true },
     slug: { type: String, required: true, unique: true },
-    description: { type: String, required: true, default: 'No description' },
+    description: { type: String, required: true, default: 'No description provided' },
+    longDescription: { type: String, default: 'No description provided' },
     category: { type: String, default: 'Web Development' },
     level: { type: String, enum: ['beginner', 'intermediate', 'advanced'], default: 'beginner' },
     price: { type: Number, default: 0 },
+    discountPrice: { type: Number, default: 0 },
     thumbnail: { type: String, default: '📚' },
     instructor: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     lessons: [LessonSchema],
     published: { type: Boolean, default: false },
     approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    hasAffiliate: { type: Boolean, default: false },
+    affiliateCommission: { type: Number, default: 20 },
+    totalRevenue: { type: Number, default: 0 },
+    enrollmentCount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
