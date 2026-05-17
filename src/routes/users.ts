@@ -16,7 +16,7 @@ router.put('/profile', validateProfileUpdate, auditLog('UPDATE_PROFILE', 'User')
 router.post('/avatar', upload.single('avatar'), auditLog('UPLOAD_AVATAR', 'User'), userController.uploadAvatar);
 router.get('/wallet', userController.getWallet);
 router.get('/referrals', userController.getReferralInfo);
-router.post('/referrals/affiliate', userController.createAffiliateLink);  // ✅ NEW
+router.post('/referrals/affiliate', userController.createAffiliateLink);
 router.get('/notifications', validatePagination, userController.getNotifications);
 router.put('/notifications/:notificationId/read', userController.markNotificationRead);
 router.put('/notifications/read-all', userController.markAllNotificationsRead);
