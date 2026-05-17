@@ -79,7 +79,6 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
-  ...
   "passport": "^0.7.0",
   "passport-google-oauth20": "^2.0.0",
   "passport-github2": "^0.1.12",
