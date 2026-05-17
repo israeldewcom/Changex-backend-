@@ -72,16 +72,17 @@ export interface ICourse extends Document {
   averageRating: number;
   approvalStatus: 'pending' | 'approved' | 'rejected';
   submittedAt?: Date;
+  hasAffiliate: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const LessonSchema = new Schema<ILesson>({
   title: { type: String, required: true },
-  description: { type: String, default: 'Lesson description' },   // ✅ default added
+  description: { type: String, default: 'Lesson description' },
   type: { type: String, enum: ['video', 'text', 'quiz', 'code', 'assignment'], required: true },
-  content: { type: String, default: '' },                         // ✅ default added
-  videoUrl: { type: String },
+  content: { type: String, default: '' },
+  videoUrl: { type: String, default: '' },
   duration: { type: Number, required: true },
   order: { type: Number, required: true },
   xpReward: { type: Number, default: 50 },
@@ -120,7 +121,7 @@ const CourseSchema = new Schema<ICourse>(
       type: String,
       enum: ['beginner', 'intermediate', 'advanced'],
       required: true,
-      set: (val: string) => val.toLowerCase()   // ✅ converts "Beginner" → "beginner"
+      set: (val: string) => val.toLowerCase()
     },
     price: { type: Number, required: true, min: 0 },
     discountPrice: { type: Number, min: 0 },
@@ -159,6 +160,7 @@ const CourseSchema = new Schema<ICourse>(
     averageRating: { type: Number, default: 0 },
     approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     submittedAt: { type: Date },
+    hasAffiliate: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
@@ -168,6 +170,7 @@ CourseSchema.index({ category: 1, level: 1, price: 1 });
 CourseSchema.index({ enrollmentCount: -1 });
 CourseSchema.index({ rating: -1 });
 CourseSchema.index({ createdAt: -1 });
+CourseSchema.index({ hasAffiliate: 1 });
 
 CourseSchema.pre('save', function(next) {
   this.totalLessons = this.lessons.length;
