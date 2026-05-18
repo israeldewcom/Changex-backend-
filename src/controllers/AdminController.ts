@@ -6,7 +6,6 @@ import mongoose from 'mongoose';
 export class AdminController {
   private notificationService = NotificationService.getInstance();
 
-  // ==================== DASHBOARD ====================
   getDashboardStats = async (req: Request, res: Response): Promise<void> => {
     try {
       const [totalUsers, totalCourses, pendingCourses, pendingWithdrawals, totalRevenue] = await Promise.all([
@@ -16,23 +15,13 @@ export class AdminController {
         WithdrawalRequest.countDocuments({ status: 'pending' }),
         Transaction.aggregate([{ $match: { type: 'purchase', status: 'completed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }])
       ]);
-      res.json({
-        success: true,
-        data: {
-          totalUsers,
-          totalCourses,
-          pendingCourses,
-          pendingWithdrawals,
-          totalRevenue: totalRevenue[0]?.total || 0,
-        },
-      });
+      res.json({ success: true, data: { totalUsers, totalCourses, pendingCourses, pendingWithdrawals, totalRevenue: totalRevenue[0]?.total || 0 } });
     } catch (error) {
       console.error('Dashboard error:', error);
       res.status(500).json({ success: false, message: 'Failed to load dashboard stats' });
     }
   };
 
-  // ==================== USER MANAGEMENT ====================
   getUsers = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, role, isBanned } = req.query;
@@ -44,13 +33,7 @@ export class AdminController {
         User.find(query).select('-password -refreshTokens').skip(skip).limit(Number(limit)),
         User.countDocuments(query)
       ]);
-      res.json({
-        success: true,
-        data: {
-          users,
-          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
-        },
-      });
+      res.json({ success: true, data: { users, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load users' });
     }
@@ -65,21 +48,16 @@ export class AdminController {
       if (roles) update.roles = roles;
       if (isApprovedInstructor !== undefined) update.isApprovedInstructor = isApprovedInstructor;
       const user = await User.findByIdAndUpdate(userId, update, { new: true }).select('-password -refreshTokens');
-      if (!user) {
-        res.status(404).json({ success: false, message: 'User not found' });
-        return;
-      }
+      if (!user) { res.status(404).json({ success: false, message: 'User not found' }); return; }
       res.json({ success: true, data: user, message: 'User updated' });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to update user' });
     }
   };
 
-  // ==================== COURSE MANAGEMENT ====================
   getPendingCourses = async (req: Request, res: Response): Promise<void> => {
     try {
-      const courses = await Course.find({ approvalStatus: 'pending', published: false })
-        .populate('instructor', 'firstName lastName email');
+      const courses = await Course.find({ approvalStatus: 'pending', published: false }).populate('instructor', 'firstName lastName email');
       res.json({ success: true, data: courses });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load pending courses' });
@@ -96,13 +74,7 @@ export class AdminController {
       const skip = (Number(page) - 1) * Number(limit);
       const courses = await Course.find(query).skip(skip).limit(Number(limit)).populate('instructor', 'firstName lastName email');
       const total = await Course.countDocuments(query);
-      res.json({
-        success: true,
-        data: {
-          courses,
-          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
-        },
-      });
+      res.json({ success: true, data: { courses, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load courses' });
     }
@@ -115,18 +87,13 @@ export class AdminController {
       const { courseId } = req.params;
       const adminId = (req as any).user.userId;
       const course = await Course.findById(courseId).session(session);
-      if (!course) {
-        res.status(404).json({ success: false, message: 'Course not found' });
-        return;
-      }
+      if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
       
-      // Update course status
       course.approvalStatus = 'approved';
       course.published = true;
       course.publishedAt = new Date();
       await course.save({ session });
       
-      // Update approval record
       let approval = await CourseApproval.findOne({ course: courseId }).session(session);
       if (approval) {
         approval.status = 'approved';
@@ -134,30 +101,27 @@ export class AdminController {
         approval.reviewedBy = adminId;
         await approval.save({ session });
       }
-      
-      // Notify instructor
-      await this.notificationService.sendNotification(course.instructor.toString(), 'system', {
-        title: 'Course Approved! 🎉',
-        message: `Your course "${course.title}" has been approved and is now live.`,
-        metadata: { courseId }
+
+      // ✅ Notify instructor
+      await this.notificationService.sendNotification(course.instructor.toString(), 'system', { 
+        title: 'Course Approved! 🎉', 
+        message: `Your course "${course.title}" has been approved and is now live.`, 
+        metadata: { courseId } 
       });
-      
-      // ========== NEW: Broadcast affiliate offer to ALL users ==========
-      const io = (req as any).app?.get('io');
-      const hasAffiliate = course.affiliateCommission && course.affiliateCommission > 0;
-      
-      if (io && hasAffiliate) {
-        // 1. Real-time notification for online users
+
+      // ✅ Broadcast affiliate offer to ALL users if course has affiliate commission
+      const io = req.app.get('io');
+      if (io && course.affiliateCommission && course.affiliateCommission > 0) {
+        // Real-time notification for online users
         io.emit('affiliate-offer', {
           courseId: course._id,
           title: course.title,
           affiliatePercent: course.affiliateCommission,
-          thumbnail: course.thumbnail,
-          message: `New affiliate offer: ${course.title} - ${course.affiliateCommission}% commission!`
+          thumbnail: course.thumbnail
         });
-        
-        // 2. Store database notifications for ALL users (including offline)
-        const allUsers = await User.find({ isActive: true, isBanned: false }).select('_id').session(session);
+
+        // ✅ Create database notifications for ALL users (offline users will see later)
+        const allUsers = await User.find({ isActive: true }).select('_id');
         const batchSize = 100;
         for (let i = 0; i < allUsers.length; i += batchSize) {
           const batch = allUsers.slice(i, i + batchSize);
@@ -166,21 +130,18 @@ export class AdminController {
             type: 'system',
             title: '📢 New Affiliate Offer Available!',
             message: `${course.title} now offers ${course.affiliateCommission}% commission. Accept in your Affiliate Dashboard.`,
-            data: { courseId: course._id, type: 'affiliate_offer', affiliatePercent: course.affiliateCommission }
+            data: { courseId: course._id, type: 'affiliate_offer' }
           }));
-          await Notification.insertMany(notifications, { session });
+          await Notification.insertMany(notifications);
         }
       }
-      
+
       await session.commitTransaction();
       res.json({ success: true, message: 'Course approved and published' });
     } catch (error) {
       await session.abortTransaction();
-      console.error('Approve course error:', error);
       res.status(500).json({ success: false, message: 'Failed to approve course' });
-    } finally {
-      session.endSession();
-    }
+    } finally { session.endSession(); }
   };
 
   rejectCourse = async (req: Request, res: Response): Promise<void> => {
@@ -191,13 +152,9 @@ export class AdminController {
       const { reason } = req.body;
       const adminId = (req as any).user.userId;
       const course = await Course.findById(courseId).session(session);
-      if (!course) {
-        res.status(404).json({ success: false, message: 'Course not found' });
-        return;
-      }
+      if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
       course.approvalStatus = 'rejected';
       await course.save({ session });
-      
       let approval = await CourseApproval.findOne({ course: courseId }).session(session);
       if (approval) {
         approval.status = 'rejected';
@@ -206,28 +163,22 @@ export class AdminController {
         approval.rejectionReason = reason;
         await approval.save({ session });
       }
-      
-      await this.notificationService.sendNotification(course.instructor.toString(), 'system', {
-        title: 'Course Rejected',
-        message: `Your course "${course.title}" was rejected. Reason: ${reason || 'Not specified'}`,
-        metadata: { courseId }
+      await this.notificationService.sendNotification(course.instructor.toString(), 'system', { 
+        title: 'Course Rejected', 
+        message: `Your course "${course.title}" was rejected. Reason: ${reason || 'Not specified'}`, 
+        metadata: { courseId } 
       });
-      
       await session.commitTransaction();
       res.json({ success: true, message: 'Course rejected' });
     } catch (error) {
       await session.abortTransaction();
       res.status(500).json({ success: false, message: 'Failed to reject course' });
-    } finally {
-      session.endSession();
-    }
+    } finally { session.endSession(); }
   };
 
-  // ==================== WITHDRAWAL MANAGEMENT ====================
   getPendingWithdrawals = async (req: Request, res: Response): Promise<void> => {
     try {
-      const withdrawals = await WithdrawalRequest.find({ status: 'pending' })
-        .populate('user', 'firstName lastName email');
+      const withdrawals = await WithdrawalRequest.find({ status: 'pending' }).populate('user', 'firstName lastName email');
       res.json({ success: true, data: withdrawals });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load pending withdrawals' });
@@ -238,18 +189,9 @@ export class AdminController {
     try {
       const { page = 1, limit = 20 } = req.query;
       const skip = (Number(page) - 1) * Number(limit);
-      const withdrawals = await WithdrawalRequest.find()
-        .skip(skip)
-        .limit(Number(limit))
-        .populate('user', 'firstName lastName email');
+      const withdrawals = await WithdrawalRequest.find().skip(skip).limit(Number(limit)).populate('user', 'firstName lastName email');
       const total = await WithdrawalRequest.countDocuments();
-      res.json({
-        success: true,
-        data: {
-          withdrawals,
-          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
-        },
-      });
+      res.json({ success: true, data: { withdrawals, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load withdrawals' });
     }
@@ -263,29 +205,23 @@ export class AdminController {
       const { action, reason } = req.body;
       const adminId = (req as any).user.userId;
       const withdrawal = await WithdrawalRequest.findById(withdrawalId).session(session);
-      if (!withdrawal) {
-        res.status(404).json({ success: false, message: 'Withdrawal not found' });
-        return;
-      }
-      
+      if (!withdrawal) { res.status(404).json({ success: false, message: 'Withdrawal not found' }); return; }
       if (action === 'approve') {
         withdrawal.status = 'completed';
         withdrawal.processedAt = new Date();
         withdrawal.processedBy = adminId;
         await withdrawal.save({ session });
         await Transaction.findByIdAndUpdate(withdrawal.transactionId, { status: 'completed', completedAt: new Date() }, { session });
-        
         const user = await User.findById(withdrawal.user).session(session);
         if (user) {
           user.pendingWithdrawal -= withdrawal.amount;
           user.totalWithdrawn += withdrawal.amount;
           await user.save({ session });
         }
-        
-        await this.notificationService.sendNotification(withdrawal.user.toString(), 'payment', {
-          title: 'Withdrawal Successful',
-          message: `₦${withdrawal.amount.toLocaleString()} has been sent to your bank account.`,
-          metadata: { withdrawalId }
+        await this.notificationService.sendNotification(withdrawal.user.toString(), 'payment', { 
+          title: 'Withdrawal Successful', 
+          message: `₦${withdrawal.amount.toLocaleString()} has been sent to your bank account.`, 
+          metadata: { withdrawalId } 
         });
       } else if (action === 'reject') {
         withdrawal.status = 'failed';
@@ -294,32 +230,26 @@ export class AdminController {
         withdrawal.processedBy = adminId;
         await withdrawal.save({ session });
         await Transaction.findByIdAndUpdate(withdrawal.transactionId, { status: 'failed' }, { session });
-        
         const user = await User.findById(withdrawal.user).session(session);
         if (user) {
           user.walletBalance += withdrawal.amount;
           user.pendingWithdrawal -= withdrawal.amount;
           await user.save({ session });
         }
-        
-        await this.notificationService.sendNotification(withdrawal.user.toString(), 'payment', {
-          title: 'Withdrawal Rejected',
-          message: `Your withdrawal of ₦${withdrawal.amount.toLocaleString()} was rejected. Reason: ${reason || 'Not specified'}`,
-          metadata: { withdrawalId }
+        await this.notificationService.sendNotification(withdrawal.user.toString(), 'payment', { 
+          title: 'Withdrawal Rejected', 
+          message: `Your withdrawal of ₦${withdrawal.amount.toLocaleString()} was rejected. Reason: ${reason || 'Not specified'}`, 
+          metadata: { withdrawalId } 
         });
       }
-      
       await session.commitTransaction();
       res.json({ success: true, message: `Withdrawal ${action}d` });
     } catch (error) {
       await session.abortTransaction();
       res.status(500).json({ success: false, message: 'Failed to process withdrawal' });
-    } finally {
-      session.endSession();
-    }
+    } finally { session.endSession(); }
   };
 
-  // ==================== COUPON MANAGEMENT ====================
   getCoupons = async (req: Request, res: Response): Promise<void> => {
     try {
       const coupons = await Coupon.find().sort({ createdAt: -1 });
@@ -331,12 +261,7 @@ export class AdminController {
 
   createCoupon = async (req: Request, res: Response): Promise<void> => {
     try {
-      const couponData = {
-        ...req.body,
-        description: req.body.description || 'Discount coupon',
-        validFrom: req.body.validFrom || new Date(),
-        validUntil: req.body.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-      };
+      const couponData = { ...req.body, description: req.body.description || 'Discount coupon', validFrom: req.body.validFrom || new Date(), validUntil: req.body.validUntil || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) };
       const coupon = new Coupon(couponData);
       await coupon.save();
       res.status(201).json({ success: true, data: coupon });
@@ -354,7 +279,6 @@ export class AdminController {
     }
   };
 
-  // ==================== ANNOUNCEMENT MANAGEMENT ====================
   getAnnouncements = async (req: Request, res: Response): Promise<void> => {
     try {
       const announcements = await Announcement.find().sort({ createdAt: -1 }).populate('createdBy', 'firstName lastName');
@@ -377,20 +301,13 @@ export class AdminController {
     }
   };
 
-  // ==================== AUDIT LOGS ====================
   getAuditLogs = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 50 } = req.query;
       const skip = (Number(page) - 1) * Number(limit);
       const logs = await AuditLog.find().sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).populate('user', 'firstName lastName email');
       const total = await AuditLog.countDocuments();
-      res.json({
-        success: true,
-        data: {
-          logs,
-          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) },
-        },
-      });
+      res.json({ success: true, data: { logs, pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) } } });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load audit logs' });
     }
