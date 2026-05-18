@@ -28,15 +28,21 @@ export interface IUser extends Document {
   lastActiveAt: Date;
   badges: string[];
   
+  // Referral system fields
   referralCode: string;
   referredBy?: mongoose.Types.ObjectId;
   referrals: mongoose.Types.ObjectId[];
+  referralCount: number;
   referralEarnings: number;
   referralLevel: number;
   
+  // Affiliate system fields
   affiliateLinks: Array<{
     courseId: mongoose.Types.ObjectId;
     link: string;
+    clicks: number;
+    conversions: number;
+    earnings: number;
     createdAt: Date;
   }>;
   
@@ -61,6 +67,7 @@ export interface IUser extends Document {
   roles: ('user' | 'creator' | 'admin' | 'moderator')[];
   
   isApprovedInstructor: boolean;
+  setupDone: boolean;
   
   createdAt: Date;
   updatedAt: Date;
@@ -102,12 +109,16 @@ const UserSchema = new Schema<IUser>(
     referralCode: { type: String, unique: true, sparse: true },
     referredBy: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     referrals: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    referralCount: { type: Number, default: 0 },
     referralEarnings: { type: Number, default: 0 },
     referralLevel: { type: Number, default: 0 },
     
     affiliateLinks: [{
       courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
       link: { type: String },
+      clicks: { type: Number, default: 0 },
+      conversions: { type: Number, default: 0 },
+      earnings: { type: Number, default: 0 },
       createdAt: { type: Date, default: Date.now }
     }],
     
@@ -132,28 +143,35 @@ const UserSchema = new Schema<IUser>(
     roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
     
     isApprovedInstructor: { type: Boolean, default: false },
+    setupDone: { type: Boolean, default: false },
     
     lastLoginAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
+// Indexes
 UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 UserSchema.index({ subscriptionExpiresAt: 1 });
 UserSchema.index({ xp: -1 });
+UserSchema.index({ referralCount: -1 });
+UserSchema.index({ referralEarnings: -1 });
 UserSchema.index({ roles: 1 });
 UserSchema.index({ createdAt: -1 });
 
+// Hash password before save
 UserSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
+// Compare password method
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
+// Check premium access
 UserSchema.methods.canAccessPremium = function(): boolean {
   if (this.subscriptionTier === 'free') return false;
   if (this.subscriptionStatus !== 'active') return false;
@@ -161,6 +179,7 @@ UserSchema.methods.canAccessPremium = function(): boolean {
   return true;
 };
 
+// Calculate level based on XP
 UserSchema.methods.calculateLevel = function(): number {
   return Math.floor(Math.pow(this.xp / 100, 0.5)) + 1;
 };
