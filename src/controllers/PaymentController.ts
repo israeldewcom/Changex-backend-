@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { PaymentService } from '../services/PaymentService';
-import { User, Transaction, WithdrawalRequest } from '../models';
+import { User, Transaction, WithdrawalRequest, Referral } from '../models';
 import { validationResult } from 'express-validator';
 import { logger } from '../utils/logger';
 import mongoose from 'mongoose';
@@ -214,7 +214,7 @@ export class PaymentController {
   };
 
   /**
-   * Create a subscription (Premium or Elite)
+   * Create a subscription (Premium or Elite) with referral bonus tracking
    * POST /api/v1/payments/subscribe
    */
   createSubscription = async (req: Request, res: Response): Promise<void> => {
@@ -228,13 +228,11 @@ export class PaymentController {
       const userId = (req as any).user?.userId;
       const { plan, paymentMethod, paymentReference, couponCode } = req.body;
 
-      // Validate plan
       if (!plan || !['premium', 'elite'].includes(plan)) {
         res.status(400).json({ success: false, message: 'Invalid plan. Choose premium or elite' });
         return;
       }
 
-      // Validate payment method
       if (!paymentMethod || !['wallet', 'stripe', 'paystack'].includes(paymentMethod)) {
         res.status(400).json({ success: false, message: 'Invalid payment method' });
         return;
@@ -246,7 +244,6 @@ export class PaymentController {
         return;
       }
 
-      // Check if already subscribed
       if (user.subscriptionStatus === 'active' && user.subscriptionExpiresAt && user.subscriptionExpiresAt > new Date()) {
         res.status(400).json({
           success: false,
@@ -255,8 +252,7 @@ export class PaymentController {
         return;
       }
 
-      // Calculate price with coupon if provided
-      let amount = plan === 'premium' ? 5000 : 15000; // NGN
+      let amount = plan === 'premium' ? 5000 : 15000;
       let discountApplied = 0;
       let couponId = null;
 
@@ -285,7 +281,6 @@ export class PaymentController {
         }
       }
 
-      // Process based on payment method
       if (paymentMethod === 'wallet') {
         if (user.walletBalance < amount) {
           res.status(400).json({
@@ -295,14 +290,12 @@ export class PaymentController {
           return;
         }
 
-        // Deduct from wallet
         user.walletBalance -= amount;
         user.subscriptionTier = plan;
         user.subscriptionStatus = 'active';
         user.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
         await user.save();
 
-        // Create transaction record
         const transaction = new Transaction({
           user: userId,
           type: 'subscription',
@@ -316,6 +309,9 @@ export class PaymentController {
           completedAt: new Date(),
         });
         await transaction.save();
+
+        // ✅ Process referral upgrade bonus if user was referred
+        await this.processReferralUpgradeBonus(userId, amount);
 
         res.json({
           success: true,
@@ -333,22 +329,12 @@ export class PaymentController {
           userId,
           amount,
           'NGN',
-          {
-            type: 'subscription',
-            plan,
-            couponId: couponId?.toString(),
-            discountApplied,
-          }
+          { type: 'subscription', plan, couponId: couponId?.toString(), discountApplied }
         );
 
         res.json({
           success: true,
-          data: {
-            clientSecret,
-            paymentIntentId,
-            amount,
-            plan,
-          },
+          data: { clientSecret, paymentIntentId, amount, plan },
           requiresPayment: true,
           message: 'Complete payment to activate your subscription',
         });
@@ -357,21 +343,12 @@ export class PaymentController {
           userId,
           amount,
           user.email,
-          {
-            type: 'subscription',
-            plan,
-            couponId: couponId?.toString(),
-            discountApplied,
-          }
+          { type: 'subscription', plan, couponId: couponId?.toString(), discountApplied }
         );
 
         res.json({
           success: true,
-          data: {
-            paymentUrl,
-            amount,
-            plan,
-          },
+          data: { paymentUrl, amount, plan },
           requiresPayment: true,
           message: 'Complete payment to activate your subscription',
         });
@@ -381,6 +358,54 @@ export class PaymentController {
       res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
   };
+
+  /**
+   * Process referral upgrade bonus when a referred user subscribes
+   */
+  private async processReferralUpgradeBonus(userId: string, amountPaid: number): Promise<void> {
+    try {
+      const user = await User.findById(userId);
+      if (!user || !user.referredBy) return;
+
+      const referral = await Referral.findOne({ referred: userId, status: 'pending' });
+      if (!referral) return;
+
+      // Mark referral as active/converted
+      referral.status = 'active';
+      referral.firstPurchaseAt = new Date();
+      await referral.save();
+
+      // Calculate bonus (e.g., 20% of first payment or fixed ₦500)
+      const bonusAmount = Math.min(amountPaid * 0.2, 5000); // 20% up to ₦5,000
+      const referrer = await User.findById(referral.referrer);
+      
+      if (referrer) {
+        referrer.walletBalance += bonusAmount;
+        referrer.referralEarnings += bonusAmount;
+        referrer.referralCount = (referrer.referralCount || 0) + 1;
+        await referrer.save();
+
+        // Create transaction record for the bonus
+        const transaction = new Transaction({
+          user: referrer._id,
+          type: 'commission',
+          subtype: 'referral',
+          amount: bonusAmount,
+          currency: 'NGN',
+          status: 'completed',
+          description: `Referral bonus for user upgrade (${user.firstName} ${user.lastName})`,
+          reference: `REF_BONUS_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          metadata: { referredUserId: userId, referralLevel: referral.level, amountPaid },
+          completedAt: new Date(),
+        });
+        await transaction.save();
+
+        logger.info(`Referral bonus of ₦${bonusAmount} awarded to ${referrer.email} for referring ${user.email}`);
+      }
+    } catch (error) {
+      logger.error('Error processing referral upgrade bonus:', error);
+    }
+  }
 
   /**
    * Verify subscription payment (webhook alternative)
@@ -394,7 +419,6 @@ export class PaymentController {
         return;
       }
 
-      // Verify with Paystack
       const verification = await this.paymentService.verifyPaystackPayment(reference as string);
 
       if (verification.status === 'success') {
@@ -407,7 +431,6 @@ export class PaymentController {
           user.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
           await user.save();
 
-          // Create transaction
           const transaction = new Transaction({
             user: userId,
             type: 'subscription',
@@ -422,6 +445,9 @@ export class PaymentController {
             completedAt: new Date(),
           });
           await transaction.save();
+
+          // ✅ Process referral upgrade bonus after successful payment verification
+          await this.processReferralUpgradeBonus(userId, verification.amount);
         }
 
         res.json({
