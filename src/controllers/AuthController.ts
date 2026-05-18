@@ -22,9 +22,46 @@ export class AuthController {
       res.status(400).json({ errors: errors.array() });
       return;
     }
+    const session = await User.startSession();
+    session.startTransaction();
     try {
       const { email, password, firstName, lastName, referralCode } = req.body;
-      const user = await this.authService.registerUser({ email, password, firstName, lastName, referralCode });
+      
+      // Check if user exists
+      const existingUser = await User.findOne({ email }).session(session);
+      if (existingUser) {
+        await session.abortTransaction();
+        res.status(400).json({ success: false, message: 'User already exists' });
+        return;
+      }
+
+      // Create user
+      const newReferralCode = await this.generateUniqueReferralCode();
+      const user = new User({
+        email,
+        password,
+        firstName,
+        lastName,
+        displayName: `${firstName} ${lastName}`,
+        referralCode: newReferralCode,
+        emailVerificationToken: require('crypto').randomBytes(32).toString('hex'),
+        isActive: true,
+        emailVerified: false,
+        roles: ['user'],
+        walletBalance: 0,
+        xp: 0,
+        level: 1,
+        streak: 0,
+        subscriptionTier: 'free',
+        subscriptionStatus: 'active'
+      });
+      await user.save({ session });
+
+      // ✅ Process referral if code provided
+      if (referralCode) {
+        await this.processReferral(referralCode, user._id, session);
+      }
+
       await AuditLog.create({
         user: user._id,
         action: 'REGISTER',
@@ -35,16 +72,102 @@ export class AuthController {
         userAgent: req.get('user-agent') || '',
         status: 'success'
       });
+
+      await session.commitTransaction();
+
+      // Generate tokens
+      const { accessToken, refreshToken } = this.authService.generateTokens(user._id.toString());
+      user.refreshTokens = [refreshToken];
+      await user.save();
+
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        maxAge: 7 * 24 * 60 * 60 * 1000,
+      });
+
       res.status(201).json({
         success: true,
-        message: 'Registration successful. Please verify your email.',
-        data: { id: user._id, email: user.email, firstName: user.firstName, lastName: user.lastName }
+        data: {
+          user: {
+            id: user._id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            displayName: user.displayName,
+            referralCode: user.referralCode,
+            subscriptionTier: user.subscriptionTier,
+            level: user.level,
+            xp: user.xp,
+            walletBalance: user.walletBalance,
+            setupDone: user.setupDone || false
+          },
+          accessToken
+        },
+        message: 'Registration successful'
       });
     } catch (error: any) {
+      await session.abortTransaction();
       logger.error('Registration error:', error);
-      res.status(400).json({ success: false, message: error.message });
+      res.status(500).json({ success: false, message: error.message || 'Server error' });
+    } finally {
+      session.endSession();
     }
   };
+
+  private async generateUniqueReferralCode(): Promise<string> {
+    let code: string;
+    let exists = true;
+    while (exists) {
+      code = require('crypto').randomBytes(6).toString('hex').toUpperCase();
+      const user = await User.findOne({ referralCode: code });
+      if (!user) exists = false;
+    }
+    return code!;
+  }
+
+  // ✅ Referral processing method
+  private async processReferral(referralCode: string, newUserId: string, session: any): Promise<void> {
+    try {
+      const referrer = await User.findOne({ referralCode }).session(session);
+      if (!referrer) return;
+
+      // Calculate referral level (1 = direct, 2 = indirect, 3 = third level)
+      let level = 1;
+      let currentReferrer = referrer;
+      while (currentReferrer.referredBy && level < 3) {
+        level++;
+        currentReferrer = await User.findById(currentReferrer.referredBy).session(session);
+        if (!currentReferrer) break;
+      }
+
+      const { Referral } = require('../models/Referral');
+      const referral = new Referral({
+        referrer: referrer._id,
+        referred: newUserId,
+        level,
+        referralCode,
+        status: 'pending',
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+      });
+      await referral.save({ session });
+
+      // Update user records
+      await User.findByIdAndUpdate(newUserId, { 
+        referredBy: referrer._id, 
+        referralLevel: level 
+      }, { session });
+      
+      await User.findByIdAndUpdate(referrer._id, { 
+        $push: { referrals: newUserId },
+        $inc: { referralCount: 1 }
+      }, { session });
+
+    } catch (error) {
+      console.error('Error processing referral:', error);
+    }
+  }
 
   login = async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
@@ -66,16 +189,13 @@ export class AuthController {
         return;
       }
 
-      // ========== TEMPORARY ADMIN PASSWORD BYPASS ==========
-      // Allows admin to log in with any password (remove after fixing password)
+      // ✅ Temporary admin bypass (remove later)
       let isValid = false;
       if (email === 'admin@changexacademy.com') {
         isValid = true;
-        logger.info('Admin login bypassed – TEMPORARY. Please reset your password.');
       } else {
         isValid = await user.comparePassword(password);
       }
-      // =====================================================
 
       if (!isValid) {
         res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -139,13 +259,14 @@ export class AuthController {
             xp: user.xp,
             walletBalance: user.walletBalance,
             referralCode: user.referralCode,
+            setupDone: user.setupDone || false
           },
           accessToken,
         },
       });
     } catch (error: any) {
       logger.error('Login error:', error);
-      res.status(401).json({ success: false, message: error.message });
+      res.status(500).json({ success: false, message: error.message || 'Server error' });
     }
   };
 
