@@ -18,6 +18,7 @@ export class CourseController {
     this.notificationService = NotificationService.getInstance();
   }
 
+  // ==================== PUBLIC ROUTES ====================
   getAllCourses = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, category, level, priceMin, priceMax, search, sortBy = 'createdAt', sortOrder = 'desc', featured, instructor } = req.query;
@@ -49,21 +50,43 @@ export class CourseController {
   getCourseById = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const course = await Course.findById(id).populate('instructor', 'firstName lastName displayName avatar bio isApprovedInstructor').populate('prerequisites', 'title slug thumbnail');
-      if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
-      res.json({ success: true, data: course });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+      const course = await Course.findById(id)
+        .populate('instructor', 'firstName lastName displayName avatar bio isApprovedInstructor')
+        .populate('prerequisites', 'title slug thumbnail');
+      if (!course) {
+        res.status(404).json({ success: false, message: 'Course not found' });
+        return;
+      }
+      // Ensure lessons have all fields for frontend
+      const sanitizedCourse = course.toObject();
+      sanitizedCourse.lessons = sanitizedCourse.lessons?.map(lesson => ({
+        ...lesson,
+        content: lesson.content || '',
+        description: lesson.description || lesson.content?.substring(0, 200) || 'No description available',
+        videoUrl: lesson.videoUrl || '',
+        resources: lesson.resources || []
+      })) || [];
+      res.json({ success: true, data: sanitizedCourse });
+    } catch (error) {
+      logger.error('Get course by ID error:', error);
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
   };
 
   getCourseReviews = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
-      const reviews = await Review.find({ course: id, isApproved: true }).populate('user', 'firstName lastName displayName avatar').sort({ createdAt: -1 });
+      const reviews = await Review.find({ course: id, isApproved: true })
+        .populate('user', 'firstName lastName displayName avatar')
+        .sort({ createdAt: -1 });
       const averageRating = reviews.reduce((sum, r) => sum + r.rating, 0) / (reviews.length || 1);
       res.json({ success: true, data: { reviews, averageRating, total: reviews.length } });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
   };
 
+  // ==================== COURSE CREATION & EDITING ====================
   createCourse = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
@@ -73,8 +96,8 @@ export class CourseController {
         return;
       }
 
-      const isAdmin = user.roles.includes('admin');
-      const isApprovedInstructor = user.roles.includes('creator') && user.isApprovedInstructor === true;
+      const isAdmin = user.roles?.includes('admin');
+      const isApprovedInstructor = user.roles?.includes('creator') && user.isApprovedInstructor === true;
       const isPremiumActive = (user.subscriptionTier === 'premium' || user.subscriptionTier === 'elite') &&
                               user.subscriptionStatus === 'active' &&
                               (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
@@ -92,14 +115,33 @@ export class CourseController {
         description = 'No description provided',
         longDescription = 'No description provided',
         lessons = [],
+        quizzes = [],
         price = 0,
+        salePrice = 0,
         category = 'Web Development',
-        level = 'Beginner',
+        level = 'beginner',
         thumbnail = '📚',
         subtitle = '',
         promoVideo = '',
-        language = 'English'
+        language = 'English',
+        hasAffiliate = false,
+        affiliatePercent = 15,
+        affiliateDescription = ''
       } = req.body;
+
+      // Ensure each lesson has required fields
+      const sanitizedLessons = (lessons || []).map((lesson: any, index: number) => ({
+        title: lesson.title || `Lesson ${index + 1}`,
+        description: lesson.description || '',
+        type: lesson.type || 'text',
+        content: lesson.content || '',
+        videoUrl: lesson.videoUrl || '',
+        duration: lesson.duration || 10,
+        order: lesson.order || index + 1,
+        xpReward: lesson.xpReward || 50,
+        isFree: lesson.isFree || false,
+        resources: lesson.resources || []
+      }));
 
       const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       const courseData = {
@@ -109,17 +151,23 @@ export class CourseController {
         longDescription,
         slug,
         instructor: userId,
-        lessons: Array.isArray(lessons) ? lessons : [],
+        lessons: sanitizedLessons,
+        quizzes: quizzes || [],
         price: Number(price) || 0,
+        discountPrice: Number(salePrice) || 0,
         category,
-        level,
+        level: level.toLowerCase(),
         thumbnail,
-        promoVideo,
+        previewVideo: promoVideo,
         language,
         published: false,
         approvalStatus: 'pending',
-        totalLessons: Array.isArray(lessons) ? lessons.length : 0
+        totalLessons: sanitizedLessons.length,
+        hasAffiliate,
+        affiliatePercent,
+        affiliateDescription
       };
+      
       const course = new Course(courseData);
       await course.save();
       res.status(201).json({ success: true, data: course, message: 'Course draft saved' });
@@ -134,52 +182,109 @@ export class CourseController {
       const { id } = req.params;
       const userId = (req as any).user?.userId;
       const course = await Course.findById(id);
-      if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
-      if (course.instructor.toString() !== userId && !(req as any).user?.roles.includes('admin')) {
+      if (!course) {
+        res.status(404).json({ success: false, message: 'Course not found' });
+        return;
+      }
+      if (course.instructor.toString() !== userId && !(req as any).user?.roles?.includes('admin')) {
         res.status(403).json({ success: false, message: 'Not authorized' });
         return;
       }
+      
       const updateData = req.body;
+      // Sanitize lessons if present
+      if (updateData.lessons) {
+        updateData.lessons = updateData.lessons.map((lesson: any, index: number) => ({
+          ...lesson,
+          order: lesson.order || index + 1,
+          content: lesson.content || '',
+          description: lesson.description || ''
+        }));
+        updateData.totalLessons = updateData.lessons.length;
+      }
       if (updateData.title) updateData.slug = updateData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      if (updateData.lessons) updateData.totalLessons = updateData.lessons.length;
+      if (updateData.level) updateData.level = updateData.level.toLowerCase();
       updateData.lastUpdated = new Date();
       updateData.version = (course.version || 1) + 1;
+      
       const updatedCourse = await Course.findByIdAndUpdate(id, updateData, { new: true });
       res.json({ success: true, data: updatedCourse, message: 'Course updated successfully' });
     } catch (error) {
+      logger.error('Update course error:', error);
       res.status(500).json({ success: false, message: 'Server error' });
     }
   };
 
+  // ==================== ENROLLMENT & PROGRESS ====================
   enrollCourse = async (req: Request, res: Response): Promise<void> => {
     try {
       const { courseId } = req.params;
       const userId = (req as any).user?.userId;
       const { paymentMethod = 'wallet' } = req.body;
+      
       const course = await Course.findById(courseId);
-      if (!course) { res.status(404).json({ success: false, message: 'Course not found' }); return; }
-      if (course.approvalStatus !== 'approved') { res.status(403).json({ success: false, message: 'Course not yet approved' }); return; }
+      if (!course) {
+        res.status(404).json({ success: false, message: 'Course not found' });
+        return;
+      }
+      if (course.approvalStatus !== 'approved') {
+        res.status(403).json({ success: false, message: 'Course not yet approved' });
+        return;
+      }
+      
       const existingEnrollment = await Enrollment.findOne({ user: userId, course: courseId });
-      if (existingEnrollment) { res.status(400).json({ success: false, message: 'Already enrolled' }); return; }
-      if (course.price === 0) {
-        const enrollment = await Enrollment.create({ user: userId, course: courseId, paymentMethod: 'free', amountPaid: 0, currency: course.currency });
+      if (existingEnrollment) {
+        res.status(400).json({ success: false, message: 'Already enrolled' });
+        return;
+      }
+      
+      const price = course.discountPrice || course.price;
+      if (price === 0) {
+        const enrollment = await Enrollment.create({
+          user: userId,
+          course: courseId,
+          paymentMethod: 'free',
+          amountPaid: 0,
+          currency: course.currency
+        });
         await User.findByIdAndUpdate(userId, { $addToSet: { coursesEnrolled: courseId } });
         await this.earningEngine.addXP(userId, course.xpReward, null as any);
         res.json({ success: true, data: enrollment, message: 'Successfully enrolled in course' });
         return;
       }
+      
       if (paymentMethod === 'wallet') {
         const enrollment = await this.paymentService.processCoursePurchase(userId, courseId, 'wallet');
         res.json({ success: true, data: enrollment, message: 'Successfully enrolled in course' });
       } else if (paymentMethod === 'stripe') {
-        const { clientSecret, paymentIntentId } = await this.paymentService.createStripePaymentIntent(userId, course.price, course.currency, { type: 'course_purchase', courseId: course._id.toString(), userId });
+        const { clientSecret, paymentIntentId } = await this.paymentService.createStripePaymentIntent(
+          userId, price, course.currency,
+          { type: 'course_purchase', courseId: course._id.toString(), userId }
+        );
         res.json({ success: true, data: { clientSecret, paymentIntentId }, requiresPayment: true });
       } else if (paymentMethod === 'paystack') {
         const user = await User.findById(userId);
-        const paymentUrl = await this.paymentService.createPaystackPaymentUrl(userId, course.price, user!.email, { type: 'course_purchase', courseId: course._id.toString(), userId });
+        const paymentUrl = await this.paymentService.createPaystackPaymentUrl(
+          userId, price, user!.email,
+          { type: 'course_purchase', courseId: course._id.toString(), userId }
+        );
         res.json({ success: true, data: { paymentUrl }, requiresPayment: true });
       }
-    } catch (error: any) { res.status(500).json({ success: false, message: error.message || 'Server error' }); }
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message || 'Server error' });
+    }
+  };
+
+  getMyCourses = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = (req as any).user?.userId;
+      const enrollments = await Enrollment.find({ user: userId })
+        .populate('course')
+        .sort({ enrolledAt: -1 });
+      res.json({ success: true, data: enrollments });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
   };
 
   getCourseProgress = async (req: Request, res: Response): Promise<void> => {
@@ -187,27 +292,53 @@ export class CourseController {
       const { courseId } = req.params;
       const userId = (req as any).user?.userId;
       const enrollment = await Enrollment.findOne({ user: userId, course: courseId }).populate('course');
-      if (!enrollment) { res.status(404).json({ success: false, message: 'Enrollment not found' }); return; }
-      res.json({ success: true, data: { progress: enrollment.progress, lessonsCompleted: enrollment.lessonsCompleted.length, totalLessons: (enrollment.course as any).totalLessons, quizzesCompleted: enrollment.quizzesCompleted.length, quizScores: enrollment.quizScores, lastAccessedAt: enrollment.lastAccessedAt, completedAt: enrollment.completedAt, certificateIssued: enrollment.certificateIssued } });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+      if (!enrollment) {
+        res.status(404).json({ success: false, message: 'Enrollment not found' });
+        return;
+      }
+      res.json({
+        success: true,
+        data: {
+          progress: enrollment.progress,
+          lessonsCompleted: enrollment.lessonsCompleted.length,
+          totalLessons: (enrollment.course as any)?.totalLessons || 0,
+          quizzesCompleted: enrollment.quizzesCompleted.length,
+          quizScores: enrollment.quizScores,
+          lastAccessedAt: enrollment.lastAccessedAt,
+          completedAt: enrollment.completedAt,
+          certificateIssued: enrollment.certificateIssued
+        }
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
   };
 
   updateLessonProgress = async (req: Request, res: Response): Promise<void> => {
     try {
       const { courseId, lessonId } = req.params;
       const userId = (req as any).user?.userId;
-      const { completed, timeSpent } = req.body;
+      const { completed } = req.body;
+      
       const enrollment = await Enrollment.findOne({ user: userId, course: courseId });
-      if (!enrollment) { res.status(404).json({ success: false, message: 'Enrollment not found' }); return; }
+      if (!enrollment) {
+        res.status(404).json({ success: false, message: 'Enrollment not found' });
+        return;
+      }
+      
       if (completed && !enrollment.lessonsCompleted.includes(lessonId as any)) {
         enrollment.lessonsCompleted.push(lessonId as any);
         const course = await Course.findById(courseId);
-        if (course) enrollment.progress = (enrollment.lessonsCompleted.length / course.totalLessons) * 100;
+        if (course) {
+          enrollment.progress = (enrollment.lessonsCompleted.length / course.totalLessons) * 100;
+        }
         await this.earningEngine.addLessonCompletionReward(userId, lessonId, courseId, 50, 10);
       }
+      
       enrollment.lastAccessedAt = new Date();
       enrollment.lastLessonId = lessonId as any;
       await enrollment.save();
+      
       const course = await Course.findById(courseId);
       if (course && enrollment.lessonsCompleted.length === course.totalLessons) {
         enrollment.status = 'completed';
@@ -215,53 +346,80 @@ export class CourseController {
         await enrollment.save();
         const certificate = await this.generateCertificate(userId, courseId, enrollment._id);
         await this.earningEngine.addCourseCompletionReward(userId, courseId, course.xpReward, 100);
-        res.json({ success: true, data: { progress: enrollment.progress, completed: true, certificate }, message: 'Congratulations! You completed the course!' });
+        res.json({
+          success: true,
+          data: { progress: enrollment.progress, completed: true, certificate },
+          message: 'Congratulations! You completed the course!'
+        });
         return;
       }
       res.json({ success: true, data: { progress: enrollment.progress, completed: false } });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
   };
 
-  getMyCourses = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = (req as any).user?.userId;
-      const enrollments = await Enrollment.find({ user: userId }).populate('course').sort({ enrolledAt: -1 });
-      res.json({ success: true, data: enrollments });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
-  };
-
+  // ==================== RATINGS & REVIEWS ====================
   rateCourse = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
       const userId = (req as any).user.userId;
       const { rating, review } = req.body;
-      if (!rating || rating < 1 || rating > 5) { res.status(400).json({ success: false, message: 'Rating must be between 1 and 5' }); return; }
+      
+      if (!rating || rating < 1 || rating > 5) {
+        res.status(400).json({ success: false, message: 'Rating must be between 1 and 5' });
+        return;
+      }
+      
       const enrollment = await Enrollment.findOne({ user: userId, course: id, status: 'completed' });
-      if (!enrollment) { res.status(403).json({ success: false, message: 'You must complete the course to rate it' }); return; }
+      if (!enrollment) {
+        res.status(403).json({ success: false, message: 'You must complete the course to rate it' });
+        return;
+      }
+      
       const existingReview = await Review.findOne({ user: userId, course: id });
       if (existingReview) {
         existingReview.rating = rating;
         existingReview.content = review || existingReview.content;
         await existingReview.save();
       } else {
-        await Review.create({ user: userId, course: id, rating, title: 'Course review', content: review || '', isVerifiedPurchase: true, isApproved: true });
+        await Review.create({
+          user: userId,
+          course: id,
+          rating,
+          title: 'Course review',
+          content: review || '',
+          isVerifiedPurchase: true,
+          isApproved: true
+        });
       }
+      
       const allReviews = await Review.find({ course: id });
       const avgRating = allReviews.reduce((sum, r) => sum + r.rating, 0) / (allReviews.length || 1);
       await Course.findByIdAndUpdate(id, { rating: avgRating, reviewCount: allReviews.length });
       res.json({ success: true, message: 'Rating submitted' });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
   };
 
+  // ==================== STUDENT Q&A ====================
   getCourseQuestions = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
       const userId = (req as any).user.userId;
       const enrollment = await Enrollment.findOne({ user: userId, course: id });
-      if (!enrollment) { res.status(403).json({ success: false, message: 'You must be enrolled to see Q&A' }); return; }
-      const questions = await CourseQuestion.find({ course: id }).populate('user', 'firstName lastName avatar').populate({ path: 'answers', populate: { path: 'user', select: 'firstName lastName avatar roles' } });
+      if (!enrollment) {
+        res.status(403).json({ success: false, message: 'You must be enrolled to see Q&A' });
+        return;
+      }
+      const questions = await CourseQuestion.find({ course: id })
+        .populate('user', 'firstName lastName avatar')
+        .populate({ path: 'answers', populate: { path: 'user', select: 'firstName lastName avatar roles' } });
       res.json({ success: true, data: questions });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
   };
 
   askQuestion = async (req: Request, res: Response): Promise<void> => {
@@ -269,26 +427,57 @@ export class CourseController {
       const { id } = req.params;
       const userId = (req as any).user.userId;
       const { lessonId, question } = req.body;
-      if (!question || question.length < 10) { res.status(400).json({ success: false, message: 'Question must be at least 10 characters' }); return; }
+      
+      if (!question || question.length < 10) {
+        res.status(400).json({ success: false, message: 'Question must be at least 10 characters' });
+        return;
+      }
+      
       const enrollment = await Enrollment.findOne({ user: userId, course: id });
-      if (!enrollment) { res.status(403).json({ success: false, message: 'You must be enrolled to ask a question' }); return; }
+      if (!enrollment) {
+        res.status(403).json({ success: false, message: 'You must be enrolled to ask a question' });
+        return;
+      }
+      
       const newQuestion = new CourseQuestion({ course: id, lessonId, user: userId, question });
       await newQuestion.save();
+      
       const course = await Course.findById(id).populate('instructor', '_id');
       if (course && course.instructor) {
-        await this.notificationService.sendNotification(course.instructor._id.toString(), 'course', { title: 'New student question', message: `New question: ${question.substring(0, 80)}...`, metadata: { courseId: id, questionId: newQuestion._id } });
+        await this.notificationService.sendNotification(course.instructor._id.toString(), 'course', {
+          title: 'New student question',
+          message: `New question: ${question.substring(0, 80)}...`,
+          metadata: { courseId: id, questionId: newQuestion._id }
+        });
       }
       res.status(201).json({ success: true, data: newQuestion });
-    } catch (error) { res.status(500).json({ success: false, message: 'Server error' }); }
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
   };
 
+  // ==================== HELPER ====================
   private async generateCertificate(userId: string, courseId: string, enrollmentId: mongoose.Types.ObjectId): Promise<any> {
     const user = await User.findById(userId);
     const course = await Course.findById(courseId);
     if (!user || !course) throw new Error('User or course not found');
     const certificateId = `CHX-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-certificate/${certificateId}`;
-    const certificate = new Certificate({ user: userId, course: courseId, enrollment: enrollmentId, certificateId, verificationUrl, pdfUrl: `${process.env.FRONTEND_URL}/certificates/${certificateId}.pdf`, metadata: { userName: `${user.firstName} ${user.lastName}`, courseName: course.title, completionScore: 100, duration: course.totalDuration, instructorName: course.instructor.toString() } });
+    const certificate = new Certificate({
+      user: userId,
+      course: courseId,
+      enrollment: enrollmentId,
+      certificateId,
+      verificationUrl,
+      pdfUrl: `${process.env.FRONTEND_URL}/certificates/${certificateId}.pdf`,
+      metadata: {
+        userName: `${user.firstName} ${user.lastName}`,
+        courseName: course.title,
+        completionScore: 100,
+        duration: course.totalDuration,
+        instructorName: course.instructor.toString()
+      }
+    });
     await certificate.save();
     await Enrollment.findByIdAndUpdate(enrollmentId, { certificateIssued: true, certificateId: certificate._id });
     await User.findByIdAndUpdate(userId, { $addToSet: { certificatesEarned: certificate._id } });
