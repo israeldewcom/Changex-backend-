@@ -1,23 +1,19 @@
+// ============================================
+// FILE: src/models/Course.ts (existing + added hasAffiliate, affiliatePercent)
+// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
-
-export interface ILessonResource extends Document {
-  title: string;
-  url: string;
-  type: 'pdf' | 'zip' | 'link' | 'video' | 'other';
-}
 
 export interface ILesson extends Document {
   title: string;
   description: string;
   type: 'video' | 'text' | 'quiz' | 'code' | 'assignment';
-  content: string;           // HTML/text content from Quill editor
+  content: string;
   videoUrl?: string;
   duration: number;
   order: number;
   xpReward: number;
   isFree: boolean;
-  resources: ILessonResource[];
-  completed?: boolean;       // For frontend tracking
+  resources: Array<{ title: string; url: string }>;
 }
 
 export interface IQuiz extends Document {
@@ -79,30 +75,26 @@ export interface ICourse extends Document {
   averageRating: number;
   approvalStatus: 'pending' | 'approved' | 'rejected';
   submittedAt?: Date;
-  hasAffiliate: boolean;
-  affiliatePercent: number;
-  affiliateDescription?: string;
+  hasAffiliate: boolean;           // ADDED
+  affiliatePercent: number;        // ADDED
   createdAt: Date;
   updatedAt: Date;
 }
 
-const LessonResourceSchema = new Schema<ILessonResource>({
-  title: { type: String, required: true },
-  url: { type: String, required: true },
-  type: { type: String, enum: ['pdf', 'zip', 'link', 'video', 'other'], default: 'link' }
-});
-
 const LessonSchema = new Schema<ILesson>({
   title: { type: String, required: true },
-  description: { type: String, default: '' },
-  type: { type: String, enum: ['video', 'text', 'quiz', 'code', 'assignment'], required: true, default: 'text' },
-  content: { type: String, default: '' },        // ✅ Critical: stores lesson HTML content
-  videoUrl: { type: String, default: '' },
-  duration: { type: Number, default: 10 },
+  description: { type: String, default: 'Lesson description' },
+  type: { type: String, enum: ['video', 'text', 'quiz', 'code', 'assignment'], required: true },
+  content: { type: String, default: '' },
+  videoUrl: { type: String },
+  duration: { type: Number, required: true },
   order: { type: Number, required: true },
   xpReward: { type: Number, default: 50 },
   isFree: { type: Boolean, default: false },
-  resources: [LessonResourceSchema],
+  resources: [{
+    title: { type: String, required: true },
+    url: { type: String, required: true },
+  }],
 });
 
 const QuizQuestionSchema = new Schema({
@@ -129,16 +121,11 @@ const CourseSchema = new Schema<ICourse>(
     longDescription: { type: String, required: true },
     category: { type: String, required: true, index: true },
     subcategory: { type: String },
-    level: {
-      type: String,
-      enum: ['beginner', 'intermediate', 'advanced'],
-      required: true,
-      set: (val: string) => val?.toLowerCase() || 'beginner'
-    },
-    price: { type: Number, required: true, min: 0, default: 0 },
+    level: { type: String, enum: ['beginner', 'intermediate', 'advanced'], required: true },
+    price: { type: Number, required: true, min: 0 },
     discountPrice: { type: Number, min: 0 },
     currency: { type: String, default: 'NGN' },
-    thumbnail: { type: String, required: true, default: '📚' },
+    thumbnail: { type: String, required: true },
     previewVideo: { type: String },
     instructor: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     lessons: [LessonSchema],
@@ -172,9 +159,8 @@ const CourseSchema = new Schema<ICourse>(
     averageRating: { type: Number, default: 0 },
     approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     submittedAt: { type: Date },
-    hasAffiliate: { type: Boolean, default: false },
-    affiliatePercent: { type: Number, default: 15, min: 5, max: 50 },
-    affiliateDescription: { type: String },
+    hasAffiliate: { type: Boolean, default: false },      // ADDED
+    affiliatePercent: { type: Number, default: 15 },      // ADDED
   },
   { timestamps: true }
 );
@@ -184,12 +170,12 @@ CourseSchema.index({ category: 1, level: 1, price: 1 });
 CourseSchema.index({ enrollmentCount: -1 });
 CourseSchema.index({ rating: -1 });
 CourseSchema.index({ createdAt: -1 });
-CourseSchema.index({ approvalStatus: 1, published: 1 });
+CourseSchema.index({ hasAffiliate: 1 });
 
 CourseSchema.pre('save', function(next) {
-  this.totalLessons = this.lessons?.length || 0;
-  this.totalQuizzes = this.quizzes?.length || 0;
-  this.totalDuration = this.lessons?.reduce((sum, lesson) => sum + (lesson.duration || 0), 0) || 0;
+  this.totalLessons = this.lessons.length;
+  this.totalQuizzes = this.quizzes.length;
+  this.totalDuration = this.lessons.reduce((sum, lesson) => sum + lesson.duration, 0);
   next();
 });
 
