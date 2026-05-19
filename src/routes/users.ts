@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/routes/users.ts (existing + affiliate endpoint)
+// ============================================
 import { Router } from 'express';
 import multer from 'multer';
 import { UserController } from '../controllers/UserController';
@@ -10,13 +13,12 @@ const userController = new UserController();
 const upload = multer({ storage: multer.memoryStorage() });
 
 router.use(authenticate);
-
 router.get('/profile', userController.getProfile);
 router.put('/profile', validateProfileUpdate, auditLog('UPDATE_PROFILE', 'User'), userController.updateProfile);
 router.post('/avatar', upload.single('avatar'), auditLog('UPLOAD_AVATAR', 'User'), userController.uploadAvatar);
 router.get('/wallet', userController.getWallet);
 router.get('/referrals', userController.getReferralInfo);
-router.post('/referrals/affiliate', userController.createAffiliateLink);  // ✅ Accept affiliate offer
+router.post('/referrals/affiliate', userController.createAffiliateLink);   // ADDED
 router.get('/notifications', validatePagination, userController.getNotifications);
 router.put('/notifications/:notificationId/read', userController.markNotificationRead);
 router.put('/notifications/read-all', userController.markAllNotificationsRead);
