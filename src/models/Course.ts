@@ -1,16 +1,23 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+export interface ILessonResource extends Document {
+  title: string;
+  url: string;
+  type: 'pdf' | 'zip' | 'link' | 'video' | 'other';
+}
+
 export interface ILesson extends Document {
   title: string;
   description: string;
   type: 'video' | 'text' | 'quiz' | 'code' | 'assignment';
-  content: string;
+  content: string;           // HTML/text content from Quill editor
   videoUrl?: string;
   duration: number;
   order: number;
   xpReward: number;
   isFree: boolean;
-  resources: Array<{ title: string; url: string; type: 'pdf' | 'zip' | 'link' | 'other' }>;
+  resources: ILessonResource[];
+  completed?: boolean;       // For frontend tracking
 }
 
 export interface IQuiz extends Document {
@@ -79,19 +86,19 @@ export interface ICourse extends Document {
   updatedAt: Date;
 }
 
-const LessonResourceSchema = new Schema({
+const LessonResourceSchema = new Schema<ILessonResource>({
   title: { type: String, required: true },
   url: { type: String, required: true },
-  type: { type: String, enum: ['pdf', 'zip', 'link', 'other'], default: 'link' }
+  type: { type: String, enum: ['pdf', 'zip', 'link', 'video', 'other'], default: 'link' }
 });
 
 const LessonSchema = new Schema<ILesson>({
   title: { type: String, required: true },
-  description: { type: String, default: 'Lesson description' },
-  type: { type: String, enum: ['video', 'text', 'quiz', 'code', 'assignment'], required: true },
-  content: { type: String, default: '' },
+  description: { type: String, default: '' },
+  type: { type: String, enum: ['video', 'text', 'quiz', 'code', 'assignment'], required: true, default: 'text' },
+  content: { type: String, default: '' },        // ✅ Critical: stores lesson HTML content
   videoUrl: { type: String, default: '' },
-  duration: { type: Number, required: true },
+  duration: { type: Number, default: 10 },
   order: { type: Number, required: true },
   xpReward: { type: Number, default: 50 },
   isFree: { type: Boolean, default: false },
@@ -126,12 +133,12 @@ const CourseSchema = new Schema<ICourse>(
       type: String,
       enum: ['beginner', 'intermediate', 'advanced'],
       required: true,
-      set: (val: string) => val.toLowerCase()
+      set: (val: string) => val?.toLowerCase() || 'beginner'
     },
-    price: { type: Number, required: true, min: 0 },
+    price: { type: Number, required: true, min: 0, default: 0 },
     discountPrice: { type: Number, min: 0 },
     currency: { type: String, default: 'NGN' },
-    thumbnail: { type: String, required: true },
+    thumbnail: { type: String, required: true, default: '📚' },
     previewVideo: { type: String },
     instructor: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     lessons: [LessonSchema],
@@ -177,12 +184,12 @@ CourseSchema.index({ category: 1, level: 1, price: 1 });
 CourseSchema.index({ enrollmentCount: -1 });
 CourseSchema.index({ rating: -1 });
 CourseSchema.index({ createdAt: -1 });
-CourseSchema.index({ hasAffiliate: 1, affiliatePercent: 1 });
+CourseSchema.index({ approvalStatus: 1, published: 1 });
 
 CourseSchema.pre('save', function(next) {
-  this.totalLessons = this.lessons.length;
-  this.totalQuizzes = this.quizzes.length;
-  this.totalDuration = this.lessons.reduce((sum, lesson) => sum + lesson.duration, 0);
+  this.totalLessons = this.lessons?.length || 0;
+  this.totalQuizzes = this.quizzes?.length || 0;
+  this.totalDuration = this.lessons?.reduce((sum, lesson) => sum + (lesson.duration || 0), 0) || 0;
   next();
 });
 
