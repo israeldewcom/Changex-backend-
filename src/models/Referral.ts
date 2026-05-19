@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/models/Referral.ts (unchanged)
+// FILE: src/models/Referral.ts (existing + type, courseId)
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
@@ -9,6 +9,8 @@ export interface IReferral extends Document {
   level: number;
   status: 'pending' | 'active' | 'completed' | 'expired';
   referralCode: string;
+  type: 'referral' | 'affiliate';      // ADDED
+  courseId?: mongoose.Types.ObjectId;   // ADDED for affiliate
   clickedAt?: Date;
   registeredAt?: Date;
   firstPurchaseAt?: Date;
@@ -31,6 +33,8 @@ const ReferralSchema = new Schema<IReferral>(
     level: { type: Number, required: true, min: 1, max: 3 },
     status: { type: String, enum: ['pending', 'active', 'completed', 'expired'], default: 'pending' },
     referralCode: { type: String, required: true, index: true },
+    type: { type: String, enum: ['referral', 'affiliate'], default: 'referral' },
+    courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
     clickedAt: { type: Date },
     registeredAt: { type: Date },
     firstPurchaseAt: { type: Date },
@@ -46,10 +50,10 @@ const ReferralSchema = new Schema<IReferral>(
   { timestamps: true }
 );
 
-// Indexes
 ReferralSchema.index({ referrer: 1, level: 1 });
 ReferralSchema.index({ referred: 1 });
 ReferralSchema.index({ referralCode: 1 });
 ReferralSchema.index({ expiresAt: 1 });
+ReferralSchema.index({ type: 1, courseId: 1 });
 
 export const Referral = mongoose.model<IReferral>('Referral', ReferralSchema);
