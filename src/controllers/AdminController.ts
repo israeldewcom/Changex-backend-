@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/controllers/AdminController.ts (existing + socket broadcast & getAnnouncements)
+// ============================================
 import { Request, Response } from 'express';
 import { User, Course, Transaction, WithdrawalRequest, Coupon, Announcement, CourseApproval, AuditLog, Enrollment } from '../models';
 import { NotificationService } from '../services/NotificationService';
@@ -16,7 +19,6 @@ export class AdminController {
     this.affiliateService = AffiliateService.getInstance();
   }
 
-  // ==================== DASHBOARD STATS ====================
   getDashboardStats = async (req: Request, res: Response): Promise<void> => {
     try {
       const [totalUsers, totalCourses, pendingCourses, pendingWithdrawals, totalRevenue, totalEnrollments, totalAffiliateClicks] = await Promise.all([
@@ -29,7 +31,6 @@ export class AdminController {
         Transaction.aggregate([{ $match: { type: 'commission', subtype: 'affiliate', status: 'completed' } }, { $group: { _id: null, total: { $sum: '$amount' } } }])
       ]);
       
-      // Get monthly revenue for chart
       const monthlyRevenue = await Transaction.aggregate([
         { $match: { type: 'purchase', status: 'completed' } },
         { $group: {
@@ -40,13 +41,11 @@ export class AdminController {
         { $limit: 12 }
       ]);
       
-      // Get top courses by enrollment
       const topCourses = await Course.find({ published: true })
         .sort({ enrollmentCount: -1 })
         .limit(5)
         .select('title enrollmentCount totalRevenue');
       
-      // Get top affiliates
       const topAffiliates = await User.aggregate([
         { $match: { 'affiliateLinks.0': { $exists: true } } },
         { $project: {
@@ -82,7 +81,6 @@ export class AdminController {
     }
   };
 
-  // ==================== USER MANAGEMENT ====================
   getUsers = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, role, isBanned, search, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
@@ -186,7 +184,6 @@ export class AdminController {
         status: 'success'
       });
       
-      // Notify user of status change
       if (isBanned !== undefined) {
         await this.notificationService.sendNotification(userId, 'system', {
           title: isBanned ? 'Account Suspended' : 'Account Reinstated',
@@ -215,7 +212,6 @@ export class AdminController {
     }
   };
 
-  // ==================== COURSE MANAGEMENT ====================
   getPendingCourses = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20 } = req.query;
@@ -365,14 +361,12 @@ export class AdminController {
         status: 'success'
       });
       
-      // Notify the instructor
       await this.notificationService.sendNotification(course.instructor.toString(), 'system', {
         title: '✅ Course Approved!',
         message: `Your course "${course.title}" has been approved and is now live. Students can now enroll!`,
         metadata: { courseId, status: 'approved' }
       });
       
-      // ✅ BROADCAST TO ALL USERS - New course available
       const allUsers = await User.find({ isActive: true, isBanned: false }).select('_id');
       for (const user of allUsers) {
         await this.notificationService.sendNotification(user._id.toString(), 'course', {
@@ -382,7 +376,6 @@ export class AdminController {
         });
       }
       
-      // Broadcast via Socket.io to all connected users
       const io = req.app.get('io');
       if (io) {
         io.emit('new_course', {
@@ -471,7 +464,6 @@ export class AdminController {
     }
   };
 
-  // ==================== WITHDRAWAL MANAGEMENT ====================
   getPendingWithdrawals = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20 } = req.query;
@@ -486,7 +478,6 @@ export class AdminController {
         WithdrawalRequest.countDocuments({ status: 'pending' })
       ]);
       
-      // Calculate total pending amount
       const totalPendingAmount = withdrawals.reduce((sum, w) => sum + w.amount, 0);
       
       res.json({
@@ -519,7 +510,6 @@ export class AdminController {
         WithdrawalRequest.countDocuments(query)
       ]);
       
-      // Calculate summary statistics
       const summary = await WithdrawalRequest.aggregate([
         { $group: {
             _id: '$status',
@@ -671,7 +661,6 @@ export class AdminController {
     }
   };
 
-  // ==================== COUPON MANAGEMENT ====================
   getCoupons = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, isActive } = req.query;
@@ -715,7 +704,6 @@ export class AdminController {
       const { code, discountType, discountValue, minOrderAmount, maxDiscount, usageLimit, validFrom, validUntil, applicableTo, applicableIds } = req.body;
       const adminId = (req as any).user.userId;
       
-      // Check if coupon code already exists
       const existingCoupon = await Coupon.findOne({ code: code.toUpperCase() });
       if (existingCoupon) {
         res.status(400).json({ success: false, message: 'Coupon code already exists' });
@@ -815,28 +803,13 @@ export class AdminController {
     }
   };
 
-  // ==================== ANNOUNCEMENT MANAGEMENT ====================
   getAnnouncements = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { page = 1, limit = 20 } = req.query;
-      const skip = (Number(page) - 1) * Number(limit);
-      
-      const [announcements, total] = await Promise.all([
-        Announcement.find()
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(Number(limit))
-          .populate('createdBy', 'firstName lastName email'),
-        Announcement.countDocuments()
-      ]);
-      
-      res.json({
-        success: true,
-        data: {
-          announcements,
-          pagination: { page: Number(page), limit: Number(limit), total, pages: Math.ceil(total / Number(limit)) }
-        }
-      });
+      const announcements = await Announcement.find({ sentToAll: true, isActive: true })
+        .sort({ createdAt: -1 })
+        .limit(20)
+        .populate('createdBy', 'firstName lastName email');
+      res.json({ success: true, data: announcements });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Failed to load announcements' });
     }
@@ -895,7 +868,6 @@ export class AdminController {
         return;
       }
       
-      // Send to all users
       const users = await User.find({ isActive: true, isBanned: false }).select('_id');
       
       for (const user of users) {
@@ -910,7 +882,6 @@ export class AdminController {
       announcement.sentAt = new Date();
       await announcement.save();
       
-      // Broadcast via Socket.io
       const io = req.app.get('io');
       if (io) {
         io.emit('announcement', {
@@ -967,7 +938,6 @@ export class AdminController {
     }
   };
 
-  // ==================== AUDIT LOGS ====================
   getAuditLogs = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 50, action, resource, userId } = req.query;
@@ -986,7 +956,6 @@ export class AdminController {
         AuditLog.countDocuments(query)
       ]);
       
-      // Get unique actions and resources for filters
       const actions = await AuditLog.distinct('action');
       const resources = await AuditLog.distinct('resource');
       
@@ -1003,7 +972,6 @@ export class AdminController {
     }
   };
 
-  // ==================== PLATFORM STATISTICS ====================
   getPlatformStatistics = async (req: Request, res: Response): Promise<void> => {
     try {
       const { period = 'month' } = req.query;
@@ -1012,7 +980,7 @@ export class AdminController {
       if (period === 'week') startDate.setDate(startDate.getDate() - 7);
       else if (period === 'month') startDate.setMonth(startDate.getMonth() - 1);
       else if (period === 'year') startDate.setFullYear(startDate.getFullYear() - 1);
-      else startDate = new Date(0); // all time
+      else startDate = new Date(0);
       
       const [userGrowth, revenueGrowth, courseGrowth, activeUsers] = await Promise.all([
         User.aggregate([
@@ -1048,10 +1016,8 @@ export class AdminController {
     }
   };
 
-  // ==================== SYSTEM SETTINGS ====================
   getSystemSettings = async (req: Request, res: Response): Promise<void> => {
     try {
-      // You can store settings in a separate collection or environment variables
       const settings = {
         platformFee: 10,
         creatorCommission: 80,
@@ -1074,7 +1040,6 @@ export class AdminController {
     try {
       const updates = req.body;
       const adminId = (req as any).user.userId;
-      // Here you would update your settings collection
       
       await AuditLog.create({
         user: adminId,
