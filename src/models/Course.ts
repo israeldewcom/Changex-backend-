@@ -10,7 +10,7 @@ export interface ILesson extends Document {
   order: number;
   xpReward: number;
   isFree: boolean;
-  resources: Array<{ title: string; url: string }>;
+  resources: Array<{ title: string; url: string; type: 'pdf' | 'zip' | 'link' | 'other' }>;
 }
 
 export interface IQuiz extends Document {
@@ -72,24 +72,30 @@ export interface ICourse extends Document {
   averageRating: number;
   approvalStatus: 'pending' | 'approved' | 'rejected';
   submittedAt?: Date;
+  hasAffiliate: boolean;
+  affiliatePercent: number;
+  affiliateDescription?: string;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const LessonResourceSchema = new Schema({
+  title: { type: String, required: true },
+  url: { type: String, required: true },
+  type: { type: String, enum: ['pdf', 'zip', 'link', 'other'], default: 'link' }
+});
 
 const LessonSchema = new Schema<ILesson>({
   title: { type: String, required: true },
   description: { type: String, default: 'Lesson description' },
   type: { type: String, enum: ['video', 'text', 'quiz', 'code', 'assignment'], required: true },
   content: { type: String, default: '' },
-  videoUrl: { type: String },
+  videoUrl: { type: String, default: '' },
   duration: { type: Number, required: true },
   order: { type: Number, required: true },
   xpReward: { type: Number, default: 50 },
   isFree: { type: Boolean, default: false },
-  resources: [{
-    title: { type: String, required: true },
-    url: { type: String, required: true },
-  }],
+  resources: [LessonResourceSchema],
 });
 
 const QuizQuestionSchema = new Schema({
@@ -159,6 +165,9 @@ const CourseSchema = new Schema<ICourse>(
     averageRating: { type: Number, default: 0 },
     approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     submittedAt: { type: Date },
+    hasAffiliate: { type: Boolean, default: false },
+    affiliatePercent: { type: Number, default: 15, min: 5, max: 50 },
+    affiliateDescription: { type: String },
   },
   { timestamps: true }
 );
@@ -168,6 +177,7 @@ CourseSchema.index({ category: 1, level: 1, price: 1 });
 CourseSchema.index({ enrollmentCount: -1 });
 CourseSchema.index({ rating: -1 });
 CourseSchema.index({ createdAt: -1 });
+CourseSchema.index({ hasAffiliate: 1, affiliatePercent: 1 });
 
 CourseSchema.pre('save', function(next) {
   this.totalLessons = this.lessons.length;
