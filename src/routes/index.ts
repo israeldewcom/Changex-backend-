@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/routes/index.ts (already includes all routes – no changes needed)
+// ============================================
 import { Router } from 'express';
 import authRoutes from './auth';
 import courseRoutes from './courses';
@@ -11,14 +14,12 @@ import instructorRoutes from './instructor';
 import aiRoutes from './ai';
 import certificateRoutes from './certificates';
 import contactRoutes from './contact';
-import affiliateRoutes from './affiliate';
+import currencyRoutes from './currency';
 import { generalRateLimit } from '../middleware/rateLimit';
 
 const router = Router();
 
-router.get('/health', (req, res) => { 
-  res.json({ status: 'healthy', timestamp: new Date().toISOString() }); 
-});
+router.get('/health', (req, res) => { res.json({ status: 'healthy', timestamp: new Date().toISOString() }); });
 
 router.use('/v1/auth', generalRateLimit, authRoutes);
 router.use('/v1/courses', generalRateLimit, courseRoutes);
@@ -32,6 +33,6 @@ router.use('/v1/ai', aiRoutes);
 router.use('/v1/certificates', certificateRoutes);
 router.use('/webhooks', webhookRoutes);
 router.use('/v1/contact', contactRoutes);
-router.use('/v1/affiliate', affiliateRoutes);
+router.use('/v1/currency', currencyRoutes);
 
 export default router;
