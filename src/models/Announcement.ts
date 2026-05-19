@@ -1,26 +1,29 @@
+// ============================================
+// FILE: src/models/Announcement.ts (existing, included for completeness)
+// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IAnnouncement extends Document {
   title: string;
   content: string;
   type: 'info' | 'warning' | 'success' | 'danger';
-  isActive: boolean;
+  createdBy: mongoose.Types.ObjectId;
   sentToAll: boolean;
   sentAt?: Date;
-  createdBy: mongoose.Types.ObjectId;
+  isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
 const AnnouncementSchema = new Schema<IAnnouncement>(
   {
-    title: { type: String, required: true, maxlength: 200 },
-    content: { type: String, required: true, maxlength: 5000 },
+    title: { type: String, required: true },
+    content: { type: String, required: true },
     type: { type: String, enum: ['info', 'warning', 'success', 'danger'], default: 'info' },
-    isActive: { type: Boolean, default: true },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     sentToAll: { type: Boolean, default: false },
     sentAt: { type: Date },
-    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
