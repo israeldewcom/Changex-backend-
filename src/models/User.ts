@@ -28,22 +28,35 @@ export interface IUser extends Document {
   lastActiveAt: Date;
   badges: string[];
   
-  // Referral system fields
   referralCode: string;
   referredBy?: mongoose.Types.ObjectId;
   referrals: mongoose.Types.ObjectId[];
-  referralCount: number;
   referralEarnings: number;
   referralLevel: number;
   
-  // Affiliate system fields
+  // ✅ Affiliate tracking
   affiliateLinks: Array<{
     courseId: mongoose.Types.ObjectId;
+    courseTitle: string;
     link: string;
     clicks: number;
+    signups: number;
     conversions: number;
-    earnings: number;
+    commissionRate: number;
+    totalEarned: number;
     createdAt: Date;
+  }>;
+  
+  // ✅ Affiliate clicks tracking
+  affiliateClicks: Array<{
+    affiliateLinkId: mongoose.Types.ObjectId;
+    courseId: mongoose.Types.ObjectId;
+    ip: string;
+    userAgent: string;
+    clickedAt: Date;
+    converted: boolean;
+    convertedAt?: Date;
+    userId?: mongoose.Types.ObjectId;
   }>;
   
   coursesEnrolled: mongoose.Types.ObjectId[];
@@ -67,7 +80,6 @@ export interface IUser extends Document {
   roles: ('user' | 'creator' | 'admin' | 'moderator')[];
   
   isApprovedInstructor: boolean;
-  setupDone: boolean;
   
   createdAt: Date;
   updatedAt: Date;
@@ -109,17 +121,32 @@ const UserSchema = new Schema<IUser>(
     referralCode: { type: String, unique: true, sparse: true },
     referredBy: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     referrals: [{ type: Schema.Types.ObjectId, ref: 'User' }],
-    referralCount: { type: Number, default: 0 },
     referralEarnings: { type: Number, default: 0 },
     referralLevel: { type: Number, default: 0 },
     
+    // ✅ Affiliate links
     affiliateLinks: [{
-      courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
-      link: { type: String },
+      courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
+      courseTitle: { type: String, required: true },
+      link: { type: String, required: true },
       clicks: { type: Number, default: 0 },
+      signups: { type: Number, default: 0 },
       conversions: { type: Number, default: 0 },
-      earnings: { type: Number, default: 0 },
+      commissionRate: { type: Number, default: 20 },
+      totalEarned: { type: Number, default: 0 },
       createdAt: { type: Date, default: Date.now }
+    }],
+    
+    // ✅ Affiliate clicks
+    affiliateClicks: [{
+      affiliateLinkId: { type: Schema.Types.ObjectId, required: true },
+      courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
+      ip: { type: String },
+      userAgent: { type: String },
+      clickedAt: { type: Date, default: Date.now },
+      converted: { type: Boolean, default: false },
+      convertedAt: { type: Date },
+      userId: { type: Schema.Types.ObjectId, ref: 'User' }
     }],
     
     coursesEnrolled: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
@@ -143,35 +170,29 @@ const UserSchema = new Schema<IUser>(
     roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
     
     isApprovedInstructor: { type: Boolean, default: false },
-    setupDone: { type: Boolean, default: false },
     
     lastLoginAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
-// Indexes
 UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 UserSchema.index({ subscriptionExpiresAt: 1 });
 UserSchema.index({ xp: -1 });
-UserSchema.index({ referralCount: -1 });
-UserSchema.index({ referralEarnings: -1 });
 UserSchema.index({ roles: 1 });
 UserSchema.index({ createdAt: -1 });
+UserSchema.index({ 'affiliateLinks.link': 1 });
 
-// Hash password before save
 UserSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
-// Compare password method
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Check premium access
 UserSchema.methods.canAccessPremium = function(): boolean {
   if (this.subscriptionTier === 'free') return false;
   if (this.subscriptionStatus !== 'active') return false;
@@ -179,7 +200,6 @@ UserSchema.methods.canAccessPremium = function(): boolean {
   return true;
 };
 
-// Calculate level based on XP
 UserSchema.methods.calculateLevel = function(): number {
   return Math.floor(Math.pow(this.xp / 100, 0.5)) + 1;
 };
