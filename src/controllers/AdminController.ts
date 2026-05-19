@@ -4,13 +4,11 @@
 import { Request, Response } from 'express';
 import { User, Course, Transaction, WithdrawalRequest, Coupon, Announcement, CourseApproval, AuditLog, Enrollment } from '../models';
 import { NotificationService } from '../services/NotificationService';
-import { AnnouncementService } from '../services/AnnouncementService';
 import { AffiliateService } from '../services/AffiliateService';
 import mongoose from 'mongoose';
 
 export class AdminController {
   private notificationService: NotificationService;
-  private announcementService: AnnouncementService;
   private affiliateService: AffiliateService;
 
   constructor() {
