@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { User, Transaction, Referral, Notification } from '../models';
+import { User, Transaction, Referral, Notification, Course } from '../models';
 import { StorageService } from '../services/StorageService';
 import { validationResult } from 'express-validator';
 import { logger } from '../utils/logger';
@@ -76,13 +76,20 @@ export class UserController {
   getWallet = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
-      const user = await User.findById(userId).select('walletBalance totalEarned totalWithdrawn pendingWithdrawal');
+      const user = await User.findById(userId).select('walletBalance totalEarned totalWithdrawn pendingWithdrawal preferredCurrency');
       if (!user) {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
       }
       const transactions = await Transaction.find({ user: userId }).sort({ createdAt: -1 }).limit(50);
-      res.json({ success: true, data: { balance: user.walletBalance, totalEarned: user.totalEarned, totalWithdrawn: user.totalWithdrawn, pendingWithdrawal: user.pendingWithdrawal, transactions } });
+      res.json({ success: true, data: { 
+        balance: user.walletBalance, 
+        totalEarned: user.totalEarned, 
+        totalWithdrawn: user.totalWithdrawn, 
+        pendingWithdrawal: user.pendingWithdrawal,
+        preferredCurrency: user.preferredCurrency,
+        transactions 
+      } });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -101,6 +108,16 @@ export class UserController {
       const totalReferrals = referrals.length;
       const activeReferrals = referrals.filter(r => r.status === 'active').length;
       const totalCommission = user.referralEarnings;
+      
+      // Calculate affiliate stats
+      const affiliateStats = {
+        totalClicks: user.affiliateLinks?.reduce((sum, l) => sum + (l.clicks || 0), 0) || 0,
+        totalSignups: user.affiliateLinks?.reduce((sum, l) => sum + (l.signups || 0), 0) || 0,
+        totalConversions: user.affiliateLinks?.reduce((sum, l) => sum + (l.conversions || 0), 0) || 0,
+        totalEarned: user.affiliateLinks?.reduce((sum, l) => sum + (l.totalEarned || 0), 0) || 0,
+        activeLinks: user.affiliateLinks?.length || 0
+      };
+      
       res.json({
         success: true,
         data: {
@@ -110,7 +127,8 @@ export class UserController {
           activeReferrals,
           totalCommission,
           referrals: referrals.map(r => ({ id: r._id, referred: r.referred, level: r.level, status: r.status, totalCommission: r.totalCommission, registeredAt: r.registeredAt, firstPurchaseAt: r.firstPurchaseAt })),
-          affiliateLinks: user.affiliateLinks || []
+          affiliateLinks: user.affiliateLinks || [],
+          affiliateStats
         }
       });
     } catch (error) {
@@ -118,28 +136,127 @@ export class UserController {
     }
   };
 
-  // ✅ User accepts an affiliate offer – automatically generates a special link using their referral code
-  createAffiliateLink = async (req: Request, res: Response): Promise<void> => {
+  // ✅ Accept affiliate offer and generate unique link
+  acceptAffiliateOffer = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user.userId;
       const { courseId } = req.body;
+      const course = await Course.findById(courseId);
+      if (!course) {
+        res.status(404).json({ success: false, message: 'Course not found' });
+        return;
+      }
+      
       const user = await User.findById(userId);
       if (!user) {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
       }
-      // Generate special affiliate link using user's referral code and the course ID
-      const affiliateLink = `${process.env.FRONTEND_URL}/aff/${user.referralCode}/${courseId}`;
-      if (!user.affiliateLinks) user.affiliateLinks = [];
+      
       // Check if already accepted
-      const alreadyAccepted = user.affiliateLinks.some(link => link.courseId.toString() === courseId);
-      if (!alreadyAccepted) {
-        user.affiliateLinks.push({ courseId, link: affiliateLink, createdAt: new Date() });
-        await user.save();
+      const existing = user.affiliateLinks?.find(l => l.courseId.toString() === courseId);
+      if (existing) {
+        res.status(400).json({ success: false, message: 'Affiliate offer already accepted' });
+        return;
       }
-      res.json({ success: true, data: { link: affiliateLink }, message: 'Affiliate offer accepted! Your special link is ready.' });
+      
+      // Generate unique affiliate link
+      const uniqueId = Math.random().toString(36).substr(2, 8);
+      const affiliateLink = `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${uniqueId}`;
+      
+      if (!user.affiliateLinks) user.affiliateLinks = [];
+      user.affiliateLinks.push({
+        courseId: course._id,
+        courseTitle: course.title,
+        link: affiliateLink,
+        clicks: 0,
+        signups: 0,
+        conversions: 0,
+        commissionRate: course.affiliatePercent || 15,
+        totalEarned: 0,
+        createdAt: new Date()
+      });
+      await user.save();
+      
+      res.json({ success: true, data: { link: affiliateLink, courseTitle: course.title, commissionRate: course.affiliatePercent || 15 }, message: 'Affiliate offer accepted' });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message || 'Server error' });
+    }
+  };
+
+  // ✅ Track affiliate click
+  trackAffiliateClick = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { userId, courseId, code } = req.params;
+      const ip = req.ip || req.socket.remoteAddress || '';
+      const userAgent = req.get('user-agent') || '';
+      
+      // Find the affiliate link
+      const affiliate = await User.findOne({ 
+        _id: userId,
+        'affiliateLinks.courseId': courseId,
+        'affiliateLinks.link': { $regex: code }
+      });
+      
+      if (!affiliate) {
+        // Redirect to course page anyway
+        res.redirect(`${process.env.FRONTEND_URL}/#/courses/${courseId}`);
+        return;
+      }
+      
+      // Find the specific affiliate link
+      const link = affiliate.affiliateLinks.find(l => l.courseId.toString() === courseId);
+      if (link) {
+        link.clicks = (link.clicks || 0) + 1;
+        await affiliate.save();
+        
+        // Record click
+        if (!affiliate.affiliateClicks) affiliate.affiliateClicks = [];
+        affiliate.affiliateClicks.push({
+          affiliateLinkId: link._id,
+          courseId: mongoose.Types.ObjectId(courseId),
+          ip,
+          userAgent,
+          clickedAt: new Date(),
+          converted: false
+        });
+        await affiliate.save();
+      }
+      
+      // Store referral cookie and redirect
+      res.cookie('cx_affiliate', `${userId}|${courseId}|${code}`, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: false, path: '/' });
+      res.redirect(`${process.env.FRONTEND_URL}/#/courses/${courseId}`);
+    } catch (error) {
+      res.redirect(`${process.env.FRONTEND_URL}/#/courses/${req.params.courseId}`);
+    }
+  };
+
+  // ✅ Track affiliate conversion (called when user registers via affiliate link)
+  trackAffiliateConversion = async (affiliateCode: string, newUserId: string, session?: any): Promise<void> => {
+    try {
+      const [affiliateId, courseId, code] = affiliateCode.split('|');
+      const affiliate = await User.findById(affiliateId).session(session || null);
+      if (!affiliate) return;
+      
+      const link = affiliate.affiliateLinks?.find(l => l.courseId.toString() === courseId);
+      if (!link) return;
+      
+      link.signups = (link.signups || 0) + 1;
+      
+      // Find the click record and mark as converted
+      const click = affiliate.affiliateClicks?.find(c => 
+        c.affiliateLinkId.toString() === link._id.toString() && 
+        !c.converted
+      );
+      if (click) {
+        click.converted = true;
+        click.convertedAt = new Date();
+        click.userId = mongoose.Types.ObjectId(newUserId);
+      }
+      
+      await affiliate.save({ session });
+    } catch (error) {
+      logger.error('Error tracking affiliate conversion:', error);
     }
   };
 
@@ -199,7 +316,7 @@ export class UserController {
   getDashboardStats = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
-      const user = await User.findById(userId).select('xp level streak walletBalance totalEarned').populate('coursesEnrolled', 'title thumbnail progress').populate('certificatesEarned', 'certificateId issueDate');
+      const user = await User.findById(userId).select('xp level streak walletBalance totalEarned preferredCurrency').populate('coursesEnrolled', 'title thumbnail progress').populate('certificatesEarned', 'certificateId issueDate');
       if (!user) {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
@@ -211,7 +328,12 @@ export class UserController {
       const recentTransactions = await Transaction.find({ user: userId }).sort({ createdAt: -1 }).limit(10);
       const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
       const weeklyXP = await Transaction.aggregate([{ $match: { user: new mongoose.Types.ObjectId(userId), createdAt: { $gte: weekAgo }, type: 'reward' } }, { $group: { _id: null, total: { $sum: '$amount' } } }]);
-      res.json({ success: true, data: { profile: { level: user.level, xp: user.xp, xpToNextLevel, xpProgress, streak: user.streak }, wallet: { balance: user.walletBalance, totalEarned: user.totalEarned }, learning: { enrolledCourses: user.coursesEnrolled, certificates: user.certificatesEarned, weeklyXP: weeklyXP[0]?.total || 0 }, recentActivity: recentTransactions } });
+      res.json({ success: true, data: { 
+        profile: { level: user.level, xp: user.xp, xpToNextLevel, xpProgress, streak: user.streak, preferredCurrency: user.preferredCurrency }, 
+        wallet: { balance: user.walletBalance, totalEarned: user.totalEarned }, 
+        learning: { enrolledCourses: user.coursesEnrolled, certificates: user.certificatesEarned, weeklyXP: weeklyXP[0]?.total || 0 }, 
+        recentActivity: recentTransactions 
+      } });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Server error' });
     }
