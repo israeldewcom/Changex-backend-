@@ -1,182 +1,170 @@
 // ============================================
-// FILE: src/models/Course.ts (existing + added hasAffiliate, affiliatePercent)
+// FILE: src/models/User.ts (existing + affiliateLinks array)
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
+import bcrypt from 'bcryptjs';
 
-export interface ILesson extends Document {
-  title: string;
-  description: string;
-  type: 'video' | 'text' | 'quiz' | 'code' | 'assignment';
-  content: string;
-  videoUrl?: string;
-  duration: number;
-  order: number;
-  xpReward: number;
-  isFree: boolean;
-  resources: Array<{ title: string; url: string }>;
-}
-
-export interface IQuiz extends Document {
-  title: string;
-  questions: Array<{
-    question: string;
-    type: 'multiple-choice' | 'true-false' | 'code';
-    options?: string[];
-    correctAnswer: string | string[];
-    explanation?: string;
-    points: number;
+export interface IUser extends Document {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  displayName: string;
+  avatar?: string;
+  bio?: string;
+  
+  subscriptionTier: 'free' | 'premium' | 'elite';
+  subscriptionStatus: 'active' | 'canceled' | 'expired' | 'trialing';
+  subscriptionId?: string;
+  subscriptionExpiresAt?: Date;
+  stripeCustomerId?: string;
+  paystackCustomerCode?: string;
+  
+  walletBalance: number;
+  totalEarned: number;
+  totalWithdrawn: number;
+  pendingWithdrawal: number;
+  
+  xp: number;
+  level: number;
+  streak: number;
+  lastActiveAt: Date;
+  badges: string[];
+  
+  referralCode: string;
+  referredBy?: mongoose.Types.ObjectId;
+  referrals: mongoose.Types.ObjectId[];
+  referralEarnings: number;
+  referralLevel: number;
+  
+  affiliateLinks: Array<{
+    courseId: mongoose.Types.ObjectId;
+    link: string;
+    createdAt: Date;
   }>;
-  passingScore: number;
-  xpReward: number;
-}
-
-export interface ICourse extends Document {
-  title: string;
-  slug: string;
-  description: string;
-  longDescription: string;
-  category: string;
-  subcategory: string;
-  level: 'beginner' | 'intermediate' | 'advanced';
-  price: number;
-  discountPrice?: number;
-  currency: string;
-  thumbnail: string;
-  previewVideo?: string;
-  instructor: mongoose.Types.ObjectId;
-  lessons: ILesson[];
-  quizzes: IQuiz[];
-  totalDuration: number;
-  totalLessons: number;
-  totalQuizzes: number;
-  xpReward: number;
-  certificateTemplate: string;
-  requirements: string[];
-  objectives: string[];
-  targetAudience: string[];
-  featured: boolean;
-  published: boolean;
-  publishedAt?: Date;
-  enrollmentCount: number;
-  rating: number;
-  reviewCount: number;
-  tags: string[];
-  prerequisites: mongoose.Types.ObjectId[];
-  whatYouWillLearn: string[];
-  language: string;
-  lastUpdated: Date;
-  version: number;
-  creatorCommission: number;
-  affiliateCommission: number;
-  platformFee: number;
-  totalRevenue: number;
-  totalEnrollments: number;
-  completionRate: number;
-  averageRating: number;
-  approvalStatus: 'pending' | 'approved' | 'rejected';
-  submittedAt?: Date;
-  hasAffiliate: boolean;           // ADDED
-  affiliatePercent: number;        // ADDED
+  
+  coursesEnrolled: mongoose.Types.ObjectId[];
+  coursesCompleted: mongoose.Types.ObjectId[];
+  lessonsCompleted: number;
+  certificatesEarned: mongoose.Types.ObjectId[];
+  totalSpent: number;
+  
+  emailNotifications: boolean;
+  twoFactorEnabled: boolean;
+  twoFactorSecret?: string;
+  preferredCurrency: string;
+  
+  refreshTokens: string[];
+  passwordResetToken?: string;
+  passwordResetExpires?: Date;
+  emailVerified: boolean;
+  emailVerificationToken?: string;
+  isActive: boolean;
+  isBanned: boolean;
+  roles: ('user' | 'creator' | 'admin' | 'moderator')[];
+  
+  isApprovedInstructor: boolean;
+  
   createdAt: Date;
   updatedAt: Date;
+  lastLoginAt: Date;
+  
+  comparePassword(candidatePassword: string): Promise<boolean>;
+  canAccessPremium(): boolean;
+  calculateLevel(): number;
 }
 
-const LessonSchema = new Schema<ILesson>({
-  title: { type: String, required: true },
-  description: { type: String, default: 'Lesson description' },
-  type: { type: String, enum: ['video', 'text', 'quiz', 'code', 'assignment'], required: true },
-  content: { type: String, default: '' },
-  videoUrl: { type: String },
-  duration: { type: Number, required: true },
-  order: { type: Number, required: true },
-  xpReward: { type: Number, default: 50 },
-  isFree: { type: Boolean, default: false },
-  resources: [{
-    title: { type: String, required: true },
-    url: { type: String, required: true },
-  }],
-});
-
-const QuizQuestionSchema = new Schema({
-  question: { type: String, required: true },
-  type: { type: String, enum: ['multiple-choice', 'true-false', 'code'], required: true },
-  options: [{ type: String }],
-  correctAnswer: { type: Schema.Types.Mixed, required: true },
-  explanation: { type: String },
-  points: { type: Number, default: 10 },
-});
-
-const QuizSchema = new Schema<IQuiz>({
-  title: { type: String, required: true },
-  questions: [QuizQuestionSchema],
-  passingScore: { type: Number, required: true, min: 0, max: 100 },
-  xpReward: { type: Number, default: 100 },
-});
-
-const CourseSchema = new Schema<ICourse>(
+const UserSchema = new Schema<IUser>(
   {
-    title: { type: String, required: true, index: true },
-    slug: { type: String, required: true, unique: true },
-    description: { type: String, required: true },
-    longDescription: { type: String, required: true },
-    category: { type: String, required: true, index: true },
-    subcategory: { type: String },
-    level: { type: String, enum: ['beginner', 'intermediate', 'advanced'], required: true },
-    price: { type: Number, required: true, min: 0 },
-    discountPrice: { type: Number, min: 0 },
-    currency: { type: String, default: 'NGN' },
-    thumbnail: { type: String, required: true },
-    previewVideo: { type: String },
-    instructor: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    lessons: [LessonSchema],
-    quizzes: [QuizSchema],
-    totalDuration: { type: Number, default: 0 },
-    totalLessons: { type: Number, default: 0 },
-    totalQuizzes: { type: Number, default: 0 },
-    xpReward: { type: Number, default: 500 },
-    certificateTemplate: { type: String },
-    requirements: [{ type: String }],
-    objectives: [{ type: String }],
-    targetAudience: [{ type: String }],
-    featured: { type: Boolean, default: false, index: true },
-    published: { type: Boolean, default: false, index: true },
-    publishedAt: { type: Date },
-    enrollmentCount: { type: Number, default: 0 },
-    rating: { type: Number, default: 0, min: 0, max: 5 },
-    reviewCount: { type: Number, default: 0 },
-    tags: [{ type: String, index: true }],
-    prerequisites: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
-    whatYouWillLearn: [{ type: String }],
-    language: { type: String, default: 'en' },
-    lastUpdated: { type: Date, default: Date.now },
-    version: { type: Number, default: 1 },
-    creatorCommission: { type: Number, default: 70 },
-    affiliateCommission: { type: Number, default: 20 },
-    platformFee: { type: Number, default: 10 },
-    totalRevenue: { type: Number, default: 0 },
-    totalEnrollments: { type: Number, default: 0 },
-    completionRate: { type: Number, default: 0 },
-    averageRating: { type: Number, default: 0 },
-    approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
-    submittedAt: { type: Date },
-    hasAffiliate: { type: Boolean, default: false },      // ADDED
-    affiliatePercent: { type: Number, default: 15 },      // ADDED
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
+    password: { type: String, required: true, minlength: 8, select: false },
+    firstName: { type: String, required: true, trim: true },
+    lastName: { type: String, required: true, trim: true },
+    displayName: { type: String, required: true, trim: true },
+    avatar: { type: String },
+    bio: { type: String, maxlength: 500 },
+    
+    subscriptionTier: { type: String, enum: ['free', 'premium', 'elite'], default: 'free' },
+    subscriptionStatus: { type: String, enum: ['active', 'canceled', 'expired', 'trialing'], default: 'active' },
+    subscriptionId: { type: String, sparse: true },
+    subscriptionExpiresAt: { type: Date },
+    stripeCustomerId: { type: String, sparse: true },
+    paystackCustomerCode: { type: String, sparse: true },
+    
+    walletBalance: { type: Number, default: 0, min: 0 },
+    totalEarned: { type: Number, default: 0 },
+    totalWithdrawn: { type: Number, default: 0 },
+    pendingWithdrawal: { type: Number, default: 0 },
+    
+    xp: { type: Number, default: 0 },
+    level: { type: Number, default: 1 },
+    streak: { type: Number, default: 0 },
+    lastActiveAt: { type: Date, default: Date.now },
+    badges: [{ type: String }],
+    
+    referralCode: { type: String, unique: true, sparse: true },
+    referredBy: { type: Schema.Types.ObjectId, ref: 'User', index: true },
+    referrals: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    referralEarnings: { type: Number, default: 0 },
+    referralLevel: { type: Number, default: 0 },
+    
+    affiliateLinks: [{
+      courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
+      link: { type: String },
+      createdAt: { type: Date, default: Date.now }
+    }],
+    
+    coursesEnrolled: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
+    coursesCompleted: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
+    lessonsCompleted: { type: Number, default: 0 },
+    certificatesEarned: [{ type: Schema.Types.ObjectId, ref: 'Certificate' }],
+    totalSpent: { type: Number, default: 0 },
+    
+    emailNotifications: { type: Boolean, default: true },
+    twoFactorEnabled: { type: Boolean, default: false },
+    twoFactorSecret: { type: String },
+    preferredCurrency: { type: String, default: 'NGN' },
+    refreshTokens: [{ type: String }],
+    passwordResetToken: { type: String },
+    passwordResetExpires: { type: Date },
+    emailVerified: { type: Boolean, default: false },
+    emailVerificationToken: { type: String },
+    isActive: { type: Boolean, default: true },
+    isBanned: { type: Boolean, default: false },
+    roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
+    
+    isApprovedInstructor: { type: Boolean, default: false },
+    
+    lastLoginAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
-CourseSchema.index({ title: 'text', description: 'text', tags: 'text' });
-CourseSchema.index({ category: 1, level: 1, price: 1 });
-CourseSchema.index({ enrollmentCount: -1 });
-CourseSchema.index({ rating: -1 });
-CourseSchema.index({ createdAt: -1 });
-CourseSchema.index({ hasAffiliate: 1 });
+UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
+UserSchema.index({ subscriptionExpiresAt: 1 });
+UserSchema.index({ xp: -1 });
+UserSchema.index({ roles: 1 });
+UserSchema.index({ createdAt: -1 });
 
-CourseSchema.pre('save', function(next) {
-  this.totalLessons = this.lessons.length;
-  this.totalQuizzes = this.quizzes.length;
-  this.totalDuration = this.lessons.reduce((sum, lesson) => sum + lesson.duration, 0);
+UserSchema.pre('save', async function(next) {
+  if (!this.isModified('password')) return next();
+  this.password = await bcrypt.hash(this.password, 12);
   next();
 });
 
-export const Course = mongoose.model<ICourse>('Course', CourseSchema);
+UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+UserSchema.methods.canAccessPremium = function(): boolean {
+  if (this.subscriptionTier === 'free') return false;
+  if (this.subscriptionStatus !== 'active') return false;
+  if (this.subscriptionExpiresAt && new Date() > this.subscriptionExpiresAt) return false;
+  return true;
+};
+
+UserSchema.methods.calculateLevel = function(): number {
+  return Math.floor(Math.pow(this.xp / 100, 0.5)) + 1;
+};
+
+export const User = mongoose.model<IUser>('User', UserSchema);
