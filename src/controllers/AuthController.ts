@@ -6,6 +6,7 @@ import { AuditLog } from '../models/AuditLog';
 import { User } from '../models/User';
 import speakeasy from 'speakeasy';
 import { RedisService } from '../services/RedisService';
+import crypto from 'crypto';
 
 export class AuthController {
   private authService: AuthService;
@@ -26,8 +27,7 @@ export class AuthController {
     session.startTransaction();
     try {
       const { email, password, firstName, lastName, referralCode } = req.body;
-      
-      // Check if user exists
+
       const existingUser = await User.findOne({ email }).session(session);
       if (existingUser) {
         await session.abortTransaction();
@@ -35,7 +35,6 @@ export class AuthController {
         return;
       }
 
-      // Create user
       const newReferralCode = await this.generateUniqueReferralCode();
       const user = new User({
         email,
@@ -44,7 +43,7 @@ export class AuthController {
         lastName,
         displayName: `${firstName} ${lastName}`,
         referralCode: newReferralCode,
-        emailVerificationToken: require('crypto').randomBytes(32).toString('hex'),
+        emailVerificationToken: crypto.randomBytes(32).toString('hex'),
         isActive: true,
         emailVerified: false,
         roles: ['user'],
@@ -57,7 +56,7 @@ export class AuthController {
       });
       await user.save({ session });
 
-      // ✅ Process referral if code provided
+      // Process referral if code provided – no error thrown on invalid code
       if (referralCode) {
         await this.processReferral(referralCode, user._id, session);
       }
@@ -75,7 +74,6 @@ export class AuthController {
 
       await session.commitTransaction();
 
-      // Generate tokens
       const { accessToken, refreshToken } = this.authService.generateTokens(user._id.toString());
       user.refreshTokens = [refreshToken];
       await user.save();
@@ -120,20 +118,18 @@ export class AuthController {
     let code: string;
     let exists = true;
     while (exists) {
-      code = require('crypto').randomBytes(6).toString('hex').toUpperCase();
+      code = crypto.randomBytes(6).toString('hex').toUpperCase();
       const user = await User.findOne({ referralCode: code });
       if (!user) exists = false;
     }
     return code!;
   }
 
-  // ✅ Referral processing method
   private async processReferral(referralCode: string, newUserId: string, session: any): Promise<void> {
     try {
       const referrer = await User.findOne({ referralCode }).session(session);
-      if (!referrer) return;
+      if (!referrer) return; // Invalid code – just ignore, no error
 
-      // Calculate referral level (1 = direct, 2 = indirect, 3 = third level)
       let level = 1;
       let currentReferrer = referrer;
       while (currentReferrer.referredBy && level < 3) {
@@ -153,13 +149,12 @@ export class AuthController {
       });
       await referral.save({ session });
 
-      // Update user records
-      await User.findByIdAndUpdate(newUserId, { 
-        referredBy: referrer._id, 
-        referralLevel: level 
+      await User.findByIdAndUpdate(newUserId, {
+        referredBy: referrer._id,
+        referralLevel: level
       }, { session });
-      
-      await User.findByIdAndUpdate(referrer._id, { 
+
+      await User.findByIdAndUpdate(referrer._id, {
         $push: { referrals: newUserId },
         $inc: { referralCount: 1 }
       }, { session });
@@ -189,8 +184,8 @@ export class AuthController {
         return;
       }
 
-      // ✅ Temporary admin bypass (remove later)
       let isValid = false;
+      // Temporary admin bypass (remove in production)
       if (email === 'admin@changexacademy.com') {
         isValid = true;
       } else {
