@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/routes/index.ts (already includes all routes – no changes needed)
-// ============================================
 import { Router } from 'express';
 import authRoutes from './auth';
 import courseRoutes from './courses';
@@ -19,7 +16,9 @@ import { generalRateLimit } from '../middleware/rateLimit';
 
 const router = Router();
 
-router.get('/health', (req, res) => { res.json({ status: 'healthy', timestamp: new Date().toISOString() }); });
+router.get('/health', (req, res) => {
+  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
 
 router.use('/v1/auth', generalRateLimit, authRoutes);
 router.use('/v1/courses', generalRateLimit, courseRoutes);
