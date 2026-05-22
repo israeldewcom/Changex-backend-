@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/services/EarningEngine.ts
+// ============================================
 import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { Transaction } from '../models/Transaction';
@@ -44,7 +47,6 @@ export class EarningEngine {
     await user.save({ session });
   }
 
-  // ✅ NEW: referral bonus when referred user subscribes to premium
   async addReferralBonusOnSubscription(userId: string, amount: number = 500): Promise<void> {
     const user = await User.findById(userId);
     if (!user) return;
