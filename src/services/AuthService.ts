@@ -47,7 +47,7 @@ export class AuthService {
     try {
       const existingUser = await User.findOne({ email: userData.email }).session(session);
       if (existingUser) throw new Error('User already exists');
-      
+
       const referralCode = this.generateReferralCode();
       const user = new User({
         ...userData,
@@ -165,6 +165,15 @@ export class AuthService {
     user.password = newPassword;
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
+    await user.save();
+  }
+
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+    const user = await User.findById(userId).select('+password');
+    if (!user) throw new Error('User not found');
+    const isValid = await user.comparePassword(currentPassword);
+    if (!isValid) throw new Error('Current password is incorrect');
+    user.password = newPassword;
     await user.save();
   }
 
