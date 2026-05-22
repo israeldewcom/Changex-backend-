@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/services/AffiliateService.ts
+// ============================================
 import mongoose from 'mongoose';
 import { User } from '../models/User';
 import { Course } from '../models/Course';
@@ -25,8 +28,11 @@ export class AffiliateService {
       if (!user || !course) throw new Error('User or course not found');
       if (!course.hasAffiliate) throw new Error('Affiliate not enabled for this course');
 
-      const existingLink = user.affiliateLinks?.find(l => l.courseId?.toString() === courseId);
-      if (existingLink) return { link: existingLink.link };
+      const alreadyAccepted = user.affiliateLinks?.some(l => l.courseId.toString() === courseId);
+      if (alreadyAccepted) {
+        const existing = user.affiliateLinks.find(l => l.courseId.toString() === courseId);
+        return { link: existing!.link };
+      }
 
       const uniqueId = Math.random().toString(36).substr(2, 8);
       const link = `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${uniqueId}`;
@@ -64,7 +70,6 @@ export class AffiliateService {
         link.clicks += 1;
         await user.save();
       }
-      // Store click in a separate collection for analytics (optional)
       logger.info(`Affiliate click: ${affiliateId} -> ${courseId}, ip=${ip}, ua=${userAgent}`);
     } catch (error) {
       logger.error('Track click error:', error);
