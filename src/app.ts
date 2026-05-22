@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/app.ts (Corrected)
+// FILE: src/app.ts (Perfect – no CORS/CSRF errors)
 // ============================================
 import express from 'express';
 import cors from 'cors';
@@ -18,7 +18,7 @@ import { logger } from './utils/logger';
 
 const app = express();
 
-// Helmet configuration (split for readability)
+// ========== HELMET (secure HTTP headers) ==========
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -34,14 +34,24 @@ app.use(
   })
 );
 
+// ========== CORS (allow frontend origin) ==========
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000').split(',');
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl) or matching allowed origins
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
   })
 );
+
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }));
 app.use(express.json({ limit: '10mb' }));
@@ -49,42 +59,54 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(passport.initialize());
 
-// XSS sanitization middleware
+// ========== XSS sanitization ==========
 app.use((req, res, next) => {
   if (req.body) {
-    const sanitizeObj = (obj: any): any => {
+    const sanitize = (obj: any): any => {
       if (typeof obj === 'string') return xss(obj);
       if (typeof obj === 'object' && obj !== null) {
-        Object.keys(obj).forEach((key) => {
-          obj[key] = sanitizeObj(obj[key]);
-        });
+        for (const key of Object.keys(obj)) {
+          obj[key] = sanitize(obj[key]);
+        }
       }
       return obj;
     };
-    req.body = sanitizeObj(req.body);
+    req.body = sanitize(req.body);
   }
   next();
 });
 
-// CSRF protection (skip for webhooks and GET requests)
+// ========== CSRF protection (skip for auth, webhooks, GET) ==========
+const csrfExcludedPaths = ['/api/v1/auth', '/api/v1/payments/webhook', '/webhooks'];
 app.use((req, res, next) => {
-  if (req.path.includes('/webhooks') || req.method === 'GET') return next();
+  const shouldSkip = csrfExcludedPaths.some(path => req.path.startsWith(path)) || req.method === 'GET';
+  if (shouldSkip) return next();
   simpleCsrf(req, res, next);
 });
 
+// ========== Rate limiting ==========
 app.use(generalRateLimit);
+
+// ========== API routes ==========
 app.use('/api', routes);
+
+// ========== Static files for certificates ==========
 app.use('/certificates', express.static('public/certificates'));
 
+// ========== Health check ==========
 app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
     environment: config.env,
+    uptime: process.uptime(),
   });
 });
 
+// ========== 404 handler ==========
 app.use(notFound);
+
+// ========== Global error handler ==========
 app.use(errorHandler);
 
 export default app;
