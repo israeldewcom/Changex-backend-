@@ -59,7 +59,7 @@ export class AuthController {
       });
       await user.save({ session });
 
-      // Process referral code – invalid codes are silently ignored (no error)
+      // Process referral – invalid codes silently ignored (no error)
       if (referralCode) {
         await this.processReferral(referralCode, user._id, session);
       }
@@ -128,7 +128,6 @@ export class AuthController {
     return code!;
   }
 
-  // Process referral – does NOT throw error if invalid
   private async processReferral(referralCode: string, newUserId: string, session: any): Promise<void> {
     try {
       const referrer = await User.findOne({ referralCode }).session(session);
@@ -308,10 +307,11 @@ export class AuthController {
   forgotPassword = async (req: Request, res: Response): Promise<void> => {
     try {
       const { email } = req.body;
-      await this.authService.forgotPassword(email);
-      res.json({ success: true, message: 'If an account exists with that email, a password reset link has been sent.' });
+      // Fire and forget – do NOT await email sending
+      this.authService.forgotPassword(email).catch(err => logger.error(err));
+      res.json({ success: true, message: 'If an account exists, a password reset link has been sent.' });
     } catch (error) {
-      res.status(500).json({ success: false, message: 'Error processing request' });
+      res.status(500).json({ success: false, message: 'Server error' });
     }
   };
 
