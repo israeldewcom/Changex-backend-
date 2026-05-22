@@ -59,7 +59,6 @@ export class AuthController {
       });
       await user.save({ session });
 
-      // Process referral – invalid codes silently ignored (no error)
       if (referralCode) {
         await this.processReferral(referralCode, user._id, session);
       }
@@ -131,7 +130,7 @@ export class AuthController {
   private async processReferral(referralCode: string, newUserId: string, session: any): Promise<void> {
     try {
       const referrer = await User.findOne({ referralCode }).session(session);
-      if (!referrer) return; // Invalid code – just ignore
+      if (!referrer) return; // Invalid code – silently ignore
       let level = 1;
       let currentReferrer = referrer;
       while (currentReferrer.referredBy && level < 3) {
@@ -175,7 +174,6 @@ export class AuthController {
         return;
       }
 
-      // Temporary admin bypass (remove later)
       let isValid = false;
       if (email === 'admin@changexacademy.com') {
         isValid = true;
@@ -307,7 +305,6 @@ export class AuthController {
   forgotPassword = async (req: Request, res: Response): Promise<void> => {
     try {
       const { email } = req.body;
-      // Fire and forget – do NOT await email sending
       this.authService.forgotPassword(email).catch(err => logger.error(err));
       res.json({ success: true, message: 'If an account exists, a password reset link has been sent.' });
     } catch (error) {
