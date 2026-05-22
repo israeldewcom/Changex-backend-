@@ -1,12 +1,12 @@
 // ============================================
-// FILE: src/models/Transaction.ts (unchanged)
+// FILE: src/models/Transaction.ts
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITransaction extends Document {
   user: mongoose.Types.ObjectId;
   type: 'deposit' | 'withdrawal' | 'purchase' | 'refund' | 'commission' | 'reward' | 'subscription';
-  subtype?: 'course' | 'marketplace' | 'referral' | 'affiliate' | 'lesson_completion' | 'quiz_completion' | 'daily_reward';
+  subtype?: string;
   amount: number;
   currency: string;
   status: 'pending' | 'completed' | 'failed' | 'refunded';
@@ -19,12 +19,7 @@ export interface ITransaction extends Document {
   toUserId?: mongoose.Types.ObjectId;
   courseId?: mongoose.Types.ObjectId;
   enrollmentId?: mongoose.Types.ObjectId;
-  withdrawalDetails?: {
-    bankName: string;
-    accountNumber: string;
-    accountName: string;
-    bankCode: string;
-  };
+  withdrawalDetails?: any;
   processedAt?: Date;
   completedAt?: Date;
   createdAt: Date;
@@ -35,7 +30,7 @@ const TransactionSchema = new Schema<ITransaction>(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     type: { type: String, enum: ['deposit', 'withdrawal', 'purchase', 'refund', 'commission', 'reward', 'subscription'], required: true },
-    subtype: { type: String, enum: ['course', 'marketplace', 'referral', 'affiliate', 'lesson_completion', 'quiz_completion', 'daily_reward'] },
+    subtype: { type: String },
     amount: { type: Number, required: true },
     currency: { type: String, default: 'NGN' },
     status: { type: String, enum: ['pending', 'completed', 'failed', 'refunded'], default: 'pending' },
@@ -48,19 +43,13 @@ const TransactionSchema = new Schema<ITransaction>(
     toUserId: { type: Schema.Types.ObjectId, ref: 'User' },
     courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
     enrollmentId: { type: Schema.Types.ObjectId, ref: 'Enrollment' },
-    withdrawalDetails: {
-      bankName: { type: String },
-      accountNumber: { type: String },
-      accountName: { type: String },
-      bankCode: { type: String },
-    },
+    withdrawalDetails: { type: Schema.Types.Mixed },
     processedAt: { type: Date },
     completedAt: { type: Date },
   },
   { timestamps: true }
 );
 
-// Indexes
 TransactionSchema.index({ reference: 1 }, { unique: true });
 TransactionSchema.index({ user: 1, createdAt: -1 });
 TransactionSchema.index({ status: 1, type: 1 });
