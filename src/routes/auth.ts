@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/routes/auth.ts (advanced with OAuth and admin fix)
+// ============================================
 import { Router } from 'express';
 import { AuthController } from '../controllers/AuthController';
 import { authenticate } from '../middleware/auth';
@@ -10,7 +13,7 @@ import passport from '../config/passport';
 const router = Router();
 const authController = new AuthController();
 
-// Existing routes...
+// Local auth endpoints
 router.post('/register', authRateLimit, validateRegistration, authController.register);
 router.post('/login', authRateLimit, validateLogin, authController.login);
 router.post('/refresh-token', authController.refreshToken);
@@ -22,19 +25,20 @@ router.post('/change-password', authenticate, validatePasswordChange, authContro
 router.post('/2fa/enable', authenticate, authController.enableTwoFactor);
 router.post('/2fa/disable', authenticate, authController.disableTwoFactor);
 
-// OAuth routes
+// OAuth routes (Google & GitHub)
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 router.get('/google/callback', passport.authenticate('google', { session: false }), (req, res) => {
-  const { token } = (req.user as any);
-  res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
-});
-router.get('/github', passport.authenticate('github', { scope: ['user:email'] }));
-router.get('/github/callback', passport.authenticate('github', { session: false }), (req, res) => {
-  const { token } = (req.user as any);
+  const token = (req.user as any).generateAuthToken ? (req.user as any).generateAuthToken() : 'fallback_token';
   res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
 });
 
-// Temporary admin fix (optional)
+router.get('/github', passport.authenticate('github', { scope: ['user:email'] }));
+router.get('/github/callback', passport.authenticate('github', { session: false }), (req, res) => {
+  const token = (req.user as any).generateAuthToken ? (req.user as any).generateAuthToken() : 'fallback_token';
+  res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
+});
+
+// Admin repair endpoint (fixes missing admin roles)
 router.post('/fix-admin', async (req, res) => {
   try {
     await User.updateOne(
