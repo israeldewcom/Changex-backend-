@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/routes/affiliate.ts
+// ============================================
 import { Router } from 'express';
 import { AffiliateController } from '../controllers/AffiliateController';
 import { authenticate } from '../middleware/auth';
