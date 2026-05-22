@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/models/Course.ts (existing + added hasAffiliate, affiliatePercent)
-// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ILesson extends Document {
@@ -77,6 +74,7 @@ export interface ICourse extends Document {
   submittedAt?: Date;
   hasAffiliate: boolean;           // ADDED
   affiliatePercent: number;        // ADDED
+  affiliateDescription?: string;   // ADDED
   createdAt: Date;
   updatedAt: Date;
 }
@@ -159,8 +157,9 @@ const CourseSchema = new Schema<ICourse>(
     averageRating: { type: Number, default: 0 },
     approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
     submittedAt: { type: Date },
-    hasAffiliate: { type: Boolean, default: false },      // ADDED
-    affiliatePercent: { type: Number, default: 15 },      // ADDED
+    hasAffiliate: { type: Boolean, default: false },
+    affiliatePercent: { type: Number, default: 15 },
+    affiliateDescription: { type: String },
   },
   { timestamps: true }
 );
