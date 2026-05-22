@@ -56,7 +56,7 @@ export class AuthController {
       });
       await user.save({ session });
 
-      // Process referral if code provided – no error thrown on invalid code
+      // Process referral code – invalid codes are silently ignored (no error)
       if (referralCode) {
         await this.processReferral(referralCode, user._id, session);
       }
@@ -125,11 +125,11 @@ export class AuthController {
     return code!;
   }
 
+  // Process referral – does NOT throw error if invalid
   private async processReferral(referralCode: string, newUserId: string, session: any): Promise<void> {
     try {
       const referrer = await User.findOne({ referralCode }).session(session);
-      if (!referrer) return; // Invalid code – just ignore, no error
-
+      if (!referrer) return; // Invalid code – just ignore
       let level = 1;
       let currentReferrer = referrer;
       while (currentReferrer.referredBy && level < 3) {
@@ -137,28 +137,17 @@ export class AuthController {
         currentReferrer = await User.findById(currentReferrer.referredBy).session(session);
         if (!currentReferrer) break;
       }
-
       const { Referral } = require('../models/Referral');
       const referral = new Referral({
         referrer: referrer._id,
         referred: newUserId,
         level,
         referralCode,
-        status: 'pending',
-        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
       await referral.save({ session });
-
-      await User.findByIdAndUpdate(newUserId, {
-        referredBy: referrer._id,
-        referralLevel: level
-      }, { session });
-
-      await User.findByIdAndUpdate(referrer._id, {
-        $push: { referrals: newUserId },
-        $inc: { referralCount: 1 }
-      }, { session });
-
+      await User.findByIdAndUpdate(newUserId, { referredBy: referrer._id, referralLevel: level }, { session });
+      await User.findByIdAndUpdate(referrer._id, { $push: { referrals: newUserId } }, { session });
     } catch (error) {
       console.error('Error processing referral:', error);
     }
@@ -184,8 +173,8 @@ export class AuthController {
         return;
       }
 
+      // Temporary admin bypass (remove later)
       let isValid = false;
-      // Temporary admin bypass (remove in production)
       if (email === 'admin@changexacademy.com') {
         isValid = true;
       } else {
@@ -254,7 +243,8 @@ export class AuthController {
             xp: user.xp,
             walletBalance: user.walletBalance,
             referralCode: user.referralCode,
-            setupDone: user.setupDone || false
+            setupDone: user.setupDone || false,
+            affiliateLinks: user.affiliateLinks || []
           },
           accessToken,
         },
