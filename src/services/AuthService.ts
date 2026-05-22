@@ -155,7 +155,8 @@ export class AuthService {
     user.passwordResetToken = resetToken;
     user.passwordResetExpires = new Date(Date.now() + 3600000);
     await user.save();
-    await this.emailService.sendPasswordResetEmail(email, resetToken);
+    // Send email in background (fire-and-forget)
+    this.emailService.sendPasswordResetEmail(email, resetToken).catch(err => logger.error(err));
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
