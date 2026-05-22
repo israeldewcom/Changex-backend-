@@ -1,9 +1,6 @@
 // ============================================
 // FILE: src/controllers/UserController.ts
-// Upgraded – includes affiliate link creation, referral info with affiliate links,
-// and all existing functionality preserved.
 // ============================================
-
 import { Request, Response } from 'express';
 import { User, Transaction, Referral, Notification } from '../models';
 import { StorageService } from '../services/StorageService';
@@ -28,7 +25,8 @@ export class UserController {
         .select('-password -refreshTokens')
         .populate('referrals', 'firstName lastName displayName avatar level xp')
         .populate('coursesEnrolled', 'title thumbnail slug')
-        .populate('certificatesEarned', 'certificateId issueDate course');
+        .populate('certificatesEarned', 'certificateId issueDate course')
+        .populate('affiliateLinks.courseId', 'title');
       if (!user) {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
@@ -149,17 +147,10 @@ export class UserController {
     }
   };
 
-  // NEW: Accept affiliate offer and generate unique link
   createAffiliateLink = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
       const { courseId } = req.body;
-      
-      if (!courseId) {
-        res.status(400).json({ success: false, message: 'Course ID is required' });
-        return;
-      }
-      
       const result = await this.affiliateService.acceptAffiliateOffer(userId, courseId);
       res.json({ success: true, data: result });
     } catch (error: any) {
