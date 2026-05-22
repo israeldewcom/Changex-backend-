@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/services/AuthService.ts
+// ============================================
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import speakeasy from 'speakeasy';
@@ -65,7 +68,6 @@ export class AuthService {
           logger.info(`Referral code ${userData.referralCode} applied for user ${user._id}`);
         } else {
           logger.warn(`Invalid referral code provided: ${userData.referralCode} – registration continues`);
-          // No error thrown – registration proceeds without referral
         }
       }
 
