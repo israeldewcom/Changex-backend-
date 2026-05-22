@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/models/User.ts (existing + affiliateLinks array)
-// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
@@ -39,7 +36,13 @@ export interface IUser extends Document {
   
   affiliateLinks: Array<{
     courseId: mongoose.Types.ObjectId;
+    courseTitle?: string;
     link: string;
+    clicks: number;
+    signups: number;
+    conversions: number;
+    commissionRate: number;
+    totalEarned: number;
     createdAt: Date;
   }>;
   
@@ -52,7 +55,7 @@ export interface IUser extends Document {
   emailNotifications: boolean;
   twoFactorEnabled: boolean;
   twoFactorSecret?: string;
-  preferredCurrency: string;
+  preferredCurrency: string;   // ✅ Multi‑currency
   
   refreshTokens: string[];
   passwordResetToken?: string;
@@ -64,6 +67,8 @@ export interface IUser extends Document {
   roles: ('user' | 'creator' | 'admin' | 'moderator')[];
   
   isApprovedInstructor: boolean;
+  setupDone?: boolean;
+  referralCount?: number;
   
   createdAt: Date;
   updatedAt: Date;
@@ -73,6 +78,18 @@ export interface IUser extends Document {
   canAccessPremium(): boolean;
   calculateLevel(): number;
 }
+
+const AffiliateLinkSchema = new Schema({
+  courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
+  courseTitle: { type: String },
+  link: { type: String, required: true },
+  clicks: { type: Number, default: 0 },
+  signups: { type: Number, default: 0 },
+  conversions: { type: Number, default: 0 },
+  commissionRate: { type: Number, default: 15 },
+  totalEarned: { type: Number, default: 0 },
+  createdAt: { type: Date, default: Date.now }
+});
 
 const UserSchema = new Schema<IUser>(
   {
@@ -108,11 +125,7 @@ const UserSchema = new Schema<IUser>(
     referralEarnings: { type: Number, default: 0 },
     referralLevel: { type: Number, default: 0 },
     
-    affiliateLinks: [{
-      courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
-      link: { type: String },
-      createdAt: { type: Date, default: Date.now }
-    }],
+    affiliateLinks: [AffiliateLinkSchema],
     
     coursesEnrolled: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
     coursesCompleted: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
@@ -134,6 +147,8 @@ const UserSchema = new Schema<IUser>(
     roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
     
     isApprovedInstructor: { type: Boolean, default: false },
+    setupDone: { type: Boolean, default: false },
+    referralCount: { type: Number, default: 0 },
     
     lastLoginAt: { type: Date, default: Date.now },
   },
