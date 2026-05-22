@@ -13,7 +13,6 @@ import passport from '../config/passport';
 const router = Router();
 const authController = new AuthController();
 
-// Local auth
 router.post('/register', authRateLimit, validateRegistration, authController.register);
 router.post('/login', authRateLimit, validateLogin, authController.login);
 router.post('/refresh-token', authController.refreshToken);
@@ -25,25 +24,28 @@ router.post('/change-password', authenticate, validatePasswordChange, authContro
 router.post('/2fa/enable', authenticate, authController.enableTwoFactor);
 router.post('/2fa/disable', authenticate, authController.disableTwoFactor);
 
-// OAuth routes
-router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-router.get('/google/callback',
-  passport.authenticate('google', { session: false, failureRedirect: `${process.env.FRONTEND_URL}/login` }),
-  (req, res) => {
-    const { token } = req.user as any;
-    res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
-  }
-);
-router.get('/github', passport.authenticate('github', { scope: ['user:email'] }));
-router.get('/github/callback',
-  passport.authenticate('github', { session: false, failureRedirect: `${process.env.FRONTEND_URL}/login` }),
-  (req, res) => {
-    const { token } = req.user as any;
-    res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
-  }
-);
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
+  router.get('/google/callback',
+    passport.authenticate('google', { session: false, failureRedirect: `${process.env.FRONTEND_URL}/login` }),
+    (req, res) => {
+      const { token } = req.user as any;
+      res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
+    }
+  );
+}
 
-// Admin fix endpoint
+if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
+  router.get('/github', passport.authenticate('github', { scope: ['user:email'] }));
+  router.get('/github/callback',
+    passport.authenticate('github', { session: false, failureRedirect: `${process.env.FRONTEND_URL}/login` }),
+    (req, res) => {
+      const { token } = req.user as any;
+      res.redirect(`${process.env.FRONTEND_URL}?token=${token}`);
+    }
+  );
+}
+
 router.post('/fix-admin', async (req, res) => {
   try {
     await User.updateOne(
