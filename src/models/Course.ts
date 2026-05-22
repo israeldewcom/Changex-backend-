@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/models/Course.ts
+// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ILesson extends Document {
@@ -72,9 +75,9 @@ export interface ICourse extends Document {
   averageRating: number;
   approvalStatus: 'pending' | 'approved' | 'rejected';
   submittedAt?: Date;
-  hasAffiliate: boolean;           // ADDED
-  affiliatePercent: number;        // ADDED
-  affiliateDescription?: string;   // ADDED
+  hasAffiliate: boolean;
+  affiliatePercent: number;
+  affiliateDescription?: string;
   createdAt: Date;
   updatedAt: Date;
 }
