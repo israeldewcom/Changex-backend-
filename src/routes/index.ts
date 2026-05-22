@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/routes/index.ts (updated to include affiliate routes)
+// FILE: src/routes/index.ts
 // ============================================
 import { Router } from 'express';
 import authRoutes from './auth';
