@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/models/Announcement.ts (existing, included for completeness)
+// FILE: src/models/Announcement.ts
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
