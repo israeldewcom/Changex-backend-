@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/models/User.ts
+// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
@@ -9,31 +12,26 @@ export interface IUser extends Document {
   displayName: string;
   avatar?: string;
   bio?: string;
-  
   subscriptionTier: 'free' | 'premium' | 'elite';
   subscriptionStatus: 'active' | 'canceled' | 'expired' | 'trialing';
   subscriptionId?: string;
   subscriptionExpiresAt?: Date;
   stripeCustomerId?: string;
   paystackCustomerCode?: string;
-  
   walletBalance: number;
   totalEarned: number;
   totalWithdrawn: number;
   pendingWithdrawal: number;
-  
   xp: number;
   level: number;
   streak: number;
   lastActiveAt: Date;
   badges: string[];
-  
   referralCode: string;
   referredBy?: mongoose.Types.ObjectId;
   referrals: mongoose.Types.ObjectId[];
   referralEarnings: number;
   referralLevel: number;
-  
   affiliateLinks: Array<{
     courseId: mongoose.Types.ObjectId;
     courseTitle?: string;
@@ -45,18 +43,15 @@ export interface IUser extends Document {
     totalEarned: number;
     createdAt: Date;
   }>;
-  
   coursesEnrolled: mongoose.Types.ObjectId[];
   coursesCompleted: mongoose.Types.ObjectId[];
   lessonsCompleted: number;
   certificatesEarned: mongoose.Types.ObjectId[];
   totalSpent: number;
-  
   emailNotifications: boolean;
   twoFactorEnabled: boolean;
   twoFactorSecret?: string;
-  preferredCurrency: string;   // ✅ Multi‑currency
-  
+  preferredCurrency: string;
   refreshTokens: string[];
   passwordResetToken?: string;
   passwordResetExpires?: Date;
@@ -65,15 +60,12 @@ export interface IUser extends Document {
   isActive: boolean;
   isBanned: boolean;
   roles: ('user' | 'creator' | 'admin' | 'moderator')[];
-  
   isApprovedInstructor: boolean;
   setupDone?: boolean;
   referralCount?: number;
-  
   createdAt: Date;
   updatedAt: Date;
   lastLoginAt: Date;
-  
   comparePassword(candidatePassword: string): Promise<boolean>;
   canAccessPremium(): boolean;
   calculateLevel(): number;
@@ -88,7 +80,7 @@ const AffiliateLinkSchema = new Schema({
   conversions: { type: Number, default: 0 },
   commissionRate: { type: Number, default: 15 },
   totalEarned: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
 });
 
 const UserSchema = new Schema<IUser>(
@@ -100,39 +92,32 @@ const UserSchema = new Schema<IUser>(
     displayName: { type: String, required: true, trim: true },
     avatar: { type: String },
     bio: { type: String, maxlength: 500 },
-    
     subscriptionTier: { type: String, enum: ['free', 'premium', 'elite'], default: 'free' },
     subscriptionStatus: { type: String, enum: ['active', 'canceled', 'expired', 'trialing'], default: 'active' },
     subscriptionId: { type: String, sparse: true },
     subscriptionExpiresAt: { type: Date },
     stripeCustomerId: { type: String, sparse: true },
     paystackCustomerCode: { type: String, sparse: true },
-    
     walletBalance: { type: Number, default: 0, min: 0 },
     totalEarned: { type: Number, default: 0 },
     totalWithdrawn: { type: Number, default: 0 },
     pendingWithdrawal: { type: Number, default: 0 },
-    
     xp: { type: Number, default: 0 },
     level: { type: Number, default: 1 },
     streak: { type: Number, default: 0 },
     lastActiveAt: { type: Date, default: Date.now },
     badges: [{ type: String }],
-    
     referralCode: { type: String, unique: true, sparse: true },
     referredBy: { type: Schema.Types.ObjectId, ref: 'User', index: true },
     referrals: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     referralEarnings: { type: Number, default: 0 },
     referralLevel: { type: Number, default: 0 },
-    
     affiliateLinks: [AffiliateLinkSchema],
-    
     coursesEnrolled: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
     coursesCompleted: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
     lessonsCompleted: { type: Number, default: 0 },
     certificatesEarned: [{ type: Schema.Types.ObjectId, ref: 'Certificate' }],
     totalSpent: { type: Number, default: 0 },
-    
     emailNotifications: { type: Boolean, default: true },
     twoFactorEnabled: { type: Boolean, default: false },
     twoFactorSecret: { type: String },
@@ -145,11 +130,9 @@ const UserSchema = new Schema<IUser>(
     isActive: { type: Boolean, default: true },
     isBanned: { type: Boolean, default: false },
     roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
-    
     isApprovedInstructor: { type: Boolean, default: false },
     setupDone: { type: Boolean, default: false },
     referralCount: { type: Number, default: 0 },
-    
     lastLoginAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
