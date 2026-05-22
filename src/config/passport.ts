@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/config/passport.ts (Fixed – no crash if env vars missing)
+// FILE: src/config/passport.ts
 // ============================================
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
@@ -9,7 +9,6 @@ import jwt from 'jsonwebtoken';
 import { config } from './index';
 import { logger } from '../utils/logger';
 
-// Google OAuth – only if credentials are provided
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   passport.use(
     new GoogleStrategy(
@@ -49,7 +48,6 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   logger.warn('Google OAuth credentials missing – strategy not registered');
 }
 
-// GitHub OAuth – only if credentials are provided
 if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
   passport.use(
     new GitHubStrategy(
