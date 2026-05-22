@@ -26,7 +26,6 @@ export class EarningEngine {
     return EarningEngine.instance;
   }
 
-  /** Public method to add XP to a user */
   async addXP(userId: string, amount: number, session?: mongoose.ClientSession): Promise<void> {
     const user = await User.findById(userId).session(session || null);
     if (!user) throw new Error('User not found');
@@ -43,6 +42,34 @@ export class EarningEngine {
       });
     }
     await user.save({ session });
+  }
+
+  // ✅ NEW: referral bonus when referred user subscribes to premium
+  async addReferralBonusOnSubscription(userId: string, amount: number = 500): Promise<void> {
+    const user = await User.findById(userId);
+    if (!user) return;
+    if (!user.referredBy) return;
+
+    const referrer = await User.findById(user.referredBy);
+    if (!referrer) return;
+
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    try {
+      await this.addToWallet(referrer._id.toString(), amount, 'commission', { type: 'referral_subscription', referredId: userId }, session);
+      const referral = await Referral.findOne({ referred: userId }).session(session);
+      if (referral) {
+        referral.status = 'completed';
+        referral.firstPurchaseAt = new Date();
+        await referral.save({ session });
+      }
+      await session.commitTransaction();
+    } catch (error) {
+      await session.abortTransaction();
+      logger.error('Referral bonus error:', error);
+    } finally {
+      session.endSession();
+    }
   }
 
   async distributeCourseCommission(
