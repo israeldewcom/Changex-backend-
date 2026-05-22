@@ -60,7 +60,7 @@ export class AuthService {
       });
       await user.save({ session });
 
-      // Process referral code if provided – but do NOT throw error if invalid
+      // Process referral only if code is valid – otherwise ignore (no error)
       if (userData.referralCode) {
         const referrer = await User.findOne({ referralCode: userData.referralCode }).session(session);
         if (referrer) {
