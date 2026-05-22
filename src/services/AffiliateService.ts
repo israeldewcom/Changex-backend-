@@ -28,9 +28,9 @@ export class AffiliateService {
       if (!user || !course) throw new Error('User or course not found');
       if (!course.hasAffiliate) throw new Error('Affiliate not enabled for this course');
 
-      const alreadyAccepted = user.affiliateLinks?.some(l => l.courseId.toString() === courseId);
+      const alreadyAccepted = user.affiliateLinks?.some(l => l.courseId?.toString() === courseId);
       if (alreadyAccepted) {
-        const existing = user.affiliateLinks.find(l => l.courseId.toString() === courseId);
+        const existing = user.affiliateLinks.find(l => l.courseId?.toString() === courseId);
         return { link: existing!.link };
       }
 
