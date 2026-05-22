@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/controllers/AuthController.ts
+// ============================================
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
 import { validationResult } from 'express-validator';
