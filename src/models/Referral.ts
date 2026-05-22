@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/models/Referral.ts (existing + type, courseId)
+// FILE: src/models/Referral.ts
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
@@ -9,8 +9,8 @@ export interface IReferral extends Document {
   level: number;
   status: 'pending' | 'active' | 'completed' | 'expired';
   referralCode: string;
-  type: 'referral' | 'affiliate';      // ADDED
-  courseId?: mongoose.Types.ObjectId;   // ADDED for affiliate
+  type: 'referral' | 'affiliate';
+  courseId?: mongoose.Types.ObjectId;
   clickedAt?: Date;
   registeredAt?: Date;
   firstPurchaseAt?: Date;
