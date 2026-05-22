@@ -18,7 +18,7 @@ export class AffiliateController {
         published: true,
         approvalStatus: 'approved',
         hasAffiliate: true,
-        price: { $gt: 0 }  // only courses with price > 0 to avoid "No / sale"
+        price: { $gt: 0 }
       }).select('title thumbnail price discountPrice affiliatePercent affiliateDescription instructor');
       res.json({ success: true, data: courses });
     } catch (error) {
