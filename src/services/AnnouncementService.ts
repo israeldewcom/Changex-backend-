@@ -1,5 +1,6 @@
 import { Announcement } from '../models/Announcement';
 import { NotificationService } from './NotificationService';
+import { logger } from '../utils/logger';
 
 export class AnnouncementService {
   private static instance: AnnouncementService;
@@ -25,6 +26,7 @@ export class AnnouncementService {
   async sendToAllUsers(announcementId: string): Promise<number> {
     const announcement = await Announcement.findById(announcementId);
     if (!announcement) throw new Error('Announcement not found');
+    if (announcement.sentToAll) throw new Error('Already sent');
     const { User } = await import('../models/User');
     const users = await User.find({ isActive: true, isBanned: false }).select('_id');
     for (const user of users) {
@@ -41,6 +43,6 @@ export class AnnouncementService {
   }
 
   async getRecentAnnouncements(limit = 20) {
-    return await Announcement.find({ sentToAll: true }).sort({ createdAt: -1 }).limit(limit);
+    return await Announcement.find({ sentToAll: true, isActive: true }).sort({ createdAt: -1 }).limit(limit);
   }
 }
