@@ -60,7 +60,6 @@ export class AuthService {
       });
       await user.save({ session });
 
-      // Process referral only if code is valid – otherwise ignore (no error)
       if (userData.referralCode) {
         const referrer = await User.findOne({ referralCode: userData.referralCode }).session(session);
         if (referrer) {
@@ -155,7 +154,7 @@ export class AuthService {
     user.passwordResetToken = resetToken;
     user.passwordResetExpires = new Date(Date.now() + 3600000);
     await user.save();
-    // Send email in background (fire-and-forget)
+    // Fire and forget
     this.emailService.sendPasswordResetEmail(email, resetToken).catch(err => logger.error(err));
   }
 
