@@ -41,39 +41,9 @@ export class AffiliateController {
         return;
       }
       
-      // This method should be implemented in UserController
-      // For now, we'll handle it directly
-      const User = require('../models/User').User;
-      const user = await User.findById(userId);
-      if (!user) {
-        res.status(404).json({ success: false, message: 'User not found' });
-        return;
-      }
+      const result = await this.affiliateService.acceptAffiliateOffer(userId, courseId);
       
-      const existing = user.affiliateLinks?.find((l: any) => l.courseId.toString() === courseId);
-      if (existing) {
-        res.status(400).json({ success: false, message: 'Affiliate offer already accepted' });
-        return;
-      }
-      
-      const uniqueId = Math.random().toString(36).substr(2, 8);
-      const affiliateLink = `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${uniqueId}`;
-      
-      if (!user.affiliateLinks) user.affiliateLinks = [];
-      user.affiliateLinks.push({
-        courseId: course._id,
-        courseTitle: course.title,
-        link: affiliateLink,
-        clicks: 0,
-        signups: 0,
-        conversions: 0,
-        commissionRate: course.affiliatePercent || 15,
-        totalEarned: 0,
-        createdAt: new Date()
-      });
-      await user.save();
-      
-      res.json({ success: true, data: { link: affiliateLink, courseTitle: course.title, commissionRate: course.affiliatePercent || 15 } });
+      res.json({ success: true, data: { link: result.link, courseTitle: course.title, commissionRate: course.affiliatePercent || 15 } });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
