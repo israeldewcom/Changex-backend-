@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/AuthService.ts (invalid referral code ignored)
+// FILE: src/services/AuthService.ts
 // ============================================
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -151,7 +151,7 @@ export class AuthService {
     user.passwordResetToken = resetToken;
     user.passwordResetExpires = new Date(Date.now() + 3600000);
     await user.save();
-    // Fire and forget – do not await email sending
+    // Fire and forget – do NOT await
     this.emailService.sendPasswordResetEmail(email, resetToken).catch(err => logger.error(err));
   }
 
