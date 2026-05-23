@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/AffiliateService.ts (push to array)
+// FILE: src/services/AffiliateService.ts
 // ============================================
 import mongoose from 'mongoose';
 import { User } from '../models/User';
