@@ -1,5 +1,8 @@
+// ============================================
+// FILE: src/controllers/CourseController.ts (UPGRADED – Full implementation)
+// ============================================
 import { Request, Response } from 'express';
-import { Course, Enrollment, User, Certificate, Review, CourseQuestion, CourseAnswer } from '../models';
+import { Course, Enrollment, User, Certificate, Review, CourseQuestion, CourseAnswer, Transaction, Referral } from '../models';
 import { PaymentService } from '../services/PaymentService';
 import { EarningEngine } from '../services/EarningEngine';
 import { NotificationService } from '../services/NotificationService';
@@ -21,12 +24,13 @@ export class CourseController {
   // ==================== PUBLIC ROUTES ====================
   getAllCourses = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { page = 1, limit = 20, category, level, priceMin, priceMax, search, sortBy = 'createdAt', sortOrder = 'desc', featured, instructor } = req.query;
+      const { page = 1, limit = 20, category, level, priceMin, priceMax, search, sortBy = 'createdAt', sortOrder = 'desc', featured, instructor, hasAffiliate } = req.query;
       const query: any = { published: true, approvalStatus: 'approved' };
       if (category) query.category = category;
       if (level) query.level = level;
       if (featured === 'true') query.featured = true;
       if (instructor) query.instructor = instructor;
+      if (hasAffiliate === 'true') query.hasAffiliate = true;
       if (priceMin || priceMax) {
         query.price = {};
         if (priceMin) query.price.$gte = Number(priceMin);
@@ -57,7 +61,6 @@ export class CourseController {
         res.status(404).json({ success: false, message: 'Course not found' });
         return;
       }
-      // Ensure lessons have all fields for frontend
       const sanitizedCourse = course.toObject();
       sanitizedCourse.lessons = sanitizedCourse.lessons?.map(lesson => ({
         ...lesson,
@@ -129,7 +132,6 @@ export class CourseController {
         affiliateDescription = ''
       } = req.body;
 
-      // Ensure each lesson has required fields
       const sanitizedLessons = (lessons || []).map((lesson: any, index: number) => ({
         title: lesson.title || `Lesson ${index + 1}`,
         description: lesson.description || '',
@@ -143,7 +145,15 @@ export class CourseController {
         resources: lesson.resources || []
       }));
 
-      const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      let slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      let existing = await Course.findOne({ slug });
+      let counter = 1;
+      while (existing) {
+        slug = `${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${counter}`;
+        existing = await Course.findOne({ slug });
+        counter++;
+      }
+
       const courseData = {
         title,
         subtitle,
@@ -192,7 +202,6 @@ export class CourseController {
       }
       
       const updateData = req.body;
-      // Sanitize lessons if present
       if (updateData.lessons) {
         updateData.lessons = updateData.lessons.map((lesson: any, index: number) => ({
           ...lesson,
@@ -202,7 +211,16 @@ export class CourseController {
         }));
         updateData.totalLessons = updateData.lessons.length;
       }
-      if (updateData.title) updateData.slug = updateData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      if (updateData.title) {
+        let newSlug = updateData.title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+        const existing = await Course.findOne({ slug: newSlug, _id: { $ne: id } });
+        if (existing) {
+          let counter = 1;
+          while (await Course.findOne({ slug: `${newSlug}-${counter}`, _id: { $ne: id } })) counter++;
+          newSlug = `${newSlug}-${counter}`;
+        }
+        updateData.slug = newSlug;
+      }
       if (updateData.level) updateData.level = updateData.level.toLowerCase();
       updateData.lastUpdated = new Date();
       updateData.version = (course.version || 1) + 1;
@@ -217,45 +235,130 @@ export class CourseController {
 
   // ==================== ENROLLMENT & PROGRESS ====================
   enrollCourse = async (req: Request, res: Response): Promise<void> => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
       const { courseId } = req.params;
       const userId = (req as any).user?.userId;
       const { paymentMethod = 'wallet' } = req.body;
       
-      const course = await Course.findById(courseId);
+      const course = await Course.findById(courseId).session(session);
       if (!course) {
+        await session.abortTransaction();
         res.status(404).json({ success: false, message: 'Course not found' });
         return;
       }
       if (course.approvalStatus !== 'approved') {
+        await session.abortTransaction();
         res.status(403).json({ success: false, message: 'Course not yet approved' });
         return;
       }
       
-      const existingEnrollment = await Enrollment.findOne({ user: userId, course: courseId });
+      const existingEnrollment = await Enrollment.findOne({ user: userId, course: courseId }).session(session);
       if (existingEnrollment) {
+        await session.abortTransaction();
         res.status(400).json({ success: false, message: 'Already enrolled' });
         return;
       }
       
       const price = course.discountPrice || course.price;
+      
       if (price === 0) {
-        const enrollment = await Enrollment.create({
+        const enrollment = await Enrollment.create([{
           user: userId,
           course: courseId,
           paymentMethod: 'free',
           amountPaid: 0,
           currency: course.currency
-        });
-        await User.findByIdAndUpdate(userId, { $addToSet: { coursesEnrolled: courseId } });
-        await this.earningEngine.addXP(userId, course.xpReward, null as any);
-        res.json({ success: true, data: enrollment, message: 'Successfully enrolled in course' });
+        }], { session });
+        await User.findByIdAndUpdate(userId, { $addToSet: { coursesEnrolled: courseId } }, { session });
+        await this.earningEngine.addXP(userId, course.xpReward, session);
+        await session.commitTransaction();
+        res.json({ success: true, data: enrollment[0], message: 'Successfully enrolled in course' });
         return;
       }
       
       if (paymentMethod === 'wallet') {
-        const enrollment = await this.paymentService.processCoursePurchase(userId, courseId, 'wallet');
-        res.json({ success: true, data: enrollment, message: 'Successfully enrolled in course' });
+        const user = await User.findById(userId).session(session);
+        if (!user || user.walletBalance < price) {
+          await session.abortTransaction();
+          res.status(400).json({ success: false, message: 'Insufficient wallet balance' });
+          return;
+        }
+        
+        user.walletBalance -= price;
+        await user.save({ session });
+        
+        const enrollment = await Enrollment.create([{
+          user: userId,
+          course: courseId,
+          paymentMethod: 'wallet',
+          amountPaid: price,
+          currency: course.currency
+        }], { session });
+        
+        const transaction = new Transaction({
+          user: userId,
+          type: 'purchase',
+          subtype: 'course',
+          amount: price,
+          currency: course.currency,
+          status: 'completed',
+          description: `Purchase of course: ${course.title}`,
+          reference: `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          paymentMethod: 'wallet',
+          courseId: course._id,
+          enrollmentId: enrollment[0]._id,
+          completedAt: new Date()
+        });
+        await transaction.save({ session });
+        
+        await User.findByIdAndUpdate(userId, { 
+          $addToSet: { coursesEnrolled: courseId },
+          $inc: { totalSpent: price }
+        }, { session });
+        
+        course.enrollmentCount += 1;
+        course.totalRevenue += price;
+        await course.save({ session });
+        
+        await this.earningEngine.distributeCourseCommission(userId, courseId, price, transaction._id, session);
+        
+        // ==================== AFFILIATE TRACKING ====================
+        const affiliateCookie = req.cookies.cx_affiliate;
+        if (affiliateCookie) {
+          const [affiliateId, courseIdFromCookie, code] = affiliateCookie.split('|');
+          if (courseId === courseIdFromCookie) {
+            const existingAff = await Referral.findOne({ referred: userId, type: 'affiliate', courseId }).session(session);
+            if (!existingAff) {
+              const referral = new Referral({
+                referrer: affiliateId,
+                referred: userId,
+                level: 1,
+                status: 'completed',
+                referralCode: code,
+                type: 'affiliate',
+                courseId,
+                expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+              });
+              await referral.save({ session });
+              const commissionAmount = (price * (course.affiliatePercent || 15)) / 100;
+              await this.earningEngine.addToWallet(affiliateId, commissionAmount, 'affiliate', { courseId, referralId: referral._id }, session);
+              const affiliateUser = await User.findById(affiliateId).session(session);
+              if (affiliateUser && affiliateUser.affiliateLinks) {
+                const link = affiliateUser.affiliateLinks.find(l => l.link.includes(code));
+                if (link) {
+                  link.conversions = (link.conversions || 0) + 1;
+                  link.totalEarned = (link.totalEarned || 0) + commissionAmount;
+                  await affiliateUser.save({ session });
+                }
+              }
+            }
+          }
+        }
+        
+        await session.commitTransaction();
+        res.json({ success: true, data: enrollment[0], message: 'Successfully enrolled in course' });
       } else if (paymentMethod === 'stripe') {
         const { clientSecret, paymentIntentId } = await this.paymentService.createStripePaymentIntent(
           userId, price, course.currency,
@@ -271,7 +374,11 @@ export class CourseController {
         res.json({ success: true, data: { paymentUrl }, requiresPayment: true });
       }
     } catch (error: any) {
+      await session.abortTransaction();
+      logger.error('Enroll course error:', error);
       res.status(500).json({ success: false, message: error.message || 'Server error' });
+    } finally {
+      session.endSession();
     }
   };
 
@@ -315,20 +422,23 @@ export class CourseController {
   };
 
   updateLessonProgress = async (req: Request, res: Response): Promise<void> => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
     try {
       const { courseId, lessonId } = req.params;
       const userId = (req as any).user?.userId;
       const { completed } = req.body;
       
-      const enrollment = await Enrollment.findOne({ user: userId, course: courseId });
+      const enrollment = await Enrollment.findOne({ user: userId, course: courseId }).session(session);
       if (!enrollment) {
+        await session.abortTransaction();
         res.status(404).json({ success: false, message: 'Enrollment not found' });
         return;
       }
       
       if (completed && !enrollment.lessonsCompleted.includes(lessonId as any)) {
         enrollment.lessonsCompleted.push(lessonId as any);
-        const course = await Course.findById(courseId);
+        const course = await Course.findById(courseId).session(session);
         if (course) {
           enrollment.progress = (enrollment.lessonsCompleted.length / course.totalLessons) * 100;
         }
@@ -337,15 +447,16 @@ export class CourseController {
       
       enrollment.lastAccessedAt = new Date();
       enrollment.lastLessonId = lessonId as any;
-      await enrollment.save();
+      await enrollment.save({ session });
       
-      const course = await Course.findById(courseId);
+      const course = await Course.findById(courseId).session(session);
       if (course && enrollment.lessonsCompleted.length === course.totalLessons) {
         enrollment.status = 'completed';
         enrollment.completedAt = new Date();
-        await enrollment.save();
+        await enrollment.save({ session });
         const certificate = await this.generateCertificate(userId, courseId, enrollment._id);
         await this.earningEngine.addCourseCompletionReward(userId, courseId, course.xpReward, 100);
+        await session.commitTransaction();
         res.json({
           success: true,
           data: { progress: enrollment.progress, completed: true, certificate },
@@ -353,9 +464,14 @@ export class CourseController {
         });
         return;
       }
+      await session.commitTransaction();
       res.json({ success: true, data: { progress: enrollment.progress, completed: false } });
     } catch (error) {
+      await session.abortTransaction();
+      logger.error('Update lesson progress error:', error);
       res.status(500).json({ success: false, message: 'Server error' });
+    } finally {
+      session.endSession();
     }
   };
 
@@ -399,6 +515,7 @@ export class CourseController {
       await Course.findByIdAndUpdate(id, { rating: avgRating, reviewCount: allReviews.length });
       res.json({ success: true, message: 'Rating submitted' });
     } catch (error) {
+      logger.error('Rate course error:', error);
       res.status(500).json({ success: false, message: 'Server error' });
     }
   };
@@ -418,6 +535,7 @@ export class CourseController {
         .populate({ path: 'answers', populate: { path: 'user', select: 'firstName lastName avatar roles' } });
       res.json({ success: true, data: questions });
     } catch (error) {
+      logger.error('Get course questions error:', error);
       res.status(500).json({ success: false, message: 'Server error' });
     }
   };
@@ -452,6 +570,49 @@ export class CourseController {
       }
       res.status(201).json({ success: true, data: newQuestion });
     } catch (error) {
+      logger.error('Ask question error:', error);
+      res.status(500).json({ success: false, message: 'Server error' });
+    }
+  };
+
+  answerQuestion = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { questionId } = req.params;
+      const userId = (req as any).user.userId;
+      const { answer } = req.body;
+      
+      if (!answer || answer.length < 3) {
+        res.status(400).json({ success: false, message: 'Answer must be at least 3 characters' });
+        return;
+      }
+      
+      const question = await CourseQuestion.findById(questionId).populate('course');
+      if (!question) {
+        res.status(404).json({ success: false, message: 'Question not found' });
+        return;
+      }
+      
+      const course = await Course.findById(question.course);
+      if (course && course.instructor.toString() !== userId && !(req as any).user?.roles?.includes('admin')) {
+        res.status(403).json({ success: false, message: 'Only the instructor can answer questions' });
+        return;
+      }
+      
+      const newAnswer = new CourseAnswer({ question: questionId, user: userId, answer });
+      await newAnswer.save();
+      
+      question.answers.push(newAnswer._id);
+      await question.save();
+      
+      await this.notificationService.sendNotification(question.user.toString(), 'course', {
+        title: 'Your question was answered',
+        message: `Instructor answered: ${answer.substring(0, 80)}...`,
+        metadata: { questionId, courseId: question.course }
+      });
+      
+      res.status(201).json({ success: true, data: newAnswer });
+    } catch (error) {
+      logger.error('Answer question error:', error);
       res.status(500).json({ success: false, message: 'Server error' });
     }
   };
@@ -463,7 +624,8 @@ export class CourseController {
     if (!user || !course) throw new Error('User or course not found');
     const certificateId = `CHX-${Date.now()}-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-certificate/${certificateId}`;
-    const certificate = new Certificate({
+    const CertificateModel = require('../models/Certificate').Certificate;
+    const certificate = new CertificateModel({
       user: userId,
       course: courseId,
       enrollment: enrollmentId,
