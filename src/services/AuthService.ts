@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/AuthService.ts
+// FILE: src/services/AuthService.ts (invalid referral code ignored)
 // ============================================
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -29,12 +29,8 @@ export class AuthService {
   }
 
   generateTokens(userId: string): { accessToken: string; refreshToken: string } {
-    const accessToken = jwt.sign({ userId }, config.jwt.accessSecret, {
-      expiresIn: config.jwt.accessExpiry,
-    });
-    const refreshToken = jwt.sign({ userId }, config.jwt.refreshSecret, {
-      expiresIn: config.jwt.refreshExpiry,
-    });
+    const accessToken = jwt.sign({ userId }, config.jwt.accessSecret, { expiresIn: config.jwt.accessExpiry });
+    const refreshToken = jwt.sign({ userId }, config.jwt.refreshSecret, { expiresIn: config.jwt.refreshExpiry });
     return { accessToken, refreshToken };
   }
 
@@ -60,6 +56,7 @@ export class AuthService {
       });
       await user.save({ session });
 
+      // Process referral only if code is valid – otherwise ignore (no error)
       if (userData.referralCode) {
         const referrer = await User.findOne({ referralCode: userData.referralCode }).session(session);
         if (referrer) {
@@ -154,7 +151,7 @@ export class AuthService {
     user.passwordResetToken = resetToken;
     user.passwordResetExpires = new Date(Date.now() + 3600000);
     await user.save();
-    // Fire and forget
+    // Fire and forget – do not await email sending
     this.emailService.sendPasswordResetEmail(email, resetToken).catch(err => logger.error(err));
   }
 
