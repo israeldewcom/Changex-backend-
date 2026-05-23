@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/AuthController.ts
+// FILE: src/controllers/AuthController.ts (forgot password fire-and-forget)
 // ============================================
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
@@ -305,6 +305,7 @@ export class AuthController {
   forgotPassword = async (req: Request, res: Response): Promise<void> => {
     try {
       const { email } = req.body;
+      // Fire and forget – do NOT await
       this.authService.forgotPassword(email).catch(err => logger.error(err));
       res.json({ success: true, message: 'If an account exists, a password reset link has been sent.' });
     } catch (error) {
