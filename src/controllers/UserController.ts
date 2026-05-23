@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/UserController.ts (welcome bonus on setupDone)
+// FILE: src/controllers/UserController.ts (welcome bonus)
 // ============================================
 import { Request, Response } from 'express';
 import { User, Transaction, Referral, Notification } from '../models';
