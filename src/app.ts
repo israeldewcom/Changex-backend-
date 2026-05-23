@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/app.ts
+// ============================================
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -15,7 +18,6 @@ import { logger } from './utils/logger';
 
 const app = express();
 
-// Helmet configuration (relaxed for PWA)
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -31,7 +33,6 @@ app.use(
   })
 );
 
-// CORS – allow frontend origin
 app.use(
   cors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -40,7 +41,6 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
   })
 );
-
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }));
 app.use(express.json({ limit: '10mb' }));
@@ -48,7 +48,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(passport.initialize());
 
-// XSS sanitization for request body
 app.use((req, res, next) => {
   if (req.body) {
     const sanitizeObj = (obj: any): any => {
@@ -65,7 +64,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// CSRF protection – skip for authentication routes and webhooks
 app.use((req, res, next) => {
   const skipPaths = ['/api/v1/auth', '/webhooks'];
   const shouldSkip = skipPaths.some(path => req.path.startsWith(path)) || req.method === 'GET';
@@ -73,28 +71,15 @@ app.use((req, res, next) => {
   simpleCsrf(req, res, next);
 });
 
-// Global rate limiting
 app.use(generalRateLimit);
-
-// API routes
 app.use('/api', routes);
-
-// Static certificates directory
 app.use('/certificates', express.static('public/certificates'));
 
-// Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    environment: config.env,
-  });
+  res.json({ status: 'healthy', timestamp: new Date().toISOString(), environment: config.env });
 });
 
-// 404 handler
 app.use(notFound);
-
-// Central error handler
 app.use(errorHandler);
 
 export default app;
