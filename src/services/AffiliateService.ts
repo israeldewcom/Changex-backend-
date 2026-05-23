@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/AffiliateService.ts
+// FILE: src/services/AffiliateService.ts (push to array)
 // ============================================
 import mongoose from 'mongoose';
 import { User } from '../models/User';
@@ -36,10 +36,9 @@ export class AffiliateService {
 
       const uniqueId = Math.random().toString(36).substr(2, 8);
       const link = `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${uniqueId}`;
-      
       if (!user.affiliateLinks) user.affiliateLinks = [];
       user.affiliateLinks.push({
-        courseId: course._id as mongoose.Types.ObjectId,
+        courseId: course._id,
         courseTitle: course.title,
         link,
         clicks: 0,
@@ -50,7 +49,6 @@ export class AffiliateService {
         createdAt: new Date()
       });
       await user.save({ session });
-
       await session.commitTransaction();
       return { link };
     } catch (error) {
@@ -110,7 +108,6 @@ export class AffiliateService {
   async getAffiliateStats(userId: string): Promise<any> {
     const user = await User.findById(userId).populate('affiliateLinks.courseId', 'title');
     if (!user) throw new Error('User not found');
-
     const affiliateReferrals = await Referral.find({ referrer: userId, type: 'affiliate' }).populate('courseId', 'title');
     const links = (user.affiliateLinks || []).map(link => {
       const referralsForLink = affiliateReferrals.filter(r => r.courseId?._id.toString() === link.courseId?._id.toString());
@@ -132,28 +129,13 @@ export class AffiliateService {
     const totalSignups = links.reduce((sum, l) => sum + l.signups, 0);
     const totalConversions = links.reduce((sum, l) => sum + l.conversions, 0);
     const totalEarned = links.reduce((sum, l) => sum + l.totalEarned, 0);
-
-    return {
-      totalClicks,
-      totalSignups,
-      totalConversions,
-      totalEarned,
-      links
-    };
+    return { totalClicks, totalSignups, totalConversions, totalEarned, links };
   }
 
   async getTopAffiliates(limit: number = 10): Promise<any[]> {
     const users = await User.aggregate([
       { $match: { 'affiliateLinks.0': { $exists: true } } },
-      { $project: {
-          firstName: 1,
-          lastName: 1,
-          displayName: 1,
-          avatar: 1,
-          totalAffiliateEarnings: { $sum: '$affiliateLinks.totalEarned' },
-          totalAffiliateConversions: { $sum: '$affiliateLinks.conversions' },
-          affiliateLinksCount: { $size: '$affiliateLinks' }
-        } },
+      { $project: { firstName: 1, lastName: 1, displayName: 1, avatar: 1, totalAffiliateEarnings: { $sum: '$affiliateLinks.totalEarned' }, totalAffiliateConversions: { $sum: '$affiliateLinks.conversions' }, affiliateLinksCount: { $size: '$affiliateLinks' } } },
       { $sort: { totalAffiliateEarnings: -1 } },
       { $limit: limit }
     ]);
