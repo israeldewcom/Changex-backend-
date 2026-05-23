@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/models/User.ts
+// FILE: src/models/User.ts (added affiliateLinks, welcomeBonusGiven)
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
@@ -63,6 +63,7 @@ export interface IUser extends Document {
   isApprovedInstructor: boolean;
   setupDone?: boolean;
   referralCount?: number;
+  welcomeBonusGiven?: boolean;
   createdAt: Date;
   updatedAt: Date;
   lastLoginAt: Date;
@@ -133,6 +134,7 @@ const UserSchema = new Schema<IUser>(
     isApprovedInstructor: { type: Boolean, default: false },
     setupDone: { type: Boolean, default: false },
     referralCount: { type: Number, default: 0 },
+    welcomeBonusGiven: { type: Boolean, default: false },
     lastLoginAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
