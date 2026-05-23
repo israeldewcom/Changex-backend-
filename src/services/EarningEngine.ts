@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/EarningEngine.ts (with referral bonus method)
+// FILE: src/services/EarningEngine.ts
 // ============================================
 import mongoose from 'mongoose';
 import { User } from '../models/User';
