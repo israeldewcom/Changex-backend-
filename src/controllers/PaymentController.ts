@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/controllers/PaymentController.ts (Upgraded – with subscription, referral bonus, Paystack inline)
+// ============================================
 import { Request, Response } from 'express';
 import { PaymentService } from '../services/PaymentService';
 import { User, Transaction, WithdrawalRequest, Referral } from '../models';
