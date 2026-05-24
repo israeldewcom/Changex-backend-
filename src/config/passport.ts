@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/config/passport.ts
+// FILE: src/config/passport.ts (Complete – conditional OAuth)
 // ============================================
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
@@ -33,9 +33,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
             });
             await user.save();
           }
-          const token = jwt.sign({ userId: user._id }, config.jwt.accessSecret, {
-            expiresIn: config.jwt.accessExpiry,
-          });
+          const token = jwt.sign({ userId: user._id }, config.jwt.accessSecret, { expiresIn: config.jwt.accessExpiry });
           return done(null, { user, token });
         } catch (error) {
           return done(error as Error, undefined);
@@ -74,9 +72,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
             });
             await user.save();
           }
-          const token = jwt.sign({ userId: user._id }, config.jwt.accessSecret, {
-            expiresIn: config.jwt.accessExpiry,
-          });
+          const token = jwt.sign({ userId: user._id }, config.jwt.accessSecret, { expiresIn: config.jwt.accessExpiry });
           return done(null, { user, token });
         } catch (error) {
           return done(error as Error, undefined);
