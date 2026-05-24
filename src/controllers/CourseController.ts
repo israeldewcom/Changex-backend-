@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/CourseController.ts (affiliate tracking, completion bonus)
+// FILE: src/controllers/CourseController.ts (Complete – with timeSpent & completion bonus)
 // ============================================
 import { Request, Response } from 'express';
 import { Course, Enrollment, User, Certificate, Review, CourseQuestion, CourseAnswer, Transaction, Referral } from '../models';
@@ -21,7 +21,6 @@ export class CourseController {
     this.notificationService = NotificationService.getInstance();
   }
 
-  // ==================== PUBLIC ROUTES ====================
   getAllCourses = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, category, level, priceMin, priceMax, search, sortBy = 'createdAt', sortOrder = 'desc', featured, instructor, hasAffiliate } = req.query;
@@ -89,7 +88,6 @@ export class CourseController {
     }
   };
 
-  // ==================== COURSE CREATION & EDITING ====================
   createCourse = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
@@ -233,7 +231,6 @@ export class CourseController {
     }
   };
 
-  // ==================== ENROLLMENT & PROGRESS ====================
   enrollCourse = async (req: Request, res: Response): Promise<void> => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -309,7 +306,7 @@ export class CourseController {
           paymentMethod: 'wallet',
           courseId: course._id,
           enrollmentId: enrollment[0]._id,
-          completedAt: new Date()
+          completedAt: new Date(),
         });
         await transaction.save({ session });
         
@@ -324,24 +321,19 @@ export class CourseController {
         
         await this.earningEngine.distributeCourseCommission(userId, courseId, price, transaction._id, session);
         
-        // Handle affiliate tracking (from cookie OR body)
+        // ✅ Handle affiliate tracking (from body OR cookie)
         let affId: string | null = null;
         let affCourseId: string | null = null;
         let affCode: string | null = null;
         
-        // First, check if affiliate data is in request body (from frontend localStorage)
         if (affiliateCode && affiliateId) {
           affId = affiliateId;
           affCourseId = courseId;
           affCode = affiliateCode;
         } else {
-          // Fallback to cookie
           const affiliateCookie = req.cookies.cx_affiliate;
           if (affiliateCookie) {
-            const [cookieAffId, cookieCourseId, cookieCode] = affiliateCookie.split('|');
-            affId = cookieAffId;
-            affCourseId = cookieCourseId;
-            affCode = cookieCode;
+            [affId, affCourseId, affCode] = affiliateCookie.split('|');
           }
         }
         
@@ -461,7 +453,7 @@ export class CourseController {
         await this.earningEngine.addLessonCompletionReward(userId, lessonId, courseId, 50, 10);
       }
       
-      // Track time spent if provided
+      // ✅ Track time spent
       if (timeSpent && timeSpent > 0) {
         enrollment.timeSpent = (enrollment.timeSpent || 0) + timeSpent;
         await enrollment.save({ session });
@@ -472,8 +464,9 @@ export class CourseController {
       await enrollment.save({ session });
       
       const course = await Course.findById(courseId).session(session);
-      // Award course completion bonus if all lessons completed OR total time spent >= course total duration
-      const isTimeCompleted = course && (enrollment.timeSpent || 0) >= (course.totalDuration * 60); // totalDuration in minutes -> seconds
+      const isTimeCompleted = course && (enrollment.timeSpent || 0) >= (course.totalDuration * 60);
+      
+      // ✅ Award course completion bonus if all lessons completed OR time threshold reached
       if (course && (enrollment.lessonsCompleted.length === course.totalLessons || isTimeCompleted) && enrollment.status !== 'completed') {
         enrollment.status = 'completed';
         enrollment.completedAt = new Date();
@@ -502,7 +495,6 @@ export class CourseController {
     }
   };
 
-  // ==================== RATINGS & REVIEWS ====================
   rateCourse = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -547,7 +539,6 @@ export class CourseController {
     }
   };
 
-  // ==================== STUDENT Q&A ====================
   getCourseQuestions = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -644,7 +635,6 @@ export class CourseController {
     }
   };
 
-  // ==================== HELPER ====================
   private async generateCertificate(userId: string, courseId: string, enrollmentId: mongoose.Types.ObjectId): Promise<any> {
     const user = await User.findById(userId);
     const course = await Course.findById(courseId);
