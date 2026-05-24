@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/models/Referral.ts
+// FILE: src/models/Referral.ts (with type, courseId)
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
