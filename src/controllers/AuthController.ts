@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/AuthController.ts
+// FILE: src/controllers/AuthController.ts (forgot password fire-and-forget)
 // ============================================
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
