@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/routes/auth.ts
+// FILE: src/routes/auth.ts (ADVANCED – Added referral redirect & admin fix)
 // ============================================
 import { Router } from 'express';
 import { AuthController } from '../controllers/AuthController';
@@ -13,6 +13,7 @@ import passport from '../config/passport';
 const router = Router();
 const authController = new AuthController();
 
+// ==================== LOCAL AUTHENTICATION ====================
 router.post('/register', authRateLimit, validateRegistration, authController.register);
 router.post('/login', authRateLimit, validateLogin, authController.login);
 router.post('/refresh-token', authController.refreshToken);
@@ -24,6 +25,14 @@ router.post('/change-password', authenticate, validatePasswordChange, authContro
 router.post('/2fa/enable', authenticate, authController.enableTwoFactor);
 router.post('/2fa/disable', authenticate, authController.disableTwoFactor);
 
+// ==================== REFERRAL REDIRECT (Fixes 404 for /ref/CODE) ====================
+router.get('/ref/:code', (req, res) => {
+  const { code } = req.params;
+  const frontendUrl = process.env.FRONTEND_URL || 'https://adc-mu.vercel.app';
+  res.redirect(`${frontendUrl}/?ref=${code}`);
+});
+
+// ==================== OAUTH (GOOGLE & GITHUB) ====================
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
   router.get('/google/callback',
@@ -46,6 +55,7 @@ if (process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET) {
   );
 }
 
+// ==================== ADMIN FIX ENDPOINT ====================
 router.post('/fix-admin', async (req, res) => {
   try {
     await User.updateOne(
