@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/UserController.ts (welcome bonus)
+// FILE: src/controllers/UserController.ts (welcome bonus on setupDone)
 // ============================================
 import { Request, Response } from 'express';
 import { User, Transaction, Referral, Notification } from '../models';
@@ -153,7 +153,7 @@ export class UserController {
         .populate('courseId', 'title')
         .sort({ createdAt: -1 });
       
-      const referralLink = `${process.env.FRONTEND_URL}/signup?ref=${user.referralCode}`;
+      const referralLink = `${process.env.FRONTEND_URL}/?ref=${user.referralCode}`;
       
       res.json({
         success: true,
