@@ -1,5 +1,7 @@
 // ============================================
-// FILE: src/controllers/CourseController.ts (UPGRADED – Full implementation)
+// FILE: src/controllers/CourseController.ts
+// FIX: Ensure course completion bonus is awarded when all lessons completed
+// Also includes affiliate cookie handling (already present, but kept intact)
 // ============================================
 import { Request, Response } from 'express';
 import { Course, Enrollment, User, Certificate, Review, CourseQuestion, CourseAnswer, Transaction, Referral } from '../models';
@@ -21,7 +23,6 @@ export class CourseController {
     this.notificationService = NotificationService.getInstance();
   }
 
-  // ==================== PUBLIC ROUTES ====================
   getAllCourses = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, category, level, priceMin, priceMax, search, sortBy = 'createdAt', sortOrder = 'desc', featured, instructor, hasAffiliate } = req.query;
@@ -89,7 +90,6 @@ export class CourseController {
     }
   };
 
-  // ==================== COURSE CREATION & EDITING ====================
   createCourse = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
@@ -233,7 +233,6 @@ export class CourseController {
     }
   };
 
-  // ==================== ENROLLMENT & PROGRESS ====================
   enrollCourse = async (req: Request, res: Response): Promise<void> => {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -324,7 +323,6 @@ export class CourseController {
         
         await this.earningEngine.distributeCourseCommission(userId, courseId, price, transaction._id, session);
         
-        // ==================== AFFILIATE TRACKING ====================
         const affiliateCookie = req.cookies.cx_affiliate;
         if (affiliateCookie) {
           const [affiliateId, courseIdFromCookie, code] = affiliateCookie.split('|');
@@ -450,20 +448,24 @@ export class CourseController {
       await enrollment.save({ session });
       
       const course = await Course.findById(courseId).session(session);
-      if (course && enrollment.lessonsCompleted.length === course.totalLessons) {
+      // ✅ FIX: Award course completion bonus when all lessons are completed
+      if (course && enrollment.lessonsCompleted.length === course.totalLessons && enrollment.status !== 'completed') {
         enrollment.status = 'completed';
         enrollment.completedAt = new Date();
         await enrollment.save({ session });
+        
         const certificate = await this.generateCertificate(userId, courseId, enrollment._id);
         await this.earningEngine.addCourseCompletionReward(userId, courseId, course.xpReward, 100);
+        
         await session.commitTransaction();
         res.json({
           success: true,
-          data: { progress: enrollment.progress, completed: true, certificate },
-          message: 'Congratulations! You completed the course!'
+          data: { progress: 100, completed: true, certificate },
+          message: '🎉 Course completed! ₦100 bonus added to your wallet!'
         });
         return;
       }
+      
       await session.commitTransaction();
       res.json({ success: true, data: { progress: enrollment.progress, completed: false } });
     } catch (error) {
@@ -475,7 +477,6 @@ export class CourseController {
     }
   };
 
-  // ==================== RATINGS & REVIEWS ====================
   rateCourse = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -520,7 +521,6 @@ export class CourseController {
     }
   };
 
-  // ==================== STUDENT Q&A ====================
   getCourseQuestions = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -617,7 +617,6 @@ export class CourseController {
     }
   };
 
-  // ==================== HELPER ====================
   private async generateCertificate(userId: string, courseId: string, enrollmentId: mongoose.Types.ObjectId): Promise<any> {
     const user = await User.findById(userId);
     const course = await Course.findById(courseId);
