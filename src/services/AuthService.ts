@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/AuthService.ts
+// FILE: src/services/AuthService.ts (ignore invalid referral codes)
 // ============================================
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
