@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/AffiliateController.ts
+// FILE: src/controllers/AffiliateController.ts (full)
 // ============================================
 import { Request, Response } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
@@ -53,11 +53,13 @@ export class AffiliateController {
       const ip = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('user-agent') || '';
       await this.affiliateService.trackClick(userId, courseId, code, ip, userAgent);
+      // Set cookie for backward compatibility (but frontend uses localStorage, so optional)
       res.cookie('cx_affiliate', `${userId}|${courseId}|${code}`, {
         maxAge: 30 * 24 * 60 * 60 * 1000,
         httpOnly: false,
         path: '/'
       });
+      // Redirect to frontend course page (using hash)
       res.redirect(`${process.env.FRONTEND_URL}/#/courses/${courseId}`);
     } catch (error) {
       res.redirect(`${process.env.FRONTEND_URL}/#/courses/${req.params.courseId}`);
