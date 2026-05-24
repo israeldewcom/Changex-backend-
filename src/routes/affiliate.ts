@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/routes/affiliate.ts
+// FILE: src/routes/affiliate.ts (full)
 // ============================================
 import { Router } from 'express';
 import { AffiliateController } from '../controllers/AffiliateController';
