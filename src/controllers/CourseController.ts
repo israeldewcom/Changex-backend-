@@ -1,7 +1,5 @@
 // ============================================
-// FILE: src/controllers/CourseController.ts
-// FIX: Ensure course completion bonus is awarded when all lessons completed
-// Also includes affiliate cookie handling (already present, but kept intact)
+// FILE: src/controllers/CourseController.ts (affiliate tracking, completion bonus)
 // ============================================
 import { Request, Response } from 'express';
 import { Course, Enrollment, User, Certificate, Review, CourseQuestion, CourseAnswer, Transaction, Referral } from '../models';
@@ -23,6 +21,7 @@ export class CourseController {
     this.notificationService = NotificationService.getInstance();
   }
 
+  // ==================== PUBLIC ROUTES ====================
   getAllCourses = async (req: Request, res: Response): Promise<void> => {
     try {
       const { page = 1, limit = 20, category, level, priceMin, priceMax, search, sortBy = 'createdAt', sortOrder = 'desc', featured, instructor, hasAffiliate } = req.query;
@@ -90,6 +89,7 @@ export class CourseController {
     }
   };
 
+  // ==================== COURSE CREATION & EDITING ====================
   createCourse = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
@@ -233,13 +233,14 @@ export class CourseController {
     }
   };
 
+  // ==================== ENROLLMENT & PROGRESS ====================
   enrollCourse = async (req: Request, res: Response): Promise<void> => {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
       const { courseId } = req.params;
       const userId = (req as any).user?.userId;
-      const { paymentMethod = 'wallet' } = req.body;
+      const { paymentMethod = 'wallet', affiliateCode, affiliateId } = req.body;
       
       const course = await Course.findById(courseId).session(session);
       if (!course) {
@@ -323,33 +324,50 @@ export class CourseController {
         
         await this.earningEngine.distributeCourseCommission(userId, courseId, price, transaction._id, session);
         
-        const affiliateCookie = req.cookies.cx_affiliate;
-        if (affiliateCookie) {
-          const [affiliateId, courseIdFromCookie, code] = affiliateCookie.split('|');
-          if (courseId === courseIdFromCookie) {
-            const existingAff = await Referral.findOne({ referred: userId, type: 'affiliate', courseId }).session(session);
-            if (!existingAff) {
-              const referral = new Referral({
-                referrer: affiliateId,
-                referred: userId,
-                level: 1,
-                status: 'completed',
-                referralCode: code,
-                type: 'affiliate',
-                courseId,
-                expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
-              });
-              await referral.save({ session });
-              const commissionAmount = (price * (course.affiliatePercent || 15)) / 100;
-              await this.earningEngine.addToWallet(affiliateId, commissionAmount, 'affiliate', { courseId, referralId: referral._id }, session);
-              const affiliateUser = await User.findById(affiliateId).session(session);
-              if (affiliateUser && affiliateUser.affiliateLinks) {
-                const link = affiliateUser.affiliateLinks.find(l => l.link.includes(code));
-                if (link) {
-                  link.conversions = (link.conversions || 0) + 1;
-                  link.totalEarned = (link.totalEarned || 0) + commissionAmount;
-                  await affiliateUser.save({ session });
-                }
+        // Handle affiliate tracking (from cookie OR body)
+        let affId: string | null = null;
+        let affCourseId: string | null = null;
+        let affCode: string | null = null;
+        
+        // First, check if affiliate data is in request body (from frontend localStorage)
+        if (affiliateCode && affiliateId) {
+          affId = affiliateId;
+          affCourseId = courseId;
+          affCode = affiliateCode;
+        } else {
+          // Fallback to cookie
+          const affiliateCookie = req.cookies.cx_affiliate;
+          if (affiliateCookie) {
+            const [cookieAffId, cookieCourseId, cookieCode] = affiliateCookie.split('|');
+            affId = cookieAffId;
+            affCourseId = cookieCourseId;
+            affCode = cookieCode;
+          }
+        }
+        
+        if (affId && affCourseId === courseId && affCode) {
+          const existingAff = await Referral.findOne({ referred: userId, type: 'affiliate', courseId }).session(session);
+          if (!existingAff) {
+            const referral = new Referral({
+              referrer: affId,
+              referred: userId,
+              level: 1,
+              status: 'completed',
+              referralCode: affCode,
+              type: 'affiliate',
+              courseId,
+              expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+            });
+            await referral.save({ session });
+            const commissionAmount = (price * (course.affiliatePercent || 15)) / 100;
+            await this.earningEngine.addToWallet(affId, commissionAmount, 'affiliate', { courseId, referralId: referral._id }, session);
+            const affiliateUser = await User.findById(affId).session(session);
+            if (affiliateUser && affiliateUser.affiliateLinks) {
+              const link = affiliateUser.affiliateLinks.find(l => l.link.includes(affCode));
+              if (link) {
+                link.conversions = (link.conversions || 0) + 1;
+                link.totalEarned = (link.totalEarned || 0) + commissionAmount;
+                await affiliateUser.save({ session });
               }
             }
           }
@@ -425,7 +443,7 @@ export class CourseController {
     try {
       const { courseId, lessonId } = req.params;
       const userId = (req as any).user?.userId;
-      const { completed } = req.body;
+      const { completed, timeSpent } = req.body;
       
       const enrollment = await Enrollment.findOne({ user: userId, course: courseId }).session(session);
       if (!enrollment) {
@@ -443,13 +461,20 @@ export class CourseController {
         await this.earningEngine.addLessonCompletionReward(userId, lessonId, courseId, 50, 10);
       }
       
+      // Track time spent if provided
+      if (timeSpent && timeSpent > 0) {
+        enrollment.timeSpent = (enrollment.timeSpent || 0) + timeSpent;
+        await enrollment.save({ session });
+      }
+      
       enrollment.lastAccessedAt = new Date();
       enrollment.lastLessonId = lessonId as any;
       await enrollment.save({ session });
       
       const course = await Course.findById(courseId).session(session);
-      // ✅ FIX: Award course completion bonus when all lessons are completed
-      if (course && enrollment.lessonsCompleted.length === course.totalLessons && enrollment.status !== 'completed') {
+      // Award course completion bonus if all lessons completed OR total time spent >= course total duration
+      const isTimeCompleted = course && (enrollment.timeSpent || 0) >= (course.totalDuration * 60); // totalDuration in minutes -> seconds
+      if (course && (enrollment.lessonsCompleted.length === course.totalLessons || isTimeCompleted) && enrollment.status !== 'completed') {
         enrollment.status = 'completed';
         enrollment.completedAt = new Date();
         await enrollment.save({ session });
@@ -477,6 +502,7 @@ export class CourseController {
     }
   };
 
+  // ==================== RATINGS & REVIEWS ====================
   rateCourse = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -521,6 +547,7 @@ export class CourseController {
     }
   };
 
+  // ==================== STUDENT Q&A ====================
   getCourseQuestions = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -617,6 +644,7 @@ export class CourseController {
     }
   };
 
+  // ==================== HELPER ====================
   private async generateCertificate(userId: string, courseId: string, enrollmentId: mongoose.Types.ObjectId): Promise<any> {
     const user = await User.findById(userId);
     const course = await Course.findById(courseId);
