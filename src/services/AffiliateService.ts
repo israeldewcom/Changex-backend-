@@ -1,5 +1,6 @@
 // ============================================
 // FILE: src/services/AffiliateService.ts
+// Fix: Generate affiliate link using BACKEND_URL (not FRONTEND_URL)
 // ============================================
 import mongoose from 'mongoose';
 import { User } from '../models/User';
@@ -35,7 +36,10 @@ export class AffiliateService {
       }
 
       const uniqueId = Math.random().toString(36).substr(2, 8);
-      const link = `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${uniqueId}`;
+      // ✅ FIX: Use BACKEND_URL instead of FRONTEND_URL
+      const backendUrl = process.env.BACKEND_URL || process.env.FRONTEND_URL;
+      const link = `${backendUrl}/api/v1/affiliate/click/${userId}/${courseId}/${uniqueId}`;
+      
       if (!user.affiliateLinks) user.affiliateLinks = [];
       user.affiliateLinks.push({
         courseId: course._id,
