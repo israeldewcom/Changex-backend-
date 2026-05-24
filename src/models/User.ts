@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/models/User.ts (added affiliateLinks, welcomeBonusGiven)
+// FILE: src/models/User.ts (with affiliateLinks, welcomeBonusGiven)
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
