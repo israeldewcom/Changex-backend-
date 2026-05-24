@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/PaymentController.ts (Upgraded – with subscription, referral bonus, Paystack inline)
+// FILE: src/controllers/PaymentController.ts (Complete – with subscription, referral bonus, Paystack inline)
 // ============================================
 import { Request, Response } from 'express';
 import { PaymentService } from '../services/PaymentService';
@@ -7,6 +7,7 @@ import { User, Transaction, WithdrawalRequest, Referral } from '../models';
 import { validationResult } from 'express-validator';
 import { logger } from '../utils/logger';
 import mongoose from 'mongoose';
+import axios from 'axios';
 
 export class PaymentController {
   private paymentService: PaymentService;
@@ -15,10 +16,6 @@ export class PaymentController {
     this.paymentService = PaymentService.getInstance();
   }
 
-  /**
-   * Initiate a withdrawal request
-   * POST /api/v1/payments/withdraw
-   */
   initiateWithdrawal = async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -48,10 +45,6 @@ export class PaymentController {
     }
   };
 
-  /**
-   * Get transaction history for the authenticated user
-   * GET /api/v1/payments/transactions
-   */
   getTransactionHistory = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
@@ -88,10 +81,6 @@ export class PaymentController {
     }
   };
 
-  /**
-   * Get withdrawal history for the authenticated user
-   * GET /api/v1/payments/withdrawals
-   */
   getWithdrawalHistory = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
@@ -124,10 +113,6 @@ export class PaymentController {
     }
   };
 
-  /**
-   * Get earnings summary for the authenticated user
-   * GET /api/v1/payments/earnings/summary
-   */
   getEarningsSummary = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
@@ -192,10 +177,6 @@ export class PaymentController {
     }
   };
 
-  /**
-   * Get available payment methods
-   * GET /api/v1/payments/methods
-   */
   getPaymentMethods = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
@@ -216,10 +197,50 @@ export class PaymentController {
     }
   };
 
-  /**
-   * Create a subscription (Premium or Elite) with referral bonus tracking
-   * POST /api/v1/payments/subscribe
-   */
+  initializePaystack = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { email, amount, currency, metadata } = req.body;
+      const reference = `PAY_${Date.now()}_${Math.random().toString(36).substr(2, 8)}`;
+      const amountInKobo = Math.round(amount * 100);
+      
+      const response = await axios.post(
+        'https://api.paystack.co/transaction/initialize',
+        { email, amount: amountInKobo, reference, currency, metadata },
+        { headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` } }
+      );
+      
+      res.json({
+        success: true,
+        data: { reference, amount: amountInKobo, authorization_url: response.data.data.authorization_url }
+      });
+    } catch (error) {
+      logger.error('Paystack initialization error:', error);
+      res.status(500).json({ success: false, message: 'Payment initialization failed' });
+    }
+  };
+
+  verifyPaystack = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { reference, courseId } = req.body;
+      const userId = (req as any).user?.userId;
+      
+      const verifyRes = await axios.get(`https://api.paystack.co/transaction/verify/${reference}`, {
+        headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}` }
+      });
+      
+      const data = verifyRes.data.data;
+      if (data.status === 'success') {
+        const enrollment = await this.paymentService.processCoursePurchase(userId, courseId, 'paystack', reference);
+        res.json({ success: true, data: enrollment, message: 'Payment verified and enrollment completed' });
+      } else {
+        res.status(400).json({ success: false, message: 'Payment verification failed' });
+      }
+    } catch (error) {
+      logger.error('Paystack verification error:', error);
+      res.status(500).json({ success: false, message: 'Verification failed' });
+    }
+  };
+
   createSubscription = async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -313,7 +334,6 @@ export class PaymentController {
         });
         await transaction.save();
 
-        // ✅ Process referral upgrade bonus if user was referred
         await this.processReferralUpgradeBonus(userId, amount);
 
         res.json({
@@ -362,9 +382,6 @@ export class PaymentController {
     }
   };
 
-  /**
-   * Process referral upgrade bonus when a referred user subscribes
-   */
   private async processReferralUpgradeBonus(userId: string, amountPaid: number): Promise<void> {
     try {
       const user = await User.findById(userId);
@@ -373,13 +390,11 @@ export class PaymentController {
       const referral = await Referral.findOne({ referred: userId, status: 'pending' });
       if (!referral) return;
 
-      // Mark referral as active/converted
       referral.status = 'active';
       referral.firstPurchaseAt = new Date();
       await referral.save();
 
-      // Calculate bonus (e.g., 20% of first payment or fixed ₦500)
-      const bonusAmount = Math.min(amountPaid * 0.2, 5000); // 20% up to ₦5,000
+      const bonusAmount = Math.min(amountPaid * 0.2, 5000);
       const referrer = await User.findById(referral.referrer);
       
       if (referrer) {
@@ -388,7 +403,6 @@ export class PaymentController {
         referrer.referralCount = (referrer.referralCount || 0) + 1;
         await referrer.save();
 
-        // Create transaction record for the bonus
         const transaction = new Transaction({
           user: referrer._id,
           type: 'commission',
@@ -410,10 +424,6 @@ export class PaymentController {
     }
   }
 
-  /**
-   * Verify subscription payment (webhook alternative)
-   * GET /api/v1/payments/verify-subscription?reference=xxx
-   */
   verifySubscription = async (req: Request, res: Response): Promise<void> => {
     try {
       const { reference } = req.query;
@@ -449,7 +459,6 @@ export class PaymentController {
           });
           await transaction.save();
 
-          // ✅ Process referral upgrade bonus after successful payment verification
           await this.processReferralUpgradeBonus(userId, verification.amount);
         }
 
@@ -469,10 +478,6 @@ export class PaymentController {
     }
   };
 
-  /**
-   * Cancel subscription
-   * POST /api/v1/payments/cancel-subscription
-   */
   cancelSubscription = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
@@ -504,10 +509,6 @@ export class PaymentController {
     }
   };
 
-  /**
-   * Get current subscription details
-   * GET /api/v1/payments/subscription
-   */
   getSubscription = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
