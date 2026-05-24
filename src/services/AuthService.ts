@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/AuthService.ts (ignore invalid referral codes)
+// FILE: src/services/AuthService.ts (Complete – fixes referral code 400)
 // ============================================
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
