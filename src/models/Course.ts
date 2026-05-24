@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/models/Course.ts
+// FILE: src/models/Course.ts (hasAffiliate, affiliatePercent)
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
