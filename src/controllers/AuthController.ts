@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/AuthController.ts (OAuth working, referral click tracking)
+// FILE: src/controllers/AuthController.ts (Complete + OAuth)
 // ============================================
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
@@ -10,6 +10,7 @@ import { User } from '../models/User';
 import speakeasy from 'speakeasy';
 import { RedisService } from '../services/RedisService';
 import crypto from 'crypto';
+import passport from 'passport';
 
 export class AuthController {
   private authService: AuthService;
@@ -59,6 +60,7 @@ export class AuthController {
       });
       await user.save({ session });
 
+      // Process referral code – invalid codes silently ignored
       if (referralCode) {
         await this.processReferral(referralCode, user._id, session);
       }
@@ -146,11 +148,9 @@ export class AuthController {
         referred: newUserId,
         level,
         referralCode,
-        type: 'referral',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
       await referral.save({ session });
-      
       await User.findByIdAndUpdate(newUserId, { referredBy: referrer._id, referralLevel: level }, { session });
       await User.findByIdAndUpdate(referrer._id, { $push: { referrals: newUserId }, $inc: { referralCount: 1 } }, { session });
     } catch (error) {
@@ -165,7 +165,7 @@ export class AuthController {
       return;
     }
     try {
-      const { email, password, twoFactorCode, rememberMe } = req.body;
+      const { email, password, twoFactorCode } = req.body;
       const ip = req.ip || req.socket.remoteAddress || '';
 
       const user = await User.findOne({ email }).select('+password');
@@ -206,21 +206,20 @@ export class AuthController {
         }
       }
 
-      user.lastLoginAt = new Date();
-      await user.save();
+      // Update streak and last login
+      await user.updateStreak();
+      
       const { accessToken, refreshToken } = this.authService.generateTokens(user._id.toString());
       user.refreshTokens.push(refreshToken);
       if (user.refreshTokens.length > 5) user.refreshTokens.shift();
       await user.save();
-      
-      const sessionDuration = rememberMe ? 30 * 24 * 60 * 60 : 7 * 24 * 60 * 60;
-      await this.redis.setex(`user:${user._id}:session`, sessionDuration, refreshToken);
+      await this.redis.setex(`user:${user._id}:session`, 3600 * 24, refreshToken);
 
       res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: sessionDuration * 1000,
+        maxAge: 7 * 24 * 60 * 60 * 1000,
       });
 
       await AuditLog.create({
@@ -247,10 +246,13 @@ export class AuthController {
             subscriptionTier: user.subscriptionTier,
             level: user.level,
             xp: user.xp,
+            streak: user.streak,
             walletBalance: user.walletBalance,
             referralCode: user.referralCode,
             setupDone: user.setupDone || false,
-            affiliateLinks: user.affiliateLinks || []
+            affiliateLinks: user.affiliateLinks || [],
+            isApprovedInstructor: user.isApprovedInstructor,
+            roles: user.roles
           },
           accessToken,
         },
@@ -311,8 +313,9 @@ export class AuthController {
   forgotPassword = async (req: Request, res: Response): Promise<void> => {
     try {
       const { email } = req.body;
+      // Fire and forget – do NOT await
       this.authService.forgotPassword(email).catch(err => logger.error(err));
-      res.json({ success: true, message: 'If an account exists with that email, a password reset link has been sent.' });
+      res.json({ success: true, message: 'If an account exists, a password reset link has been sent.' });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -365,15 +368,38 @@ export class AuthController {
     }
   };
 
-  trackReferralClick = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { code } = req.params;
-      const ip = req.ip || req.socket.remoteAddress || '';
-      const userAgent = req.get('user-agent') || '';
-      await this.authService.trackReferralClick(code, ip, userAgent);
-      res.redirect(`${process.env.FRONTEND_URL}/?ref=${code}`);
-    } catch (error) {
-      res.redirect(`${process.env.FRONTEND_URL}`);
-    }
+  // OAuth handlers
+  googleAuth = passport.authenticate('google', { scope: ['profile', 'email'] });
+  
+  googleCallback = (req: Request, res: Response, next: any) => {
+    passport.authenticate('google', { session: false, failureRedirect: `${process.env.FRONTEND_URL}/login` }, async (err: any, user: any, info: any) => {
+      if (err || !user) {
+        return res.redirect(`${process.env.FRONTEND_URL}/login?error=oauth_failed`);
+      }
+      try {
+        const token = this.authService.generateTokens(user._id.toString()).accessToken;
+        await user.updateStreak();
+        res.redirect(`${process.env.FRONTEND_URL}/?token=${token}`);
+      } catch (error) {
+        res.redirect(`${process.env.FRONTEND_URL}/login?error=token_generation`);
+      }
+    })(req, res, next);
+  };
+
+  githubAuth = passport.authenticate('github', { scope: ['user:email'] });
+  
+  githubCallback = (req: Request, res: Response, next: any) => {
+    passport.authenticate('github', { session: false, failureRedirect: `${process.env.FRONTEND_URL}/login` }, async (err: any, user: any, info: any) => {
+      if (err || !user) {
+        return res.redirect(`${process.env.FRONTEND_URL}/login?error=oauth_failed`);
+      }
+      try {
+        const token = this.authService.generateTokens(user._id.toString()).accessToken;
+        await user.updateStreak();
+        res.redirect(`${process.env.FRONTEND_URL}/?token=${token}`);
+      } catch (error) {
+        res.redirect(`${process.env.FRONTEND_URL}/login?error=token_generation`);
+      }
+    })(req, res, next);
   };
 }
