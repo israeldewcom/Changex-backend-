@@ -1,9 +1,10 @@
 // ============================================
-// FILE: src/controllers/AffiliateController.ts (Complete – with backend URL)
+// FILE: src/controllers/AffiliateController.ts (Complete – with code generation)
 // ============================================
 import { Request, Response } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
 import { Course } from '../models/Course';
+import { User } from '../models/User';
 
 export class AffiliateController {
   private affiliateService: AffiliateService;
@@ -52,14 +53,18 @@ export class AffiliateController {
       const { userId, courseId, code } = req.params;
       const ip = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.get('user-agent') || '';
+      
       await this.affiliateService.trackClick(userId, courseId, code, ip, userAgent);
-      res.cookie('cx_affiliate', `${userId}|${courseId}|${code}`, {
+      
+      // Set cookie for tracking
+      res.cookie('cx_affiliate_code', code, {
         maxAge: 30 * 24 * 60 * 60 * 1000,
         httpOnly: false,
         path: '/'
       });
-      // ✅ Redirect to frontend with course ID as query parameter (easier to handle)
-      res.redirect(`${process.env.FRONTEND_URL}/?course=${courseId}`);
+      
+      // Redirect to frontend course page with code as query param
+      res.redirect(`${process.env.FRONTEND_URL}/?course=${courseId}&aff_code=${code}`);
     } catch (error) {
       res.redirect(`${process.env.FRONTEND_URL}/?course=${req.params.courseId}`);
     }
