@@ -337,6 +337,22 @@ export class CourseController {
           }
         }
         
+        // ✅ Additional check for cx_affiliate_code cookie (find by unique affiliate code)
+        if (!affCode && !affId) {
+          const codeCookie = req.cookies.cx_affiliate_code;
+          if (codeCookie) {
+            const affiliateUser = await User.findOne({ 'affiliateLinks.code': codeCookie }).session(session);
+            if (affiliateUser) {
+              const link = affiliateUser.affiliateLinks.find(l => l.code === codeCookie && l.courseId.toString() === courseId);
+              if (link) {
+                affId = affiliateUser._id.toString();
+                affCourseId = courseId;
+                affCode = codeCookie;
+              }
+            }
+          }
+        }
+        
         if (affId && affCourseId === courseId && affCode) {
           const existingAff = await Referral.findOne({ referred: userId, type: 'affiliate', courseId }).session(session);
           if (!existingAff) {
@@ -355,7 +371,7 @@ export class CourseController {
             await this.earningEngine.addToWallet(affId, commissionAmount, 'affiliate', { courseId, referralId: referral._id }, session);
             const affiliateUser = await User.findById(affId).session(session);
             if (affiliateUser && affiliateUser.affiliateLinks) {
-              const link = affiliateUser.affiliateLinks.find(l => l.link.includes(affCode));
+              const link = affiliateUser.affiliateLinks.find(l => l.link.includes(affCode as string) || l.code === affCode);
               if (link) {
                 link.conversions = (link.conversions || 0) + 1;
                 link.totalEarned = (link.totalEarned || 0) + commissionAmount;
@@ -363,6 +379,18 @@ export class CourseController {
               }
             }
           }
+        }
+        
+        // ✅ Process affiliate conversion if user came from affiliate link
+        const conversionAffiliateCode = req.cookies.cx_affiliate_code || req.body.affiliateCode;
+        if (conversionAffiliateCode) {
+          const AffiliateService = require('../services/AffiliateService').AffiliateService;
+          await AffiliateService.getInstance().processAffiliateConversion(
+            userId, 
+            courseId, 
+            price, 
+            transaction._id
+          );
         }
         
         await session.commitTransaction();
