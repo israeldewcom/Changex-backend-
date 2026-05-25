@@ -1,7 +1,6 @@
 import { Request, Response } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
 import { User } from '../models/User';
-import { Course } from '../models/Course';
 
 export class AffiliateController {
   private affiliateService: AffiliateService;
@@ -33,6 +32,7 @@ export class AffiliateController {
         res.status(404).json({ success: false, message: 'User not found' });
         return;
       }
+      const frontendUrl = process.env.FRONTEND_URL;
       const links = user.affiliateLinks.map(link => ({
         id: link._id,
         courseId: link.courseId,
@@ -41,7 +41,7 @@ export class AffiliateController {
         clicks: link.clicks,
         conversions: link.conversions,
         totalEarned: link.totalEarned,
-        link: `${process.env.FRONTEND_URL}/aff/${userId}/${link.courseId}/${link.code}`
+        link: `${frontendUrl}/aff/${userId}/${link.courseId}/${link.code}`
       }));
       res.json({ success: true, data: links });
     } catch (error: any) {
@@ -62,12 +62,7 @@ export class AffiliateController {
       const totalEarned = user.affiliateLinks.reduce((sum, l) => sum + (l.totalEarned || 0), 0);
       res.json({
         success: true,
-        data: {
-          totalClicks,
-          totalConversions,
-          totalEarned,
-          linksCount: user.affiliateLinks.length
-        }
+        data: { totalClicks, totalConversions, totalEarned, linksCount: user.affiliateLinks.length }
       });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
