@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/app.ts (Complete – Fixed CORS for Vercel frontend)
+// ============================================
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -17,6 +20,32 @@ import { logger } from './utils/logger';
 
 const app = express();
 
+// Allowed origins (Vercel frontend + localhost)
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'https://adc-mu.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://changex-academy.vercel.app'
+].filter(Boolean);
+
+app.use(cors({
+  origin: function(origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      logger.warn(`CORS blocked request from origin: ${origin}`);
+      callback(null, false); // reject, but don't throw – return false to reject
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'x-csrf-token']
+}));
+
+// Security headers
 app.use(helmet({ 
   crossOriginResourcePolicy: { policy: 'cross-origin' }, 
   contentSecurityPolicy: { 
@@ -28,13 +57,6 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"] 
     } 
   } 
-}));
-
-app.use(cors({ 
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000', 
-  credentials: true, 
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], 
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'x-csrf-token'] 
 }));
 
 app.use(compression());
@@ -75,7 +97,7 @@ app.use((req, res, next) => {
 });
 
 app.use(generalRateLimit);
-app.use('/', publicRoutes);     // <-- must be before /api
+app.use('/', publicRoutes);
 app.use('/api', routes);
 app.use('/certificates', express.static('public/certificates'));
 
