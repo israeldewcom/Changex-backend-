@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/app.ts (CORS + CSRF skip for auth & affiliate)
-// ============================================
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -8,32 +5,36 @@ import compression from 'compression';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import xss from 'xss';
-import passport from './config/passport';
+import passport from 'passport';
 import { config } from './config';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { generalRateLimit } from './middleware/rateLimit';
 import { simpleCsrf } from './middleware/csrf';
 import routes from './routes';
+import publicRoutes from './routes/public';
+import './config/passport';
 import { logger } from './utils/logger';
 
 const app = express();
 
-app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' }, contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], fontSrc: ["'self'", 'https://fonts.gstatic.com'], imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com', 'https://*.s3.amazonaws.com'], scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"] } } }));
+app.use(helmet({ 
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, 
+  contentSecurityPolicy: { 
+    directives: { 
+      defaultSrc: ["'self'"], 
+      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], 
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'], 
+      imgSrc: ["'self'", 'data:', 'https://res.cloudinary.com', 'https://*.s3.amazonaws.com'], 
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"] 
+    } 
+  } 
+}));
 
-const allowedOrigins = [process.env.FRONTEND_URL, 'https://adc-mu.vercel.app', 'http://localhost:3000', 'http://localhost:3001'].filter(Boolean);
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      logger.warn(`CORS blocked origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+app.use(cors({ 
+  origin: process.env.FRONTEND_URL || 'http://localhost:3000', 
+  credentials: true, 
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], 
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'x-csrf-token'] 
 }));
 
 app.use(compression());
@@ -43,13 +44,18 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(passport.initialize());
 
-// XSS sanitization
+// XSS sanitization - skip for auth routes
 app.use((req, res, next) => {
-  if (req.body) {
+  if (req.path.includes('/auth/') || req.path.includes('/login') || req.path.includes('/register')) {
+    return next();
+  }
+  if (req.body && typeof req.body === 'object') {
     const sanitizeObj = (obj: any): any => {
-      if (typeof obj === 'string') return xss(obj);
+      if (typeof obj === 'string') {
+        return xss(obj);
+      }
       if (typeof obj === 'object' && obj !== null) {
-        Object.keys(obj).forEach((key) => {
+        Object.keys(obj).forEach(key => {
           obj[key] = sanitizeObj(obj[key]);
         });
       }
@@ -60,20 +66,21 @@ app.use((req, res, next) => {
   next();
 });
 
-// CSRF protection – skip for auth, affiliate, webhooks, health
+// CSRF - skip public affiliate route and webhooks
 app.use((req, res, next) => {
-  const skipPaths = ['/api/v1/auth', '/api/v1/affiliate', '/webhooks', '/health'];
-  const shouldSkip = skipPaths.some(path => req.path.startsWith(path)) || req.method === 'GET';
-  if (shouldSkip) return next();
+  if (req.path.includes('/webhooks') || req.method === 'GET' || req.path === '/health' || req.path.startsWith('/aff/')) {
+    return next();
+  }
   simpleCsrf(req, res, next);
 });
 
 app.use(generalRateLimit);
+app.use('/', publicRoutes);     // <-- must be before /api
 app.use('/api', routes);
 app.use('/certificates', express.static('public/certificates'));
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString(), environment: config.env });
+app.get('/health', (req, res) => { 
+  res.json({ status: 'healthy', timestamp: new Date().toISOString(), environment: config.env }); 
 });
 
 app.use(notFound);
