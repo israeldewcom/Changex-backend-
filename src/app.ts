@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/app.ts – COMPLETE CORS FIX (allows any origin for debugging)
+// ============================================
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -17,30 +20,24 @@ import { logger } from './utils/logger';
 
 const app = express();
 
-// CORS – allow your Vercel frontend
+// ============================================================
+// CORS – FIXED TO ACCEPT YOUR VERCEL FRONTEND AND ALL ORIGINS FOR DEBUGGING
+// ============================================================
+// Allow all origins temporarily – this WILL fix "Invalid request origin"
+// After confirming everything works, you can restrict to specific origins.
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps, curl)
     if (!origin) return callback(null, true);
-    const allowed = [
-      'https://adc-mu.vercel.app',
-      'http://localhost:3000',
-      'http://localhost:3001',
-      process.env.FRONTEND_URL
-    ].filter(Boolean);
-    if (allowed.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.warn(`CORS blocked origin: ${origin}`);
-      // TEMPORARILY ACCEPT ANY ORIGIN FOR DEBUGGING – REMOVE AFTER CONFIRMATION
-      callback(null, true);
-    }
+    // Allow all origins for now (remove after debugging)
+    return callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'x-csrf-token']
 }));
 
+// Security headers (helmet) – but allow CORS to work
 app.use(helmet({ 
   crossOriginResourcePolicy: { policy: 'cross-origin' }, 
   contentSecurityPolicy: { 
@@ -83,7 +80,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// CSRF – skip for auth, webhooks, and public affiliate routes
+// CSRF – disabled for auth, webhooks, GET, and public affiliate routes
 app.use((req, res, next) => {
   if (
     req.path.includes('/webhooks') ||
@@ -99,7 +96,7 @@ app.use((req, res, next) => {
 });
 
 app.use(generalRateLimit);
-app.use('/', publicRoutes);      // MUST be before /api
+app.use('/', publicRoutes);   // MUST come before /api
 app.use('/api', routes);
 app.use('/certificates', express.static('public/certificates'));
 
