@@ -1,16 +1,23 @@
 // ============================================
-// FILE: src/services/AffiliateService.ts (Complete – tracks clicks, signups, conversions)
+// FILE: src/services/AffiliateService.ts (Complete)
 // ============================================
 import mongoose from 'mongoose';
+import { AffiliateClick } from '../models/AffiliateClick';
 import { User } from '../models/User';
 import { Course } from '../models/Course';
+import { Transaction } from '../models/Transaction';
 import { Referral } from '../models/Referral';
+import { EarningEngine } from './EarningEngine';
 import { logger } from '../utils/logger';
+import crypto from 'crypto';
 
 export class AffiliateService {
   private static instance: AffiliateService;
+  private earningEngine: EarningEngine;
 
-  private constructor() {}
+  private constructor() {
+    this.earningEngine = EarningEngine.getInstance();
+  }
 
   static getInstance(): AffiliateService {
     if (!AffiliateService.instance) {
@@ -19,209 +26,188 @@ export class AffiliateService {
     return AffiliateService.instance;
   }
 
-  async acceptAffiliateOffer(userId: string, courseId: string): Promise<{ link: string; code: string }> {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      const user = await User.findById(userId).session(session);
-      const course = await Course.findById(courseId).session(session);
-      if (!user || !course) throw new Error('User or course not found');
-      if (!course.hasAffiliate) throw new Error('Affiliate not enabled for this course');
+  async generateAffiliateLink(userId: string, courseId: string): Promise<{ code: string; link: string }> {
+    const user = await User.findById(userId);
+    const course = await Course.findById(courseId);
+    if (!user || !course) throw new Error('User or course not found');
 
-      const alreadyAccepted = user.affiliateLinks?.some(l => l.courseId?.toString() === courseId);
-      if (alreadyAccepted) {
-        const existing = user.affiliateLinks.find(l => l.courseId?.toString() === courseId);
-        return { link: existing!.link, code: existing!.code };
-      }
-
-      const uniqueCode = `AFF${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
-      const link = `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${uniqueCode}`;
-      
-      if (!user.affiliateLinks) user.affiliateLinks = [];
-      user.affiliateLinks.push({
-        courseId: course._id,
-        courseTitle: course.title,
-        link,
-        code: uniqueCode,
-        clicks: 0,
-        signups: 0,
-        conversions: 0,
-        commissionRate: course.affiliatePercent || 15,
-        totalEarned: 0,
-        createdAt: new Date()
-      });
-      await user.save({ session });
-      await session.commitTransaction();
-      return { link, code: uniqueCode };
-    } catch (error) {
-      await session.abortTransaction();
-      throw error;
-    } finally {
-      session.endSession();
-    }
-  }
-
-  async trackClick(affiliateId: string, courseId: string, code: string, ip: string, userAgent: string): Promise<void> {
-    try {
-      const user = await User.findById(affiliateId);
-      if (!user) return;
-      const link = user.affiliateLinks?.find(l => l.code === code);
-      if (link) {
-        link.clicks += 1;
-        await user.save();
-      }
-      // Store click in a separate collection for detailed analytics
-      const AffiliateClick = require('../models/AffiliateClick').AffiliateClick;
-      if (AffiliateClick) {
-        await AffiliateClick.create({
-          affiliateId,
-          courseId,
-          code,
-          ip,
-          userAgent,
-          clickedAt: new Date()
-        });
-      }
-      logger.info(`Affiliate click: ${affiliateId} -> ${courseId}, code=${code}, ip=${ip}, ua=${userAgent}`);
-    } catch (error) {
-      logger.error('Track click error:', error);
-    }
-  }
-
-  async registerAffiliateSignup(affiliateId: string, courseId: string, newUserId: string, code: string): Promise<void> {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      const referrer = await User.findById(affiliateId).session(session);
-      if (!referrer) return;
-      const link = referrer.affiliateLinks?.find(l => l.code === code);
-      if (link) {
-        link.signups += 1;
-        await referrer.save({ session });
-      }
-      // Check if this affiliate referral already exists
-      const existing = await Referral.findOne({ referrer: affiliateId, referred: newUserId, type: 'affiliate', courseId }).session(session);
-      if (!existing) {
-        const referral = new Referral({
-          referrer: affiliateId,
-          referred: newUserId,
-          level: 1,
-          status: 'pending',
-          referralCode: code,
-          type: 'affiliate',
-          courseId,
-          expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
-        });
-        await referral.save({ session });
-      }
-      await session.commitTransaction();
-    } catch (error) {
-      await session.abortTransaction();
-      logger.error('Register affiliate signup error:', error);
-    } finally {
-      session.endSession();
-    }
-  }
-
-  async completeAffiliateConversion(userId: string, courseId: string, amount: number, transactionId: mongoose.Types.ObjectId): Promise<void> {
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    try {
-      const referral = await Referral.findOne({ referred: userId, type: 'affiliate', courseId, status: 'pending' }).session(session);
-      if (!referral) return;
-
-      const course = await Course.findById(courseId).session(session);
-      if (!course) return;
-
-      const commissionAmount = (amount * (course.affiliatePercent || 15)) / 100;
-      if (commissionAmount <= 0) return;
-
-      // Update referral
-      referral.status = 'completed';
-      referral.firstPurchaseAt = new Date();
-      referral.totalCommission += commissionAmount;
-      referral.commissions.push({
-        amount: commissionAmount,
-        type: 'course_purchase',
-        transactionId,
-        createdAt: new Date()
-      });
-      await referral.save({ session });
-
-      // Update affiliate link stats
-      const affiliateUser = await User.findById(referral.referrer).session(session);
-      if (affiliateUser && affiliateUser.affiliateLinks) {
-        const link = affiliateUser.affiliateLinks.find(l => l.code === referral.referralCode);
-        if (link) {
-          link.conversions += 1;
-          link.totalEarned += commissionAmount;
-          await affiliateUser.save({ session });
-        }
-      }
-
-      // Add commission to affiliate wallet
-      const { EarningEngine } = require('./EarningEngine');
-      const earningEngine = EarningEngine.getInstance();
-      await earningEngine.addToWallet(referral.referrer.toString(), commissionAmount, 'affiliate', {
-        courseId,
-        referralId: referral._id,
-        percent: course.affiliatePercent,
-        transactionId: transactionId.toString()
-      }, session);
-
-      await session.commitTransaction();
-    } catch (error) {
-      await session.abortTransaction();
-      logger.error('Complete affiliate conversion error:', error);
-    } finally {
-      session.endSession();
-    }
-  }
-
-  async getAffiliateStats(userId: string): Promise<any> {
-    const user = await User.findById(userId).populate('affiliateLinks.courseId', 'title');
-    if (!user) throw new Error('User not found');
-    
-    const affiliateReferrals = await Referral.find({ referrer: userId, type: 'affiliate' }).populate('courseId', 'title');
-    const links = (user.affiliateLinks || []).map(link => {
-      const referralsForLink = affiliateReferrals.filter(r => r.referralCode === link.code);
-      const conversions = referralsForLink.filter(r => r.status === 'completed').length;
-      const totalEarned = referralsForLink.reduce((sum, r) => sum + r.totalCommission, 0);
+    const existing = user.affiliateLinks.find(l => l.courseId.toString() === courseId);
+    if (existing) {
       return {
-        courseId: link.courseId?._id,
-        courseTitle: link.courseTitle || link.courseId?.title || 'Course',
-        link: link.link,
-        code: link.code,
-        clicks: link.clicks || 0,
-        signups: link.signups || 0,
-        conversions,
-        commissionRate: link.commissionRate,
-        totalEarned,
-        createdAt: link.createdAt
+        code: existing.code,
+        link: `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${existing.code}`
       };
+    }
+
+    let code: string;
+    let isUnique = false;
+    do {
+      code = crypto.randomBytes(6).toString('hex').toUpperCase();
+      const existingCode = await User.findOne({ 'affiliateLinks.code': code });
+      if (!existingCode) isUnique = true;
+    } while (!isUnique);
+
+    user.affiliateLinks.push({
+      courseId: new mongoose.Types.ObjectId(courseId),
+      code,
+      clicks: 0,
+      conversions: 0,
+      totalEarned: 0,
+      createdAt: new Date()
     });
-    const totalClicks = links.reduce((sum, l) => sum + l.clicks, 0);
-    const totalSignups = links.reduce((sum, l) => sum + l.signups, 0);
-    const totalConversions = links.reduce((sum, l) => sum + l.conversions, 0);
-    const totalEarned = links.reduce((sum, l) => sum + l.totalEarned, 0);
-    return { totalClicks, totalSignups, totalConversions, totalEarned, links };
+    await user.save();
+
+    return {
+      code,
+      link: `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${code}`
+    };
   }
 
-  async getTopAffiliates(limit: number = 10): Promise<any[]> {
-    const users = await User.aggregate([
-      { $match: { 'affiliateLinks.0': { $exists: true } } },
-      { $project: {
-          firstName: 1,
-          lastName: 1,
-          displayName: 1,
-          avatar: 1,
-          totalAffiliateEarnings: { $sum: '$affiliateLinks.totalEarned' },
-          totalAffiliateConversions: { $sum: '$affiliateLinks.conversions' },
-          affiliateLinksCount: { $size: '$affiliateLinks' }
-        } },
-      { $sort: { totalAffiliateEarnings: -1 } },
-      { $limit: limit }
-    ]);
-    return users;
+  async trackClick(affiliateUserId: string, courseId: string, code: string, req: any): Promise<void> {
+    const user = await User.findById(affiliateUserId);
+    if (!user) throw new Error('Affiliate user not found');
+
+    const affiliateLink = user.affiliateLinks.find(l => l.courseId.toString() === courseId && l.code === code);
+    if (!affiliateLink) throw new Error('Invalid affiliate link');
+
+    affiliateLink.clicks += 1;
+    await user.save();
+
+    await AffiliateClick.create({
+      affiliateLinkId: affiliateLink._id!,
+      affiliateUserId: affiliateUserId,
+      courseId,
+      ip: req.ip || req.socket.remoteAddress || '',
+      userAgent: req.get('user-agent') || '',
+      referrer: req.get('referer'),
+      clickedAt: new Date()
+    });
+
+    logger.info(`Affiliate click tracked: user ${affiliateUserId}, course ${courseId}, code ${code}`);
+  }
+
+  async processAffiliateConversion(buyerId: string, courseId: string, transactionId: mongoose.Types.ObjectId, session: mongoose.ClientSession): Promise<void> {
+    const click = await AffiliateClick.findOne({
+      affiliateUserId: { $ne: buyerId },
+      courseId,
+      converted: false
+    }).sort({ clickedAt: -1 }).session(session);
+
+    if (!click) return;
+
+    click.converted = true;
+    click.conversionAt = new Date();
+    click.transactionId = transactionId;
+    await click.save({ session });
+
+    const affiliate = await User.findById(click.affiliateUserId).session(session);
+    if (!affiliate) return;
+
+    const affiliateLink = affiliate.affiliateLinks.find(l => l._id!.equals(click.affiliateLinkId));
+    if (!affiliateLink) return;
+
+    const course = await Course.findById(courseId).session(session);
+    if (!course) return;
+
+    const commissionPercent = course.affiliateCommission || 20;
+    const transaction = await Transaction.findById(transactionId).session(session);
+    const amount = transaction?.amount || 0;
+    const commission = amount * (commissionPercent / 100);
+
+    if (commission <= 0) return;
+
+    affiliate.walletBalance += commission;
+    affiliate.totalEarned += commission;
+    affiliateLink.totalEarned += commission;
+    affiliateLink.conversions += 1;
+    await affiliate.save({ session });
+
+    const commissionTx = new Transaction({
+      user: affiliate._id,
+      type: 'commission',
+      subtype: 'affiliate',
+      amount: commission,
+      currency: course.currency,
+      status: 'completed',
+      description: `Affiliate commission for course "${course.title}"`,
+      reference: `AFF_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      metadata: {
+        courseId: course._id.toString(),
+        buyerId,
+        commissionPercent,
+        clickId: click._id
+      },
+      fromUserId: buyerId,
+      toUserId: affiliate._id,
+      completedAt: new Date()
+    });
+    await commissionTx.save({ session });
+
+    logger.info(`Affiliate commission: ${commission} to user ${affiliate._id} for course ${courseId}`);
+  }
+
+  async processReferralSignup(referralCode: string, newUserId: string, session?: mongoose.ClientSession): Promise<void> {
+    const referrer = await User.findOne({ referralCode });
+    if (!referrer) return;
+
+    let level = 1;
+    let currentReferrer = referrer;
+    while (currentReferrer.referredBy && level < 3) {
+      level++;
+      currentReferrer = await User.findById(currentReferrer.referredBy);
+      if (!currentReferrer) break;
+    }
+
+    const referral = new Referral({
+      referrer: referrer._id,
+      referred: newUserId,
+      level,
+      referralCode,
+      status: 'pending',
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+    });
+    if (session) await referral.save({ session });
+    else await referral.save();
+
+    await User.findByIdAndUpdate(newUserId, { referredBy: referrer._id, referralLevel: level }, { session });
+    await User.findByIdAndUpdate(referrer._id, { $push: { referrals: newUserId } }, { session });
+  }
+
+  async processReferralUpgrade(userId: string, amountPaid: number, transactionId: mongoose.Types.ObjectId, session: mongoose.ClientSession): Promise<void> {
+    const user = await User.findById(userId).session(session);
+    if (!user || !user.referredBy) return;
+
+    const referral = await Referral.findOne({ referred: userId, status: 'pending' }).session(session);
+    if (!referral) return;
+
+    referral.status = 'active';
+    referral.firstPurchaseAt = new Date();
+    await referral.save({ session });
+
+    const bonusAmount = Math.min(amountPaid * 0.2, 5000);
+    const referrer = await User.findById(referral.referrer).session(session);
+    if (referrer && bonusAmount > 0) {
+      referrer.walletBalance += bonusAmount;
+      referrer.referralEarnings += bonusAmount;
+      await referrer.save({ session });
+
+      const bonusTx = new Transaction({
+        user: referrer._id,
+        type: 'commission',
+        subtype: 'referral',
+        amount: bonusAmount,
+        currency: 'NGN',
+        status: 'completed',
+        description: `Referral bonus for user ${user.firstName} ${user.lastName} upgrading to Premium`,
+        reference: `REF_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        metadata: { referredUserId: userId, level: referral.level, amountPaid },
+        fromUserId: userId,
+        toUserId: referrer._id,
+        completedAt: new Date()
+      });
+      await bonusTx.save({ session });
+
+      logger.info(`Referral bonus of ₦${bonusAmount} awarded to ${referrer.email}`);
+    }
   }
 }
