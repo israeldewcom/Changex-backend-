@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/models/AffiliateClick.ts (New)
-// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IAffiliateClick extends Document {
@@ -33,6 +30,4 @@ const AffiliateClickSchema = new Schema<IAffiliateClick>(
 );
 
 AffiliateClickSchema.index({ affiliateUserId: 1, courseId: 1, converted: 1 });
-AffiliateClickSchema.index({ clickedAt: -1 });
-
 export const AffiliateClick = mongoose.model<IAffiliateClick>('AffiliateClick', AffiliateClickSchema);
