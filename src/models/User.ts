@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/models/User.ts (with affiliateLinks, welcomeBonusGiven)
+// FILE: src/models/User.ts (Updated AffiliateLinkSchema with code field)
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
@@ -36,6 +36,7 @@ export interface IUser extends Document {
     courseId: mongoose.Types.ObjectId;
     courseTitle?: string;
     link: string;
+    code: string; // ✅ Added unique code
     clicks: number;
     signups: number;
     conversions: number;
@@ -76,6 +77,7 @@ const AffiliateLinkSchema = new Schema({
   courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
   courseTitle: { type: String },
   link: { type: String, required: true },
+  code: { type: String, required: true, unique: true }, // ✅ Added unique code
   clicks: { type: Number, default: 0 },
   signups: { type: Number, default: 0 },
   conversions: { type: Number, default: 0 },
@@ -84,6 +86,7 @@ const AffiliateLinkSchema = new Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Rest of UserSchema remains unchanged...
 const UserSchema = new Schema<IUser>(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
