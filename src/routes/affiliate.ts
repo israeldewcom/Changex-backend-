@@ -1,18 +1,16 @@
 // ============================================
-// FILE: src/routes/affiliate.ts (complete)
+// FILE: src/routes/affiliate.ts (New)
 // ============================================
 import { Router } from 'express';
 import { AffiliateController } from '../controllers/AffiliateController';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
-const affiliateController = new AffiliateController();
+const controller = new AffiliateController();
 
-router.get('/offers', affiliateController.getAvailableOffers);
-router.get('/click/:userId/:courseId/:code', affiliateController.trackClick);
-router.get('/leaderboard', affiliateController.getTopAffiliates);
-router.use(authenticate);
-router.post('/accept', affiliateController.acceptOffer);
-router.get('/my-stats', affiliateController.getMyAffiliateStats);
+router.get('/generate-link', authenticate, controller.generateLink);
+router.get('/my-links', authenticate, controller.getMyLinks);
+router.get('/stats', authenticate, controller.getStats);
+router.get('/leaderboard', controller.getLeaderboard);
 
 export default router;
