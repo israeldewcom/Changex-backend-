@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/AffiliateService.ts (Complete – tracks clicks, signups, conversions, generates unique links)
+// FILE: src/services/AffiliateService.ts (Complete – tracks clicks, signups, conversions)
 // ============================================
 import mongoose from 'mongoose';
 import { User } from '../models/User';
@@ -34,17 +34,15 @@ export class AffiliateService {
         return { link: existing!.link, code: existing!.code };
       }
 
-      const uniqueId = Math.random().toString(36).substr(2, 8).toUpperCase();
-      const code = `AFF${uniqueId}`;
-      // ✅ Generate link that points to FRONTEND (handled by frontend)
-      const link = `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${code}`;
+      const uniqueCode = `AFF${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+      const link = `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${uniqueCode}`;
       
       if (!user.affiliateLinks) user.affiliateLinks = [];
       user.affiliateLinks.push({
         courseId: course._id,
         courseTitle: course.title,
         link,
-        code,
+        code: uniqueCode,
         clicks: 0,
         signups: 0,
         conversions: 0,
@@ -54,7 +52,7 @@ export class AffiliateService {
       });
       await user.save({ session });
       await session.commitTransaction();
-      return { link, code };
+      return { link, code: uniqueCode };
     } catch (error) {
       await session.abortTransaction();
       throw error;
@@ -64,43 +62,29 @@ export class AffiliateService {
   }
 
   async trackClick(affiliateId: string, courseId: string, code: string, ip: string, userAgent: string): Promise<void> {
-    const session = await mongoose.startSession();
-    session.startTransaction();
     try {
-      const user = await User.findById(affiliateId).session(session);
+      const user = await User.findById(affiliateId);
       if (!user) return;
-      
       const link = user.affiliateLinks?.find(l => l.code === code);
       if (link) {
-        link.clicks = (link.clicks || 0) + 1;
-        await user.save({ session });
+        link.clicks += 1;
+        await user.save();
       }
-      
-      // Also create/update referral record for tracking
-      let referral = await Referral.findOne({ referralCode: code, type: 'affiliate', courseId }).session(session);
-      if (!referral) {
-        referral = new Referral({
-          referrer: affiliateId,
-          level: 1,
-          referralCode: code,
-          type: 'affiliate',
+      // Store click in a separate collection for detailed analytics
+      const AffiliateClick = require('../models/AffiliateClick').AffiliateClick;
+      if (AffiliateClick) {
+        await AffiliateClick.create({
+          affiliateId,
           courseId,
-          expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+          code,
+          ip,
+          userAgent,
+          clickedAt: new Date()
         });
-        await referral.save({ session });
       }
-      referral.clickedAt = new Date();
-      referral.clickedIp = ip;
-      referral.clickedUserAgent = userAgent;
-      await referral.save({ session });
-      
-      await session.commitTransaction();
       logger.info(`Affiliate click: ${affiliateId} -> ${courseId}, code=${code}, ip=${ip}, ua=${userAgent}`);
     } catch (error) {
-      await session.abortTransaction();
       logger.error('Track click error:', error);
-    } finally {
-      session.endSession();
     }
   }
 
@@ -110,21 +94,26 @@ export class AffiliateService {
     try {
       const referrer = await User.findById(affiliateId).session(session);
       if (!referrer) return;
-      
       const link = referrer.affiliateLinks?.find(l => l.code === code);
       if (link) {
-        link.signups = (link.signups || 0) + 1;
+        link.signups += 1;
         await referrer.save({ session });
       }
-      
-      const referral = await Referral.findOne({ referralCode: code, type: 'affiliate', courseId }).session(session);
-      if (referral) {
-        referral.referred = newUserId;
-        referral.registeredAt = new Date();
-        referral.status = 'pending';
+      // Check if this affiliate referral already exists
+      const existing = await Referral.findOne({ referrer: affiliateId, referred: newUserId, type: 'affiliate', courseId }).session(session);
+      if (!existing) {
+        const referral = new Referral({
+          referrer: affiliateId,
+          referred: newUserId,
+          level: 1,
+          status: 'pending',
+          referralCode: code,
+          type: 'affiliate',
+          courseId,
+          expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+        });
         await referral.save({ session });
       }
-      
       await session.commitTransaction();
     } catch (error) {
       await session.abortTransaction();
@@ -134,40 +123,20 @@ export class AffiliateService {
     }
   }
 
-  async convertAffiliateSale(referralCode: string, courseId: string, amount: number, transactionId: mongoose.Types.ObjectId): Promise<void> {
+  async completeAffiliateConversion(userId: string, courseId: string, amount: number, transactionId: mongoose.Types.ObjectId): Promise<void> {
     const session = await mongoose.startSession();
     session.startTransaction();
     try {
-      const referral = await Referral.findOne({ referralCode: code, type: 'affiliate', courseId, status: 'pending' }).session(session);
+      const referral = await Referral.findOne({ referred: userId, type: 'affiliate', courseId, status: 'pending' }).session(session);
       if (!referral) return;
-      
+
       const course = await Course.findById(courseId).session(session);
       if (!course) return;
-      
+
       const commissionAmount = (amount * (course.affiliatePercent || 15)) / 100;
-      const affiliateUser = await User.findById(referral.referrer).session(session);
-      
-      if (affiliateUser) {
-        const link = affiliateUser.affiliateLinks?.find(l => l.code === referralCode);
-        if (link) {
-          link.conversions = (link.conversions || 0) + 1;
-          link.totalEarned = (link.totalEarned || 0) + commissionAmount;
-          await affiliateUser.save({ session });
-        }
-        
-        // Award commission to wallet
-        affiliateUser.walletBalance += commissionAmount;
-        affiliateUser.totalEarned += commissionAmount;
-        await affiliateUser.save({ session });
-        
-        const { EarningEngine } = await import('./EarningEngine');
-        await EarningEngine.getInstance().addToWallet(affiliateUser._id.toString(), commissionAmount, 'affiliate', {
-          courseId,
-          referralId: referral._id,
-          commissionRate: course.affiliatePercent
-        }, session);
-      }
-      
+      if (commissionAmount <= 0) return;
+
+      // Update referral
       referral.status = 'completed';
       referral.firstPurchaseAt = new Date();
       referral.totalCommission += commissionAmount;
@@ -178,11 +147,32 @@ export class AffiliateService {
         createdAt: new Date()
       });
       await referral.save({ session });
-      
+
+      // Update affiliate link stats
+      const affiliateUser = await User.findById(referral.referrer).session(session);
+      if (affiliateUser && affiliateUser.affiliateLinks) {
+        const link = affiliateUser.affiliateLinks.find(l => l.code === referral.referralCode);
+        if (link) {
+          link.conversions += 1;
+          link.totalEarned += commissionAmount;
+          await affiliateUser.save({ session });
+        }
+      }
+
+      // Add commission to affiliate wallet
+      const { EarningEngine } = require('./EarningEngine');
+      const earningEngine = EarningEngine.getInstance();
+      await earningEngine.addToWallet(referral.referrer.toString(), commissionAmount, 'affiliate', {
+        courseId,
+        referralId: referral._id,
+        percent: course.affiliatePercent,
+        transactionId: transactionId.toString()
+      }, session);
+
       await session.commitTransaction();
     } catch (error) {
       await session.abortTransaction();
-      logger.error('Convert affiliate sale error:', error);
+      logger.error('Complete affiliate conversion error:', error);
     } finally {
       session.endSession();
     }
@@ -195,36 +185,40 @@ export class AffiliateService {
     const affiliateReferrals = await Referral.find({ referrer: userId, type: 'affiliate' }).populate('courseId', 'title');
     const links = (user.affiliateLinks || []).map(link => {
       const referralsForLink = affiliateReferrals.filter(r => r.referralCode === link.code);
-      const clicks = link.clicks || 0;
-      const signups = link.signups || 0;
-      const conversions = link.conversions || 0;
-      const totalEarned = link.totalEarned || 0;
+      const conversions = referralsForLink.filter(r => r.status === 'completed').length;
+      const totalEarned = referralsForLink.reduce((sum, r) => sum + r.totalCommission, 0);
       return {
         courseId: link.courseId?._id,
         courseTitle: link.courseTitle || link.courseId?.title || 'Course',
         link: link.link,
         code: link.code,
-        clicks,
-        signups,
+        clicks: link.clicks || 0,
+        signups: link.signups || 0,
         conversions,
         commissionRate: link.commissionRate,
         totalEarned,
         createdAt: link.createdAt
       };
     });
-    
     const totalClicks = links.reduce((sum, l) => sum + l.clicks, 0);
     const totalSignups = links.reduce((sum, l) => sum + l.signups, 0);
     const totalConversions = links.reduce((sum, l) => sum + l.conversions, 0);
     const totalEarned = links.reduce((sum, l) => sum + l.totalEarned, 0);
-    
     return { totalClicks, totalSignups, totalConversions, totalEarned, links };
   }
 
   async getTopAffiliates(limit: number = 10): Promise<any[]> {
     const users = await User.aggregate([
       { $match: { 'affiliateLinks.0': { $exists: true } } },
-      { $project: { firstName: 1, lastName: 1, displayName: 1, avatar: 1, totalAffiliateEarnings: { $sum: '$affiliateLinks.totalEarned' }, totalAffiliateConversions: { $sum: '$affiliateLinks.conversions' }, affiliateLinksCount: { $size: '$affiliateLinks' } } },
+      { $project: {
+          firstName: 1,
+          lastName: 1,
+          displayName: 1,
+          avatar: 1,
+          totalAffiliateEarnings: { $sum: '$affiliateLinks.totalEarned' },
+          totalAffiliateConversions: { $sum: '$affiliateLinks.conversions' },
+          affiliateLinksCount: { $size: '$affiliateLinks' }
+        } },
       { $sort: { totalAffiliateEarnings: -1 } },
       { $limit: limit }
     ]);
