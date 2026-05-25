@@ -1,18 +1,20 @@
 // ============================================
-// FILE: src/middleware/validation.ts (unchanged, plus 2FA validations)
+// FILE: src/middleware/validation.ts (Complete Updated - With Fixed Login Validation)
 // ============================================
 import { body, param, query } from 'express-validator';
 
 export const validateRegistration = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
-  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters').matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/).withMessage('Password must contain uppercase, lowercase, number, and special character'),
+  body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters')
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
+    .withMessage('Password must contain uppercase, lowercase, number, and special character'),
   body('firstName').notEmpty().withMessage('First name is required').isLength({ max: 50 }),
   body('lastName').notEmpty().withMessage('Last name is required').isLength({ max: 50 }),
   body('referralCode').optional().isString().isLength({ min: 6, max: 10 }),
 ];
 
 export const validateLogin = [
-  body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
+  body('email').notEmpty().withMessage('Email is required').isEmail().withMessage('Valid email is required').normalizeEmail(),
   body('password').notEmpty().withMessage('Password is required'),
   body('twoFactorCode').optional().isString().isLength({ min: 6, max: 6 }),
 ];
@@ -115,4 +117,11 @@ export const validateSearch = [
   query('level').optional().isString(),
   query('sortBy').optional().isString(),
   query('sortOrder').optional().isIn(['asc', 'desc']),
+];
+
+export const validateSubscription = [
+  body('plan').isIn(['premium', 'elite']).withMessage('Plan must be premium or elite'),
+  body('paymentMethod').isIn(['wallet', 'stripe', 'paystack']).withMessage('Invalid payment method'),
+  body('paymentReference').optional().isString(),
+  body('couponCode').optional().isString().isLength({ min: 3, max: 20 }),
 ];
