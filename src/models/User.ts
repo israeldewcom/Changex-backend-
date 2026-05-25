@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/models/User.ts (Complete - with affiliateLinks, referralCode, updateStreak)
+// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
@@ -41,6 +44,7 @@ export interface IUser extends Document {
   
   // Affiliate links
   affiliateLinks: Array<{
+    _id?: mongoose.Types.ObjectId;
     courseId: mongoose.Types.ObjectId;
     code: string;
     clicks: number;
@@ -87,8 +91,9 @@ const AffiliateLinkSchema = new Schema({
   courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
   code: { 
     type: String, 
-    required: false,
-    default: () => crypto.randomBytes(6).toString('hex')
+    required: true, 
+    unique: true,
+    default: () => crypto.randomBytes(6).toString('hex').toUpperCase()
   },
   clicks: { type: Number, default: 0 },
   conversions: { type: Number, default: 0 },
@@ -157,26 +162,26 @@ const UserSchema = new Schema<IUser>(
   { timestamps: true }
 );
 
-// Indexes
 UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 UserSchema.index({ 'subscriptionExpiresAt': 1 });
 UserSchema.index({ xp: -1 });
 UserSchema.index({ roles: 1 });
 UserSchema.index({ createdAt: -1 });
+UserSchema.index({ 'affiliateLinks.code': 1 });
 
-// Hash password before save
 UserSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
+  if (!this.referralCode) {
+    this.referralCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+  }
   next();
 });
 
-// Compare password
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
 };
 
-// Check premium access
 UserSchema.methods.canAccessPremium = function(): boolean {
   if (this.subscriptionTier === 'free') return false;
   if (this.subscriptionStatus !== 'active') return false;
@@ -184,12 +189,10 @@ UserSchema.methods.canAccessPremium = function(): boolean {
   return true;
 };
 
-// Calculate level based on XP
 UserSchema.methods.calculateLevel = function(): number {
   return Math.floor(Math.pow(this.xp / 100, 0.5)) + 1;
 };
 
-// ✅ ADD THE MISSING updateStreak METHOD
 UserSchema.methods.updateStreak = async function(): Promise<void> {
   const now = new Date();
   const lastActive = this.lastActiveAt || now;
@@ -200,7 +203,6 @@ UserSchema.methods.updateStreak = async function(): Promise<void> {
   } else if (daysDiff > 1) {
     this.streak = 1;
   }
-  // If daysDiff === 0, do nothing (already active today)
   
   this.lastActiveAt = now;
   await this.save();
