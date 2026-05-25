@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/routes/referrals.ts (New)
-// ============================================
 import { Router } from 'express';
 import { ReferralController } from '../controllers/ReferralController';
 import { authenticate } from '../middleware/auth';
