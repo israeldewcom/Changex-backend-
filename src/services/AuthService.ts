@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/AuthService.ts (Complete – fixes referral code 400)
+// FILE: src/services/AuthService.ts (Complete – with affiliate tracking on signup)
 // ============================================
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
@@ -40,6 +40,7 @@ export class AuthService {
     firstName: string;
     lastName: string;
     referralCode?: string;
+    affiliateCode?: string;
   }): Promise<IUser> {
     const session = await User.startSession();
     session.startTransaction();
@@ -56,7 +57,7 @@ export class AuthService {
       });
       await user.save({ session });
 
-      // Process referral only if code is valid – otherwise ignore (no error)
+      // Process regular referral code (if provided and valid)
       if (userData.referralCode) {
         const referrer = await User.findOne({ referralCode: userData.referralCode }).session(session);
         if (referrer) {
@@ -65,6 +66,12 @@ export class AuthService {
         } else {
           logger.warn(`Invalid referral code provided: ${userData.referralCode} – registration continues`);
         }
+      }
+      
+      // ✅ Process affiliate code (if provided)
+      if (userData.affiliateCode) {
+        const AffiliateService = require('./AffiliateService').AffiliateService;
+        await AffiliateService.getInstance().registerAffiliateSignup(userData.affiliateCode, user._id.toString());
       }
 
       await this.emailService.sendVerificationEmail(user.email, user.emailVerificationToken!);
@@ -217,6 +224,7 @@ export class AuthService {
       referred: newUserId,
       level,
       referralCode,
+      type: 'referral',
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     });
     await referral.save({ session });
