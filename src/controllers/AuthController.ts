@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/AuthController.ts (Complete Updated)
+// FILE: src/controllers/AuthController.ts (Complete - Fixed Transaction Error Handling)
 // ============================================
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
@@ -18,12 +18,20 @@ export class AuthController {
   register = async (req: Request, res: Response): Promise<void> => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) { 
-      res.status(400).json({ errors: errors.array() }); 
+      res.status(400).json({ success: false, message: 'Please check your input', errors: errors.array() }); 
       return; 
     }
     
     try {
       const { email, password, firstName, lastName, referralCode } = req.body;
+      
+      // Check if user already exists before transaction
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        res.status(400).json({ success: false, message: 'User with this email already exists' });
+        return;
+      }
+      
       const user = await this.authService.registerUser({ 
         email, 
         password, 
@@ -54,20 +62,20 @@ export class AuthController {
         } 
       });
     } catch (error: any) { 
-      logger.error('Registration error:', error); 
-      res.status(400).json({ success: false, message: error.message }); 
+      logger.error('Registration error:', error);
+      // Handle MongoDB transaction errors gracefully
+      if (error.message && error.message.includes('transaction')) {
+        res.status(400).json({ success: false, message: 'Registration failed due to a conflict. Please try again.' });
+      } else {
+        res.status(400).json({ success: false, message: error.message || 'Registration failed' });
+      }
     }
   };
 
   login = async (req: Request, res: Response): Promise<void> => {
-    // Debug logging to see what's coming in
-    console.log('🔍 Login request received');
-    console.log('🔍 Content-Type:', req.headers['content-type']);
-    console.log('🔍 Request body:', JSON.stringify(req.body, null, 2));
-    
+    // No debug logs in production, but keep for troubleshooting
     const errors = validationResult(req);
     if (!errors.isEmpty()) { 
-      console.log('❌ Validation errors:', JSON.stringify(errors.array(), null, 2));
       res.status(400).json({ 
         success: false, 
         message: 'Please check your input',
@@ -79,8 +87,6 @@ export class AuthController {
     try {
       const { email, password, twoFactorCode } = req.body;
       const ip = req.ip || req.socket.remoteAddress || '';
-      
-      console.log(`🔍 Attempting login for email: ${email}`);
       
       const result = await this.authService.loginUser(email, password, ip, twoFactorCode);
       
@@ -111,8 +117,6 @@ export class AuthController {
         status: 'success' 
       });
       
-      console.log(`✅ Login successful for: ${email}`);
-      
       res.json({ 
         success: true, 
         data: { 
@@ -132,9 +136,8 @@ export class AuthController {
         } 
       });
     } catch (error: any) { 
-      console.error('❌ Login error:', error);
       logger.error('Login error:', error); 
-      res.status(401).json({ success: false, message: error.message }); 
+      res.status(401).json({ success: false, message: error.message || 'Invalid credentials' }); 
     }
   };
 
