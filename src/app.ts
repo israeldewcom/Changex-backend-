@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/app.ts – COMPLETE & GUARANTEED WORKING
-// ============================================
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -20,30 +17,23 @@ import { logger } from './utils/logger';
 
 const app = express();
 
-// ============================================================
-// CORS – FIXED TO ACCEPT YOUR VERCEL FRONTEND
-// ============================================================
-// Allow all origins temporarily (remove after confirming login works)
-// Then replace with your specific frontend URL.
-const allowedOrigins = [
-  'https://adc-mu.vercel.app',
-  'http://localhost:3000',
-  'http://localhost:3001',
-  process.env.FRONTEND_URL
-].filter(Boolean);
-
+// CORS – allow your Vercel frontend
 app.use(cors({
   origin: function(origin, callback) {
     // Allow requests with no origin (like mobile apps, curl)
     if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+    const allowed = [
+      'https://adc-mu.vercel.app',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      process.env.FRONTEND_URL
+    ].filter(Boolean);
+    if (allowed.includes(origin)) {
       callback(null, true);
     } else {
       console.warn(`CORS blocked origin: ${origin}`);
-      // TEMPORARILY ACCEPT ANY ORIGIN TO DEBUG – REMOVE AFTER FIX
+      // TEMPORARILY ACCEPT ANY ORIGIN FOR DEBUGGING – REMOVE AFTER CONFIRMATION
       callback(null, true);
-      // In production, uncomment below line to block:
-      // callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
@@ -51,9 +41,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'x-csrf-token']
 }));
 
-// ============================================================
-// SECURITY HEADERS (Helmet)
-// ============================================================
 app.use(helmet({ 
   crossOriginResourcePolicy: { policy: 'cross-origin' }, 
   contentSecurityPolicy: { 
@@ -67,9 +54,6 @@ app.use(helmet({
   } 
 }));
 
-// ============================================================
-// MIDDLEWARE
-// ============================================================
 app.use(compression());
 app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }));
 app.use(express.json({ limit: '10mb' }));
@@ -77,7 +61,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(passport.initialize());
 
-// XSS sanitization - SKIP for auth routes (prevents email corruption)
+// XSS sanitization – skip for auth routes (preserve email format)
 app.use((req, res, next) => {
   if (req.path.includes('/auth/') || req.path.includes('/login') || req.path.includes('/register')) {
     return next();
@@ -99,14 +83,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// CSRF protection – DISABLED for authentication routes and affiliate clicks
+// CSRF – skip for auth, webhooks, and public affiliate routes
 app.use((req, res, next) => {
   if (
     req.path.includes('/webhooks') ||
     req.method === 'GET' ||
     req.path === '/health' ||
     req.path.startsWith('/aff/') ||
-    req.path.includes('/auth/') ||      // Let auth work without CSRF
+    req.path.includes('/auth/') ||
     req.path.includes('/login')
   ) {
     return next();
@@ -114,25 +98,16 @@ app.use((req, res, next) => {
   simpleCsrf(req, res, next);
 });
 
-// Rate limiting
 app.use(generalRateLimit);
-
-// ============================================================
-// ROUTES
-// ============================================================
-app.use('/', publicRoutes);          // Public affiliate tracker: /aff/...
-app.use('/api', routes);             // All API endpoints
+app.use('/', publicRoutes);      // MUST be before /api
+app.use('/api', routes);
 app.use('/certificates', express.static('public/certificates'));
 
-// Health check
 app.get('/health', (req, res) => { 
   res.json({ status: 'healthy', timestamp: new Date().toISOString(), environment: config.env }); 
 });
 
-// 404 handler
 app.use(notFound);
-
-// Global error handler
 app.use(errorHandler);
 
 export default app;
