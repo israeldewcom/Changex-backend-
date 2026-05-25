@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/controllers/AffiliateController.ts (Complete)
-// ============================================
 import { Request, Response } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
 import { User } from '../models/User';
