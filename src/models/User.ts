@@ -39,10 +39,10 @@ export interface IUser extends Document {
   referralEarnings: number;
   referralLevel: number;
   
-  // Affiliate links (FIXED: code is optional or auto‑generated)
+  // Affiliate links
   affiliateLinks: Array<{
     courseId: mongoose.Types.ObjectId;
-    code: string;           // Now optional in schema (see below)
+    code: string;
     clicks: number;
     conversions: number;
     totalEarned: number;
@@ -72,7 +72,6 @@ export interface IUser extends Document {
   isBanned: boolean;
   roles: ('user' | 'creator' | 'admin' | 'moderator')[];
   
-  // Timestamps
   createdAt: Date;
   updatedAt: Date;
   lastLoginAt: Date;
@@ -81,14 +80,15 @@ export interface IUser extends Document {
   comparePassword(candidatePassword: string): Promise<boolean>;
   canAccessPremium(): boolean;
   calculateLevel(): number;
+  updateStreak(): Promise<void>;
 }
 
 const AffiliateLinkSchema = new Schema({
   courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
   code: { 
     type: String, 
-    required: false,           // ✅ FIX: 'code' is no longer required
-    default: () => crypto.randomBytes(6).toString('hex')  // auto‑generate if missing
+    required: false,
+    default: () => crypto.randomBytes(6).toString('hex')
   },
   clicks: { type: Number, default: 0 },
   conversions: { type: Number, default: 0 },
@@ -130,7 +130,7 @@ const UserSchema = new Schema<IUser>(
     referralEarnings: { type: Number, default: 0 },
     referralLevel: { type: Number, default: 0 },
     
-    affiliateLinks: [AffiliateLinkSchema],  // ✅ FIXED: uses the updated schema
+    affiliateLinks: [AffiliateLinkSchema],
     
     coursesEnrolled: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
     coursesCompleted: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
@@ -157,7 +157,7 @@ const UserSchema = new Schema<IUser>(
   { timestamps: true }
 );
 
-// Indexes for performance
+// Indexes
 UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 UserSchema.index({ 'subscriptionExpiresAt': 1 });
 UserSchema.index({ xp: -1 });
@@ -171,7 +171,7 @@ UserSchema.pre('save', async function(next) {
   next();
 });
 
-// Compare password method
+// Compare password
 UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
 };
@@ -186,8 +186,24 @@ UserSchema.methods.canAccessPremium = function(): boolean {
 
 // Calculate level based on XP
 UserSchema.methods.calculateLevel = function(): number {
-  // Level 1: 0 XP, Level 2: 200 XP, Level 3: 500 XP, etc.
   return Math.floor(Math.pow(this.xp / 100, 0.5)) + 1;
+};
+
+// ✅ ADD THE MISSING updateStreak METHOD
+UserSchema.methods.updateStreak = async function(): Promise<void> {
+  const now = new Date();
+  const lastActive = this.lastActiveAt || now;
+  const daysDiff = Math.floor((now.getTime() - lastActive.getTime()) / (1000 * 60 * 60 * 24));
+  
+  if (daysDiff === 1) {
+    this.streak += 1;
+  } else if (daysDiff > 1) {
+    this.streak = 1;
+  }
+  // If daysDiff === 0, do nothing (already active today)
+  
+  this.lastActiveAt = now;
+  await this.save();
 };
 
 export const User = mongoose.model<IUser>('User', UserSchema);
