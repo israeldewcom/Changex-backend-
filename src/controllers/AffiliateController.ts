@@ -1,12 +1,10 @@
 // ============================================
-// FILE: src/controllers/AffiliateController.ts (Complete – tracks clicks, signups, conversions)
+// FILE: src/controllers/AffiliateController.ts (Complete)
 // ============================================
 import { Request, Response } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
-import { Course } from '../models/Course';
 import { User } from '../models/User';
-import { Referral } from '../models/Referral';
-import { AffiliateClick } from '../models/AffiliateClick';
+import { Course } from '../models/Course';
 
 export class AffiliateController {
   private affiliateService: AffiliateService;
@@ -15,103 +13,91 @@ export class AffiliateController {
     this.affiliateService = AffiliateService.getInstance();
   }
 
-  getAvailableOffers = async (req: Request, res: Response): Promise<void> => {
+  generateLink = async (req: Request, res: Response): Promise<void> => {
     try {
-      const courses = await Course.find({
-        published: true,
-        approvalStatus: 'approved',
-        hasAffiliate: true,
-        price: { $gt: 0 }
-      }).select('title thumbnail price discountPrice affiliatePercent affiliateDescription instructor');
-      res.json({ success: true, data: courses });
-    } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
-    }
-  };
-
-  acceptOffer = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = (req as any).user.userId;
-      const { courseId } = req.body;
-      const result = await this.affiliateService.acceptAffiliateOffer(userId, courseId);
-      res.json({ success: true, data: result });
+      const userId = (req as any).user?.userId;
+      const { courseId } = req.query;
+      if (!courseId) {
+        res.status(400).json({ success: false, message: 'courseId required' });
+        return;
+      }
+      const { code, link } = await this.affiliateService.generateAffiliateLink(userId, courseId as string);
+      res.json({ success: true, data: { code, link } });
     } catch (error: any) {
-      res.status(400).json({ success: false, message: error.message });
+      res.status(500).json({ success: false, message: error.message });
     }
   };
 
-  getMyAffiliateStats = async (req: Request, res: Response): Promise<void> => {
+  getMyLinks = async (req: Request, res: Response): Promise<void> => {
     try {
-      const userId = (req as any).user.userId;
-      const stats = await this.affiliateService.getAffiliateStats(userId);
-      res.json({ success: true, data: stats });
-    } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+      const userId = (req as any).user?.userId;
+      const user = await User.findById(userId).populate('affiliateLinks.courseId', 'title price');
+      if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
+      const links = user.affiliateLinks.map(link => ({
+        id: link._id,
+        courseId: link.courseId,
+        courseTitle: (link.courseId as any)?.title || 'Course',
+        code: link.code,
+        clicks: link.clicks,
+        conversions: link.conversions,
+        totalEarned: link.totalEarned,
+        link: `${process.env.FRONTEND_URL}/aff/${userId}/${link.courseId}/${link.code}`
+      }));
+      res.json({ success: true, data: links });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
     }
   };
 
-  trackClick = async (req: Request, res: Response): Promise<void> => {
+  getStats = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { userId, courseId, code } = req.params;
-      const ip = req.ip || req.socket.remoteAddress || '';
-      const userAgent = req.get('user-agent') || '';
-      
-      // Track the click
-      await this.affiliateService.trackClick(userId, courseId, code, ip, userAgent);
-      
-      // Set cookie for 30 days (fallback for older browsers)
-      res.cookie('cx_affiliate', `${userId}|${courseId}|${code}`, {
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-        httpOnly: false,
-        path: '/'
-      });
-      
-      // Redirect to frontend course page
-      res.redirect(`${process.env.FRONTEND_URL}/#/courses/${courseId}`);
-    } catch (error) {
-      res.redirect(`${process.env.FRONTEND_URL}/#/courses/${req.params.courseId}`);
-    }
-  };
-
-  getTopAffiliates = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { limit = 10 } = req.query;
-      const topAffiliates = await this.affiliateService.getTopAffiliates(Number(limit));
-      res.json({ success: true, data: topAffiliates });
-    } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
-    }
-  };
-
-  getClickAnalytics = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = (req as any).user.userId;
-      const { days = 30 } = req.query;
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - Number(days));
-      
-      const clicks = await AffiliateClick.aggregate([
-        { $match: { affiliateId: new (require('mongoose').Types.ObjectId)(userId), clickedAt: { $gte: startDate } } },
-        { $group: {
-            _id: { $dateToString: { format: '%Y-%m-%d', date: '$clickedAt' } },
-            count: { $sum: 1 }
-          } },
-        { $sort: { _id: 1 } }
-      ]);
-      
-      const totalClicks = await AffiliateClick.countDocuments({ affiliateId: userId });
-      const uniqueCourses = await AffiliateClick.distinct('courseId', { affiliateId: userId });
-      
+      const userId = (req as any).user?.userId;
+      const user = await User.findById(userId);
+      if (!user) {
+        res.status(404).json({ success: false, message: 'User not found' });
+        return;
+      }
+      const totalClicks = user.affiliateLinks.reduce((sum, l) => sum + (l.clicks || 0), 0);
+      const totalConversions = user.affiliateLinks.reduce((sum, l) => sum + (l.conversions || 0), 0);
+      const totalEarned = user.affiliateLinks.reduce((sum, l) => sum + (l.totalEarned || 0), 0);
       res.json({
         success: true,
         data: {
-          dailyClicks: clicks,
           totalClicks,
-          uniqueCoursesClicked: uniqueCourses.length
+          totalConversions,
+          totalEarned,
+          linksCount: user.affiliateLinks.length
         }
       });
-    } catch (error) {
-      res.status(500).json({ success: false, message: 'Server error' });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  getLeaderboard = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const leaders = await User.aggregate([
+        { $unwind: '$affiliateLinks' },
+        {
+          $group: {
+            _id: '$_id',
+            firstName: { $first: '$firstName' },
+            lastName: { $first: '$lastName' },
+            displayName: { $first: '$displayName' },
+            totalAffiliateEarnings: { $sum: '$affiliateLinks.totalEarned' },
+            totalAffiliateConversions: { $sum: '$affiliateLinks.conversions' },
+            affiliateLinksCount: { $sum: 1 }
+          }
+        },
+        { $sort: { totalAffiliateEarnings: -1 } },
+        { $limit: 20 }
+      ]);
+      res.json({ success: true, data: leaders });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
     }
   };
 }
