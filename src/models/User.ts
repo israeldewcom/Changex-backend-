@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/models/User.ts (Updated AffiliateLinkSchema with code field)
+// FILE: src/models/User.ts (add code field to affiliateLinks)
 // ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
@@ -36,7 +36,7 @@ export interface IUser extends Document {
     courseId: mongoose.Types.ObjectId;
     courseTitle?: string;
     link: string;
-    code: string; // ✅ Added unique code
+    code: string;
     clicks: number;
     signups: number;
     conversions: number;
@@ -77,7 +77,7 @@ const AffiliateLinkSchema = new Schema({
   courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
   courseTitle: { type: String },
   link: { type: String, required: true },
-  code: { type: String, required: true, unique: true }, // ✅ Added unique code
+  code: { type: String, required: true, unique: true },
   clicks: { type: Number, default: 0 },
   signups: { type: Number, default: 0 },
   conversions: { type: Number, default: 0 },
@@ -86,7 +86,6 @@ const AffiliateLinkSchema = new Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
-// Rest of UserSchema remains unchanged...
 const UserSchema = new Schema<IUser>(
   {
     email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
@@ -148,6 +147,7 @@ UserSchema.index({ subscriptionExpiresAt: 1 });
 UserSchema.index({ xp: -1 });
 UserSchema.index({ roles: 1 });
 UserSchema.index({ createdAt: -1 });
+UserSchema.index({ 'affiliateLinks.code': 1 });
 
 UserSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
