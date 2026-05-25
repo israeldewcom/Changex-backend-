@@ -1,11 +1,12 @@
 // ============================================
-// FILE: src/services/AuthService.ts (Complete – with affiliate tracking on signup)
+// FILE: src/services/AuthService.ts (Complete – No 400 on invalid referral, tracks referral clicks)
 // ============================================
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import speakeasy from 'speakeasy';
 import QRCode from 'qrcode';
 import { User, IUser } from '../models/User';
+import { Referral } from '../models/Referral';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 import { RedisService } from './RedisService';
@@ -40,7 +41,6 @@ export class AuthService {
     firstName: string;
     lastName: string;
     referralCode?: string;
-    affiliateCode?: string;
   }): Promise<IUser> {
     const session = await User.startSession();
     session.startTransaction();
@@ -57,21 +57,24 @@ export class AuthService {
       });
       await user.save({ session });
 
-      // Process regular referral code (if provided and valid)
+      // Process referral only if code is valid – otherwise ignore (no error)
       if (userData.referralCode) {
         const referrer = await User.findOne({ referralCode: userData.referralCode }).session(session);
         if (referrer) {
           await this.processReferral(userData.referralCode, user._id, session);
           logger.info(`Referral code ${userData.referralCode} applied for user ${user._id}`);
+          
+          // Update click conversion for referral link
+          const referralRecord = await Referral.findOne({ referralCode: userData.referralCode, referred: null }).session(session);
+          if (referralRecord) {
+            referralRecord.referred = user._id;
+            referralRecord.registeredAt = new Date();
+            referralRecord.status = 'pending';
+            await referralRecord.save({ session });
+          }
         } else {
           logger.warn(`Invalid referral code provided: ${userData.referralCode} – registration continues`);
         }
-      }
-      
-      // ✅ Process affiliate code (if provided)
-      if (userData.affiliateCode) {
-        const AffiliateService = require('./AffiliateService').AffiliateService;
-        await AffiliateService.getInstance().registerAffiliateSignup(userData.affiliateCode, user._id.toString());
       }
 
       await this.emailService.sendVerificationEmail(user.email, user.emailVerificationToken!);
@@ -208,9 +211,37 @@ export class AuthService {
     await user.save();
   }
 
+  async trackReferralClick(referralCode: string, ip: string, userAgent: string): Promise<void> {
+    try {
+      const referrer = await User.findOne({ referralCode });
+      if (!referrer) return;
+      
+      let referral = await Referral.findOne({ referralCode, referred: null });
+      if (!referral) {
+        referral = new Referral({
+          referrer: referrer._id,
+          level: 1,
+          referralCode,
+          type: 'referral',
+          expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        });
+        await referral.save();
+      }
+      referral.clickedAt = new Date();
+      referral.clickedIp = ip;
+      referral.clickedUserAgent = userAgent;
+      await referral.save();
+      
+      logger.info(`Referral click tracked for code ${referralCode} from IP ${ip}`);
+    } catch (error) {
+      logger.error('Track referral click error:', error);
+    }
+  }
+
   private async processReferral(referralCode: string, newUserId: string, session: any): Promise<void> {
     const referrer = await User.findOne({ referralCode }).session(session);
     if (!referrer) return;
+    
     let level = 1;
     let currentReferrer = referrer;
     while (currentReferrer.referredBy && level < 3) {
@@ -218,18 +249,20 @@ export class AuthService {
       currentReferrer = await User.findById(currentReferrer.referredBy).session(session);
       if (!currentReferrer) break;
     }
-    const { Referral } = require('../models/Referral');
+    
     const referral = new Referral({
       referrer: referrer._id,
       referred: newUserId,
       level,
       referralCode,
+      status: 'pending',
       type: 'referral',
       expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
     });
     await referral.save({ session });
+    
     await User.findByIdAndUpdate(newUserId, { referredBy: referrer._id, referralLevel: level }, { session });
-    await User.findByIdAndUpdate(referrer._id, { $push: { referrals: newUserId } }, { session });
+    await User.findByIdAndUpdate(referrer._id, { $push: { referrals: newUserId }, $inc: { referralCount: 1 } }, { session });
   }
 
   private generateReferralCode(): string {
