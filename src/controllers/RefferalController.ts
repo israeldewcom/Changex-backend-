@@ -1,9 +1,5 @@
-// ============================================
-// FILE: src/controllers/ReferralController.ts (Complete)
-// ============================================
 import { Request, Response } from 'express';
 import { Referral } from '../models/Referral';
-import { User } from '../models/User';
 
 export class ReferralController {
   getMyReferrals = async (req: Request, res: Response): Promise<void> => {
