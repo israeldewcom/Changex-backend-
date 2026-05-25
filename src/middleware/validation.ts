@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/middleware/validation.ts (Complete Updated - With Fixed Login Validation)
+// FILE: src/middleware/validation.ts (Complete - Login Validation Fixed)
 // ============================================
 import { body, param, query } from 'express-validator';
 
