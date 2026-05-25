@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/controllers/AuthController.ts (forgot password fire-and-forget)
+// FILE: src/controllers/AuthController.ts (OAuth working, referral click tracking)
 // ============================================
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
@@ -131,6 +131,7 @@ export class AuthController {
     try {
       const referrer = await User.findOne({ referralCode }).session(session);
       if (!referrer) return; // Invalid code – silently ignore
+      
       let level = 1;
       let currentReferrer = referrer;
       while (currentReferrer.referredBy && level < 3) {
@@ -138,17 +139,20 @@ export class AuthController {
         currentReferrer = await User.findById(currentReferrer.referredBy).session(session);
         if (!currentReferrer) break;
       }
+      
       const { Referral } = require('../models/Referral');
       const referral = new Referral({
         referrer: referrer._id,
         referred: newUserId,
         level,
         referralCode,
+        type: 'referral',
         expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
       await referral.save({ session });
+      
       await User.findByIdAndUpdate(newUserId, { referredBy: referrer._id, referralLevel: level }, { session });
-      await User.findByIdAndUpdate(referrer._id, { $push: { referrals: newUserId } }, { session });
+      await User.findByIdAndUpdate(referrer._id, { $push: { referrals: newUserId }, $inc: { referralCount: 1 } }, { session });
     } catch (error) {
       console.error('Error processing referral:', error);
     }
@@ -161,7 +165,7 @@ export class AuthController {
       return;
     }
     try {
-      const { email, password, twoFactorCode } = req.body;
+      const { email, password, twoFactorCode, rememberMe } = req.body;
       const ip = req.ip || req.socket.remoteAddress || '';
 
       const user = await User.findOne({ email }).select('+password');
@@ -208,13 +212,15 @@ export class AuthController {
       user.refreshTokens.push(refreshToken);
       if (user.refreshTokens.length > 5) user.refreshTokens.shift();
       await user.save();
-      await this.redis.setex(`user:${user._id}:session`, 3600 * 24, refreshToken);
+      
+      const sessionDuration = rememberMe ? 30 * 24 * 60 * 60 : 7 * 24 * 60 * 60;
+      await this.redis.setex(`user:${user._id}:session`, sessionDuration, refreshToken);
 
       res.cookie('refreshToken', refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000,
+        maxAge: sessionDuration * 1000,
       });
 
       await AuditLog.create({
@@ -305,9 +311,8 @@ export class AuthController {
   forgotPassword = async (req: Request, res: Response): Promise<void> => {
     try {
       const { email } = req.body;
-      // Fire and forget – do NOT await
       this.authService.forgotPassword(email).catch(err => logger.error(err));
-      res.json({ success: true, message: 'If an account exists, a password reset link has been sent.' });
+      res.json({ success: true, message: 'If an account exists with that email, a password reset link has been sent.' });
     } catch (error) {
       res.status(500).json({ success: false, message: 'Server error' });
     }
@@ -357,6 +362,18 @@ export class AuthController {
       res.json({ success: true, message: 'Two‑factor authentication disabled' });
     } catch (error: any) {
       res.status(400).json({ success: false, message: error.message });
+    }
+  };
+
+  trackReferralClick = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { code } = req.params;
+      const ip = req.ip || req.socket.remoteAddress || '';
+      const userAgent = req.get('user-agent') || '';
+      await this.authService.trackReferralClick(code, ip, userAgent);
+      res.redirect(`${process.env.FRONTEND_URL}/?ref=${code}`);
+    } catch (error) {
+      res.redirect(`${process.env.FRONTEND_URL}`);
     }
   };
 }
