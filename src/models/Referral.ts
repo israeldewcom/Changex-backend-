@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/models/Referral.ts (Ensure it exists)
-// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IReferral extends Document {
