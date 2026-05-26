@@ -1,10 +1,14 @@
+// ============================================
+// FILE: src/controllers/AffiliateController.ts (Complete - with accept offer endpoint)
+// ============================================
 import { Request, Response } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
 import { User } from '../models/User';
+import { Course } from '../models/Course';
 
 export class AffiliateController {
   private affiliateService: AffiliateService;
-
+  
   constructor() {
     this.affiliateService = AffiliateService.getInstance();
   }
@@ -24,26 +28,43 @@ export class AffiliateController {
     }
   };
 
+  acceptOffer = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = (req as any).user?.userId;
+      const { courseId } = req.body;
+      if (!courseId) {
+        res.status(400).json({ success: false, message: 'courseId required' });
+        return;
+      }
+      const { code, link } = await this.affiliateService.acceptAffiliateOffer(userId, courseId);
+      res.json({ success: true, data: { code, link } });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
   getMyLinks = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
-      const user = await User.findById(userId).populate('affiliateLinks.courseId', 'title price');
-      if (!user) {
-        res.status(404).json({ success: false, message: 'User not found' });
-        return;
-      }
-      const frontendUrl = process.env.FRONTEND_URL;
-      const links = user.affiliateLinks.map(link => ({
-        id: link._id,
-        courseId: link.courseId,
-        courseTitle: (link.courseId as any)?.title || 'Course',
-        code: link.code,
-        clicks: link.clicks,
-        conversions: link.conversions,
-        totalEarned: link.totalEarned,
-        link: `${frontendUrl}/aff/${userId}/${link.courseId}/${link.code}`
+      const stats = await this.affiliateService.getAffiliateStats(userId);
+      // Add course titles to links
+      const linksWithTitles = await Promise.all(stats.links.map(async (link: any) => {
+        const course = await Course.findById(link.courseId).select('title');
+        return {
+          ...link,
+          courseTitle: course?.title || 'Course'
+        };
       }));
-      res.json({ success: true, data: links });
+      res.json({ 
+        success: true, 
+        data: {
+          totalClicks: stats.totalClicks,
+          totalConversions: stats.totalConversions,
+          totalEarned: stats.totalEarned,
+          linksCount: stats.linksCount,
+          links: linksWithTitles
+        }
+      });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -52,18 +73,8 @@ export class AffiliateController {
   getStats = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
-      const user = await User.findById(userId);
-      if (!user) {
-        res.status(404).json({ success: false, message: 'User not found' });
-        return;
-      }
-      const totalClicks = user.affiliateLinks.reduce((sum, l) => sum + (l.clicks || 0), 0);
-      const totalConversions = user.affiliateLinks.reduce((sum, l) => sum + (l.conversions || 0), 0);
-      const totalEarned = user.affiliateLinks.reduce((sum, l) => sum + (l.totalEarned || 0), 0);
-      res.json({
-        success: true,
-        data: { totalClicks, totalConversions, totalEarned, linksCount: user.affiliateLinks.length }
-      });
+      const stats = await this.affiliateService.getAffiliateStats(userId);
+      res.json({ success: true, data: stats });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
