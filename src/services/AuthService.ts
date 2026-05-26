@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/services/AuthService.ts (Complete – transaction‑free, fixed registration)
+// ============================================
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import speakeasy from 'speakeasy';
@@ -29,75 +32,105 @@ export class AuthService {
   }
 
   generateTokens(userId: string): { accessToken: string; refreshToken: string } {
-    const accessToken = jwt.sign({ userId }, config.jwt.accessSecret, { expiresIn: config.jwt.accessExpiry });
-    const refreshToken = jwt.sign({ userId }, config.jwt.refreshSecret, { expiresIn: config.jwt.refreshExpiry });
+    const accessToken = jwt.sign({ userId }, config.jwt.accessSecret, {
+      expiresIn: config.jwt.accessExpiry,
+    });
+    const refreshToken = jwt.sign({ userId }, config.jwt.refreshSecret, {
+      expiresIn: config.jwt.refreshExpiry,
+    });
     return { accessToken, refreshToken };
   }
 
-  async registerUser(userData: { email: string; password: string; firstName: string; lastName: string; referralCode?: string }): Promise<IUser> {
-    let session = null;
-    let useTransaction = false;
-    try {
-      session = await User.startSession();
-      if (session && typeof session.startTransaction === 'function') {
-        await session.startTransaction();
-        useTransaction = true;
+  // ============================================================
+  // REGISTRATION – WITHOUT TRANSACTIONS (fixes replica set error)
+  // ============================================================
+  async registerUser(userData: {
+    email: string;
+    password: string;
+    firstName: string;
+    lastName: string;
+    referralCode?: string;
+  }): Promise<IUser> {
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: userData.email });
+    if (existingUser) throw new Error('User already exists');
+
+    // Generate referral code and email verification token
+    const referralCode = crypto.randomBytes(6).toString('hex').toUpperCase();
+    const emailVerificationToken = crypto.randomBytes(32).toString('hex');
+
+    // Create user
+    const user = new User({
+      ...userData,
+      displayName: `${userData.firstName} ${userData.lastName}`,
+      referralCode,
+      emailVerificationToken,
+    });
+
+    await user.save();
+
+    // Process referral if code was provided (best effort, don't fail registration)
+    if (userData.referralCode) {
+      try {
+        await this.affiliateService.processReferralSignup(userData.referralCode, user._id);
+      } catch (refError) {
+        logger.warn('Referral processing failed but registration continues:', refError);
       }
-    } catch (err) {
-      logger.warn('Transaction not available, continuing without transaction:', err);
-      useTransaction = false;
-      session = null;
     }
-    try {
-      let existingUser;
-      if (session && useTransaction) existingUser = await User.findOne({ email: userData.email }).session(session);
-      else existingUser = await User.findOne({ email: userData.email });
-      if (existingUser) throw new Error('User already exists');
-      const referralCode = crypto.randomBytes(6).toString('hex').toUpperCase();
-      const user = new User({
-        ...userData,
-        displayName: `${userData.firstName} ${userData.lastName}`,
-        referralCode,
-        emailVerificationToken: crypto.randomBytes(32).toString('hex'),
-      });
-      if (session && useTransaction) await user.save({ session });
-      else await user.save();
-      if (userData.referralCode) {
-        try {
-          await this.affiliateService.processReferralSignup(userData.referralCode, user._id, session);
-        } catch (refError) {
-          logger.warn('Referral processing failed but registration continues:', refError);
-        }
-      }
-      if (session && useTransaction) await session.commitTransaction();
-      await this.emailService.sendVerificationEmail(user.email, user.emailVerificationToken!);
-      return user;
-    } catch (error) {
-      if (session && useTransaction && session.inTransaction()) await session.abortTransaction();
-      throw error;
-    } finally {
-      if (session) await session.endSession();
-    }
+
+    // Send verification email (fire and forget, don't block)
+    this.emailService.sendVerificationEmail(user.email, emailVerificationToken).catch(err => {
+      logger.error('Failed to send verification email:', err);
+    });
+
+    return user;
   }
 
-  async loginUser(email: string, password: string, ipAddress: string, twoFactorCode?: string): Promise<{ user: IUser; accessToken: string; refreshToken: string; requiresTwoFactor?: boolean }> {
+  // ============================================================
+  // LOGIN – with streak update
+  // ============================================================
+  async loginUser(
+    email: string,
+    password: string,
+    ipAddress: string,
+    twoFactorCode?: string
+  ): Promise<{
+    user: IUser;
+    accessToken: string;
+    refreshToken: string;
+    requiresTwoFactor?: boolean;
+  }> {
     const user = await User.findOne({ email }).select('+password');
     if (!user) throw new Error('Invalid credentials');
     if (user.isBanned) throw new Error('Account has been banned');
+
     const isValidPassword = await user.comparePassword(password);
     if (!isValidPassword) throw new Error('Invalid credentials');
+
     if (user.twoFactorEnabled) {
-      if (!twoFactorCode) return { user, accessToken: '', refreshToken: '', requiresTwoFactor: true };
-      const verified = speakeasy.totp.verify({ secret: user.twoFactorSecret!, encoding: 'base32', token: twoFactorCode });
-      if (!verified) throw new Error('Invalid two-factor code');
+      if (!twoFactorCode) {
+        return { user, accessToken: '', refreshToken: '', requiresTwoFactor: true };
+      }
+      const verified = speakeasy.totp.verify({
+        secret: user.twoFactorSecret!,
+        encoding: 'base32',
+        token: twoFactorCode,
+      });
+      if (!verified) throw new Error('Invalid two‑factor code');
     }
+
+    // Update last login and streak
     user.lastLoginAt = new Date();
+    await user.updateStreak();  // ✅ updates streak and lastActiveAt
     await user.save();
+
     const { accessToken, refreshToken } = this.generateTokens(user._id.toString());
     user.refreshTokens.push(refreshToken);
     if (user.refreshTokens.length > 5) user.refreshTokens.shift();
     await user.save();
+
     await this.redis.setex(`user:${user._id}:session`, 3600 * 24, refreshToken);
+
     return { user, accessToken, refreshToken, requiresTwoFactor: false };
   }
 
@@ -105,7 +138,9 @@ export class AuthService {
     try {
       const decoded = jwt.verify(refreshToken, config.jwt.refreshSecret) as { userId: string };
       const user = await User.findById(decoded.userId);
-      if (!user || !user.refreshTokens.includes(refreshToken)) throw new Error('Invalid refresh token');
+      if (!user || !user.refreshTokens.includes(refreshToken)) {
+        throw new Error('Invalid refresh token');
+      }
       user.refreshTokens = user.refreshTokens.filter(t => t !== refreshToken);
       const tokens = this.generateTokens(user._id.toString());
       user.refreshTokens.push(tokens.refreshToken);
@@ -144,7 +179,10 @@ export class AuthService {
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {
-    const user = await User.findOne({ passwordResetToken: token, passwordResetExpires: { $gt: new Date() } });
+    const user = await User.findOne({
+      passwordResetToken: token,
+      passwordResetExpires: { $gt: new Date() },
+    });
     if (!user) throw new Error('Invalid or expired reset token');
     user.password = newPassword;
     user.passwordResetToken = undefined;
@@ -166,7 +204,11 @@ export class AuthService {
   async disableTwoFactor(userId: string, code: string): Promise<void> {
     const user = await User.findById(userId);
     if (!user || !user.twoFactorSecret) throw new Error('2FA not enabled');
-    const verified = speakeasy.totp.verify({ secret: user.twoFactorSecret, encoding: 'base32', token: code });
+    const verified = speakeasy.totp.verify({
+      secret: user.twoFactorSecret,
+      encoding: 'base32',
+      token: code,
+    });
     if (!verified) throw new Error('Invalid code');
     user.twoFactorEnabled = false;
     user.twoFactorSecret = undefined;
