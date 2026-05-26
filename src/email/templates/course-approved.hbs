@@ -1,0 +1,16 @@
+{{!-- File: src/email/templates/course-approved.hbs --}}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Course Approved</title>
+</head>
+<body style="font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px;">
+  <div style="max-width: 600px; margin: auto; background: white; padding: 30px; border-radius: 8px;">
+    <h2 style="color: #1a73e8;">Great News, {{firstName}}!</h2>
+    <p>Your course "<strong>{{courseTitle}}</strong>" has been approved and is now live on ChangeX Academy.</p>
+    <p>Start sharing your knowledge and earning money!</p>
+    <p><a href="{{courseUrl}}" style="display: inline-block; padding: 10px 20px; background: #1a73e8; color: white; text-decoration: none; border-radius: 5px;">View Your Course</a></p>
+  </div>
+</body>
+</html>
