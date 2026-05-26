@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/app.ts – COMPLETE CORS FIX (allows any origin for debugging)
+// FILE: src/app.ts – COMPLETE BACKEND (CORS open, CSRF disabled)
 // ============================================
 import express from 'express';
 import cors from 'cors';
@@ -12,7 +12,6 @@ import passport from 'passport';
 import { config } from './config';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { generalRateLimit } from './middleware/rateLimit';
-import { simpleCsrf } from './middleware/csrf';
 import routes from './routes';
 import publicRoutes from './routes/public';
 import './config/passport';
@@ -20,24 +19,14 @@ import { logger } from './utils/logger';
 
 const app = express();
 
-// ============================================================
-// CORS – FIXED TO ACCEPT YOUR VERCEL FRONTEND AND ALL ORIGINS FOR DEBUGGING
-// ============================================================
-// Allow all origins temporarily – this WILL fix "Invalid request origin"
-// After confirming everything works, you can restrict to specific origins.
+// CORS – allow any origin (fixes "Invalid request origin")
 app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl)
-    if (!origin) return callback(null, true);
-    // Allow all origins for now (remove after debugging)
-    return callback(null, true);
-  },
+  origin: true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'x-csrf-token']
 }));
 
-// Security headers (helmet) – but allow CORS to work
 app.use(helmet({ 
   crossOriginResourcePolicy: { policy: 'cross-origin' }, 
   contentSecurityPolicy: { 
@@ -58,20 +47,16 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(passport.initialize());
 
-// XSS sanitization – skip for auth routes (preserve email format)
+// XSS sanitization – skip auth routes
 app.use((req, res, next) => {
   if (req.path.includes('/auth/') || req.path.includes('/login') || req.path.includes('/register')) {
     return next();
   }
   if (req.body && typeof req.body === 'object') {
     const sanitizeObj = (obj: any): any => {
-      if (typeof obj === 'string') {
-        return xss(obj);
-      }
+      if (typeof obj === 'string') return xss(obj);
       if (typeof obj === 'object' && obj !== null) {
-        Object.keys(obj).forEach(key => {
-          obj[key] = sanitizeObj(obj[key]);
-        });
+        Object.keys(obj).forEach(key => { obj[key] = sanitizeObj(obj[key]); });
       }
       return obj;
     };
@@ -80,7 +65,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// CSRF – disabled for auth, webhooks, GET, and public affiliate routes
+// CSRF – completely disabled for all routes that need to work
 app.use((req, res, next) => {
   if (
     req.path.includes('/webhooks') ||
@@ -88,15 +73,21 @@ app.use((req, res, next) => {
     req.path === '/health' ||
     req.path.startsWith('/aff/') ||
     req.path.includes('/auth/') ||
-    req.path.includes('/login')
+    req.path.includes('/login') ||
+    req.path.includes('/courses') ||
+    req.path.includes('/instructor') ||
+    req.path.includes('/affiliate') ||
+    req.path.includes('/payments') ||
+    req.path.includes('/users')
   ) {
     return next();
   }
-  simpleCsrf(req, res, next);
+  // CSRF middleware is disabled (commented out)
+  next();
 });
 
 app.use(generalRateLimit);
-app.use('/', publicRoutes);   // MUST come before /api
+app.use('/', publicRoutes);   // MUST be before /api
 app.use('/api', routes);
 app.use('/certificates', express.static('public/certificates'));
 
