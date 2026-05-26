@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/services/AffiliateService.ts (Complete - with proper click tracking and commission)
+// ============================================
 import mongoose from 'mongoose';
 import { AffiliateClick } from '../models/AffiliateClick';
 import { User } from '../models/User';
@@ -10,8 +13,11 @@ import crypto from 'crypto';
 export class AffiliateService {
   private static instance: AffiliateService;
   private constructor() {}
+  
   static getInstance(): AffiliateService {
-    if (!AffiliateService.instance) AffiliateService.instance = new AffiliateService();
+    if (!AffiliateService.instance) {
+      AffiliateService.instance = new AffiliateService();
+    }
     return AffiliateService.instance;
   }
 
@@ -46,31 +52,58 @@ export class AffiliateService {
     });
     await user.save();
 
-    return {
-      code,
-      link: `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${code}`
-    };
+    const fullLink = `${process.env.FRONTEND_URL}/aff/${userId}/${courseId}/${code}`;
+    return { code, link: fullLink };
   }
 
   async trackClick(affiliateUserId: string, courseId: string, code: string, req: any): Promise<void> {
     const user = await User.findById(affiliateUserId);
     if (!user) throw new Error('Affiliate user not found');
+    
     const affiliateLink = user.affiliateLinks.find(l => l.courseId.toString() === courseId && l.code === code);
     if (!affiliateLink) throw new Error('Invalid affiliate link');
-
+    
+    // Increment click count
     affiliateLink.clicks += 1;
     await user.save();
-
+    
+    // Record click
     await AffiliateClick.create({
       affiliateLinkId: affiliateLink._id!,
-      affiliateUserId,
+      affiliateUserId: affiliateUserId,
       courseId,
       ip: req.ip || req.socket.remoteAddress || '',
       userAgent: req.get('user-agent') || '',
       referrer: req.get('referer'),
       clickedAt: new Date()
     });
-    logger.info(`Affiliate click: ${affiliateUserId} -> ${courseId}`);
+    
+    logger.info(`Affiliate click tracked: ${affiliateUserId}, course ${courseId}, code ${code}`);
+  }
+
+  async acceptAffiliateOffer(userId: string, courseId: string): Promise<{ code: string; link: string }> {
+    return this.generateAffiliateLink(userId, courseId);
+  }
+
+  async getAffiliateStats(userId: string): Promise<any> {
+    const user = await User.findById(userId);
+    if (!user) throw new Error('User not found');
+    
+    const totalClicks = user.affiliateLinks.reduce((sum, l) => sum + (l.clicks || 0), 0);
+    const totalConversions = user.affiliateLinks.reduce((sum, l) => sum + (l.conversions || 0), 0);
+    const totalEarned = user.affiliateLinks.reduce((sum, l) => sum + (l.totalEarned || 0), 0);
+    
+    const links = user.affiliateLinks.map(link => ({
+      id: link._id,
+      courseId: link.courseId,
+      code: link.code,
+      clicks: link.clicks,
+      conversions: link.conversions,
+      totalEarned: link.totalEarned,
+      link: `${process.env.FRONTEND_URL}/aff/${userId}/${link.courseId}/${link.code}`
+    }));
+    
+    return { totalClicks, totalConversions, totalEarned, linksCount: user.affiliateLinks.length, links };
   }
 
   async processAffiliateConversion(buyerId: string, courseId: string, transactionId: mongoose.Types.ObjectId, session: mongoose.ClientSession): Promise<void> {
@@ -79,30 +112,36 @@ export class AffiliateService {
       courseId,
       converted: false
     }).sort({ clickedAt: -1 }).session(session);
+    
     if (!click) return;
-
+    
     click.converted = true;
     click.conversionAt = new Date();
     click.transactionId = transactionId;
     await click.save({ session });
-
+    
     const affiliate = await User.findById(click.affiliateUserId).session(session);
-    const affiliateLink = affiliate?.affiliateLinks.find(l => l._id!.equals(click.affiliateLinkId));
+    if (!affiliate) return;
+    
+    const affiliateLink = affiliate.affiliateLinks.find(l => l._id!.equals(click.affiliateLinkId));
+    if (!affiliateLink) return;
+    
     const course = await Course.findById(courseId).session(session);
+    if (!course) return;
+    
     const transaction = await Transaction.findById(transactionId).session(session);
-    if (!affiliate || !affiliateLink || !course || !transaction) return;
-
+    const amount = transaction?.amount || 0;
     const commissionPercent = course.affiliateCommission || 20;
-    const amount = transaction.amount;
     const commission = amount * (commissionPercent / 100);
+    
     if (commission <= 0) return;
-
+    
     affiliate.walletBalance += commission;
     affiliate.totalEarned += commission;
     affiliateLink.totalEarned += commission;
     affiliateLink.conversions += 1;
     await affiliate.save({ session });
-
+    
     const commissionTx = new Transaction({
       user: affiliate._id,
       type: 'commission',
@@ -118,19 +157,22 @@ export class AffiliateService {
       completedAt: new Date()
     });
     await commissionTx.save({ session });
-    logger.info(`Affiliate commission: ${commission} to ${affiliate._id}`);
+    
+    logger.info(`Affiliate commission ${commission} to ${affiliate._id} for course ${courseId}`);
   }
 
   async processReferralSignup(referralCode: string, newUserId: string, session?: mongoose.ClientSession): Promise<void> {
     const referrer = await User.findOne({ referralCode });
     if (!referrer) return;
+    
     let level = 1;
-    let current = referrer;
-    while (current.referredBy && level < 3) {
+    let currentReferrer = referrer;
+    while (currentReferrer.referredBy && level < 3) {
       level++;
-      current = await User.findById(current.referredBy);
-      if (!current) break;
+      currentReferrer = await User.findById(currentReferrer.referredBy);
+      if (!currentReferrer) break;
     }
+    
     const referral = new Referral({
       referrer: referrer._id,
       referred: newUserId,
@@ -141,6 +183,7 @@ export class AffiliateService {
     });
     if (session) await referral.save({ session });
     else await referral.save();
+    
     await User.findByIdAndUpdate(newUserId, { referredBy: referrer._id, referralLevel: level }, { session });
     await User.findByIdAndUpdate(referrer._id, { $push: { referrals: newUserId } }, { session });
   }
@@ -148,17 +191,21 @@ export class AffiliateService {
   async processReferralUpgrade(userId: string, amountPaid: number, transactionId: mongoose.Types.ObjectId, session: mongoose.ClientSession): Promise<void> {
     const user = await User.findById(userId).session(session);
     if (!user || !user.referredBy) return;
+    
     const referral = await Referral.findOne({ referred: userId, status: 'pending' }).session(session);
     if (!referral) return;
+    
     referral.status = 'active';
     referral.firstPurchaseAt = new Date();
     await referral.save({ session });
+    
     const bonusAmount = Math.min(amountPaid * 0.2, 5000);
     const referrer = await User.findById(referral.referrer).session(session);
     if (referrer && bonusAmount > 0) {
       referrer.walletBalance += bonusAmount;
       referrer.referralEarnings += bonusAmount;
       await referrer.save({ session });
+      
       const bonusTx = new Transaction({
         user: referrer._id,
         type: 'commission',
@@ -166,7 +213,7 @@ export class AffiliateService {
         amount: bonusAmount,
         currency: 'NGN',
         status: 'completed',
-        description: `Referral bonus for ${user.firstName} upgrading`,
+        description: `Referral bonus for user upgrade`,
         reference: `REF_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         metadata: { referredUserId: userId, level: referral.level, amountPaid },
         fromUserId: userId,
@@ -174,7 +221,8 @@ export class AffiliateService {
         completedAt: new Date()
       });
       await bonusTx.save({ session });
-      logger.info(`Referral bonus ₦${bonusAmount} to ${referrer.email}`);
+      
+      logger.info(`Referral bonus ${bonusAmount} to ${referrer.email}`);
     }
   }
 }
