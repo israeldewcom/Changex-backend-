@@ -26,21 +26,13 @@ export class AuthController {
     try {
       const { email, password, firstName, lastName, referralCode } = req.body;
       
-      // Check if user already exists
       const existingUser = await User.findOne({ email });
       if (existingUser) {
         res.status(400).json({ success: false, message: 'User with this email already exists' });
         return;
       }
       
-      // Create user (the AuthService will handle referral processing internally)
-      const user = await this.authService.registerUser({ 
-        email, 
-        password, 
-        firstName, 
-        lastName, 
-        referralCode 
-      });
+      const user = await this.authService.registerUser({ email, password, firstName, lastName, referralCode });
       
       await AuditLog.create({ 
         user: user._id, 
@@ -70,8 +62,10 @@ export class AuthController {
   };
 
   login = async (req: Request, res: Response): Promise<void> => {
+    console.log('[LOGIN] Request received');
     const errors = validationResult(req);
     if (!errors.isEmpty()) { 
+      console.log('[LOGIN] Validation errors:', errors.array());
       res.status(400).json({ 
         success: false, 
         message: 'Please check your input',
@@ -84,6 +78,7 @@ export class AuthController {
       const { email, password, twoFactorCode } = req.body;
       const ip = req.ip || req.socket.remoteAddress || '';
       
+      console.log(`[LOGIN] Attempting login for: ${email}`);
       const result = await this.authService.loginUser(email, password, ip, twoFactorCode);
       
       if (result.requiresTwoFactor) {
@@ -109,6 +104,7 @@ export class AuthController {
         status: 'success' 
       });
       
+      console.log(`[LOGIN] Success for: ${email}`);
       res.json({ 
         success: true, 
         data: { 
@@ -128,6 +124,7 @@ export class AuthController {
         } 
       });
     } catch (error: any) { 
+      console.error('[LOGIN] Error:', error.message);
       logger.error('Login error:', error); 
       res.status(401).json({ success: false, message: error.message || 'Invalid credentials' }); 
     }
@@ -264,7 +261,6 @@ export class AuthController {
     }
   };
 
-  // OAuth handlers
   googleAuth = (req: Request, res: Response, next: any) => {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
       return res.redirect(`${process.env.FRONTEND_URL}/login?error=oauth_not_configured`);
