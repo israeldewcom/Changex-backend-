@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/routes/public.ts (Complete - redirects to course page, not dashboard)
+// FILE: src/routes/public.ts (Complete – for affiliate click tracking)
 // ============================================
 import { Router } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
@@ -9,19 +9,15 @@ import { logger } from '../utils/logger';
 const router = Router();
 const affiliateService = AffiliateService.getInstance();
 
-// Public affiliate click tracker - redirects to course page
 router.get('/aff/:userId/:courseId/:code', async (req, res) => {
   const { userId, courseId, code } = req.params;
   try {
     await affiliateService.trackClick(userId, courseId, code, req);
     const course = await Course.findById(courseId);
-    // Redirect to course page, NOT dashboard
     const redirectUrl = course ? `${process.env.FRONTEND_URL}/courses/${courseId}` : `${process.env.FRONTEND_URL}/explore`;
-    logger.info(`Affiliate click tracked, redirecting to ${redirectUrl}`);
     res.redirect(redirectUrl);
   } catch (error) {
     logger.error('Affiliate click tracking failed:', error);
-    // Still redirect to course page even if tracking fails
     res.redirect(`${process.env.FRONTEND_URL}/courses/${courseId}`);
   }
 });
