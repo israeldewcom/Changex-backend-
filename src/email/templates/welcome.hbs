@@ -1,0 +1,23 @@
+{{!-- File: src/email/templates/welcome.hbs --}}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Welcome to ChangeX Academy</title>
+  <style>
+    body { font-family: Arial, sans-serif; background: #f4f4f4; padding: 20px; }
+    .container { max-width: 600px; margin: auto; background: white; padding: 30px; border-radius: 8px; }
+    h1 { color: #1a73e8; }
+    .button { display: inline-block; padding: 10px 20px; background: #1a73e8; color: white; text-decoration: none; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Welcome {{firstName}}!</h1>
+    <p>You've joined ChangeX Academy – the place where you learn and earn.</p>
+    <p><a href="{{loginUrl}}" class="button">Start Learning</a></p>
+    <p>If you have any questions, just reply to this email.</p>
+    <p>Best,<br/>The ChangeX Team</p>
+  </div>
+</body>
+</html>
