@@ -67,7 +67,7 @@ export interface IUser extends Document {
 
 const AffiliateLinkSchema = new Schema({
   courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
-  code: { type: String, required: true, unique: true, default: () => crypto.randomBytes(6).toString('hex').toUpperCase() },
+  code: { type: String, required: false, default: () => crypto.randomBytes(6).toString('hex').toUpperCase() },
   clicks: { type: Number, default: 0 },
   conversions: { type: Number, default: 0 },
   totalEarned: { type: Number, default: 0 },
@@ -128,8 +128,6 @@ const UserSchema = new Schema<IUser>(
 
 UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
 UserSchema.index({ 'affiliateLinks.code': 1 });
-UserSchema.index({ 'subscriptionExpiresAt': 1 });
-UserSchema.index({ xp: -1 });
 
 UserSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
