@@ -41,7 +41,4 @@ const ReferralSchema = new Schema<IReferral>(
   { timestamps: true }
 );
 
-ReferralSchema.index({ referrer: 1, level: 1 });
-ReferralSchema.index({ expiresAt: 1 });
-
 export const Referral = mongoose.model<IReferral>('Referral', ReferralSchema);
