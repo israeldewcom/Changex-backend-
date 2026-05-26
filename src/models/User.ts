@@ -1,157 +1,70 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
-export interface IUser extends Document {
-  email: string;
-  password: string;
-  firstName: string;
-  lastName: string;
-  displayName: string;
-  avatar?: string;
-  bio?: string;
-  subscriptionTier: 'free' | 'premium' | 'elite';
-  subscriptionStatus: 'active' | 'canceled' | 'expired' | 'trialing';
-  walletBalance: number;
-  totalEarned: number;
-  totalWithdrawn: number;
-  pendingWithdrawal: number;
-  xp: number;
-  level: number;
-  streak: number;
-  lastActiveAt: Date;
-  badges: string[];
-  referralCode: string;
-  referredBy?: mongoose.Types.ObjectId;
-  referrals: mongoose.Types.ObjectId[];
-  referralEarnings: number;
-  referralLevel: number;
-  affiliateLinks: Array<{
-    _id?: mongoose.Types.ObjectId;
-    courseId: mongoose.Types.ObjectId;
-    code?: string;
-    clicks: number;
-    conversions: number;
-    totalEarned: number;
-    createdAt: Date;
-  }>;
-  coursesEnrolled: mongoose.Types.ObjectId[];
-  coursesCompleted: mongoose.Types.ObjectId[];
-  lessonsCompleted: number;
-  certificatesEarned: mongoose.Types.ObjectId[];
-  totalSpent: number;
-  emailNotifications: boolean;
-  twoFactorEnabled: boolean;
-  twoFactorSecret?: string;
-  preferredCurrency: string;
-  refreshTokens: string[];
-  passwordResetToken?: string;
-  passwordResetExpires?: Date;
-  emailVerified: boolean;
-  emailVerificationToken?: string;
-  isActive: boolean;
-  isBanned: boolean;
-  roles: ('user' | 'creator' | 'admin' | 'moderator')[];
-  createdAt: Date;
-  updatedAt: Date;
-  lastLoginAt: Date;
-  comparePassword(candidatePassword: string): Promise<boolean>;
-  canAccessPremium(): boolean;
-  calculateLevel(): number;
-  updateStreak(): Promise<void>;
-}
-
-const AffiliateLinkSchema = new Schema({
-  courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
-  code: { type: String, required: false },
-  clicks: { type: Number, default: 0 },
-  conversions: { type: Number, default: 0 },
+const UserSchema = new mongoose.Schema({
+  email: { type: String, required: true, unique: true, lowercase: true },
+  password: { type: String, required: true, select: false },
+  firstName: String, lastName: String, displayName: String, avatar: String, bio: String,
+  subscriptionTier: { type: String, enum: ['free', 'premium', 'elite'], default: 'free' },
+  subscriptionStatus: { type: String, enum: ['active', 'canceled', 'expired'], default: 'active' },
+  subscriptionExpiresAt: Date,
+  walletBalance: { type: Number, default: 0 },
   totalEarned: { type: Number, default: 0 },
-  createdAt: { type: Date, default: Date.now }
-});
-
-const UserSchema = new Schema<IUser>(
-  {
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true, index: true },
-    password: { type: String, required: true, minlength: 8, select: false },
-    firstName: { type: String, required: true, trim: true },
-    lastName: { type: String, required: true, trim: true },
-    displayName: { type: String, required: true, trim: true },
-    avatar: { type: String },
-    bio: { type: String, maxlength: 500 },
-    subscriptionTier: { type: String, enum: ['free', 'premium', 'elite'], default: 'free' },
-    subscriptionStatus: { type: String, enum: ['active', 'canceled', 'expired', 'trialing'], default: 'active' },
-    walletBalance: { type: Number, default: 0, min: 0 },
+  totalWithdrawn: { type: Number, default: 0 },
+  pendingWithdrawal: { type: Number, default: 0 },
+  xp: { type: Number, default: 0 },
+  level: { type: Number, default: 1 },
+  streak: { type: Number, default: 0 },
+  lastActiveAt: { type: Date, default: Date.now },
+  badges: [String],
+  referralCode: { type: String, unique: true, sparse: true },
+  referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  referrals: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  referralEarnings: { type: Number, default: 0 },
+  referralLevel: { type: Number, default: 0 },
+  affiliateLinks: [{
+    courseId: { type: mongoose.Schema.Types.ObjectId, ref: 'Course' },
+    code: String,
+    clicks: { type: Number, default: 0 },
+    conversions: { type: Number, default: 0 },
     totalEarned: { type: Number, default: 0 },
-    totalWithdrawn: { type: Number, default: 0 },
-    pendingWithdrawal: { type: Number, default: 0 },
-    xp: { type: Number, default: 0 },
-    level: { type: Number, default: 1 },
-    streak: { type: Number, default: 0 },
-    lastActiveAt: { type: Date, default: Date.now },
-    badges: [{ type: String }],
-    referralCode: { type: String, unique: true, sparse: true },
-    referredBy: { type: Schema.Types.ObjectId, ref: 'User', index: true },
-    referrals: [{ type: Schema.Types.ObjectId, ref: 'User' }],
-    referralEarnings: { type: Number, default: 0 },
-    referralLevel: { type: Number, default: 0 },
-    affiliateLinks: [AffiliateLinkSchema],
-    coursesEnrolled: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
-    coursesCompleted: [{ type: Schema.Types.ObjectId, ref: 'Course' }],
-    lessonsCompleted: { type: Number, default: 0 },
-    certificatesEarned: [{ type: Schema.Types.ObjectId, ref: 'Certificate' }],
-    totalSpent: { type: Number, default: 0 },
-    emailNotifications: { type: Boolean, default: true },
-    twoFactorEnabled: { type: Boolean, default: false },
-    twoFactorSecret: { type: String },
-    preferredCurrency: { type: String, default: 'NGN' },
-    refreshTokens: [{ type: String }],
-    passwordResetToken: { type: String },
-    passwordResetExpires: { type: Date },
-    emailVerified: { type: Boolean, default: false },
-    emailVerificationToken: { type: String },
-    isActive: { type: Boolean, default: true },
-    isBanned: { type: Boolean, default: false },
-    roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
-    lastLoginAt: { type: Date, default: Date.now },
-  },
-  { timestamps: true }
-);
-
-UserSchema.index({ referralCode: 1 }, { unique: true, sparse: true });
-UserSchema.index({ 'affiliateLinks.code': 1 });
+    createdAt: { type: Date, default: Date.now }
+  }],
+  coursesEnrolled: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }],
+  coursesCompleted: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Course' }],
+  lessonsCompleted: { type: Number, default: 0 },
+  certificatesEarned: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Certificate' }],
+  totalSpent: { type: Number, default: 0 },
+  emailNotifications: { type: Boolean, default: true },
+  twoFactorEnabled: { type: Boolean, default: false },
+  twoFactorSecret: String,
+  preferredCurrency: { type: String, default: 'NGN' },
+  refreshTokens: [String],
+  passwordResetToken: String, passwordResetExpires: Date,
+  emailVerified: { type: Boolean, default: false },
+  emailVerificationToken: String,
+  isActive: { type: Boolean, default: true },
+  isBanned: { type: Boolean, default: false },
+  roles: { type: [String], enum: ['user', 'creator', 'admin', 'moderator'], default: ['user'] },
+  isApprovedInstructor: { type: Boolean, default: false },
+  lastLoginAt: Date
+}, { timestamps: true });
 
 UserSchema.pre('save', async function(next) {
   if (!this.isModified('password')) return next();
   this.password = await bcrypt.hash(this.password, 12);
-  if (!this.referralCode) {
-    this.referralCode = crypto.randomBytes(6).toString('hex').toUpperCase();
-  }
+  if (!this.referralCode) this.referralCode = crypto.randomBytes(6).toString('hex').toUpperCase();
   next();
 });
-
-UserSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
-  return bcrypt.compare(candidatePassword, this.password);
-};
-
-UserSchema.methods.canAccessPremium = function(): boolean {
-  if (this.subscriptionTier === 'free') return false;
-  if (this.subscriptionStatus !== 'active') return false;
-  return true;
-};
-
-UserSchema.methods.calculateLevel = function(): number {
-  return Math.floor(Math.pow(this.xp / 100, 0.5)) + 1;
-};
-
-UserSchema.methods.updateStreak = async function(): Promise<void> {
+UserSchema.methods.comparePassword = async function(candidate: string) { return bcrypt.compare(candidate, this.password); };
+UserSchema.methods.updateStreak = async function() {
   const now = new Date();
-  const lastActive = this.lastActiveAt || now;
-  const daysDiff = Math.floor((now.getTime() - lastActive.getTime()) / (1000 * 60 * 60 * 24));
-  if (daysDiff === 1) this.streak += 1;
-  else if (daysDiff > 1) this.streak = 1;
+  const diff = Math.floor((now.getTime() - (this.lastActiveAt || now).getTime()) / (1000*60*60*24));
+  if (diff === 1) this.streak += 1;
+  else if (diff > 1) this.streak = 1;
   this.lastActiveAt = now;
   await this.save();
 };
 
-export const User = mongoose.model<IUser>('User', UserSchema);
+export const User = mongoose.model('User', UserSchema);
