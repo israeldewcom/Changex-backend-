@@ -1,58 +1,30 @@
-// ============================================
-// FILE: src/models/Transaction.ts
-// ============================================
+// File: src/models/Transaction.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITransaction extends Document {
-  user: mongoose.Types.ObjectId;
-  type: 'deposit' | 'withdrawal' | 'purchase' | 'refund' | 'commission' | 'reward' | 'subscription';
-  subtype?: string;
+  userId: mongoose.Types.ObjectId;
+  type: string;
   amount: number;
-  currency: string;
-  status: 'pending' | 'completed' | 'failed' | 'refunded';
-  description: string;
-  metadata: Record<string, any>;
-  reference: string;
-  paymentMethod?: 'stripe' | 'paystack' | 'wallet' | 'bank_transfer';
-  paymentGatewayReference?: string;
-  fromUserId?: mongoose.Types.ObjectId;
-  toUserId?: mongoose.Types.ObjectId;
-  courseId?: mongoose.Types.ObjectId;
-  enrollmentId?: mongoose.Types.ObjectId;
-  withdrawalDetails?: any;
-  processedAt?: Date;
-  completedAt?: Date;
+  status: 'pending' | 'completed' | 'failed';
+  description?: string;
+  reference?: string;
+  metadata?: Record<string, any>;
   createdAt: Date;
-  updatedAt: Date;
 }
 
 const TransactionSchema = new Schema<ITransaction>(
   {
-    user: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-    type: { type: String, enum: ['deposit', 'withdrawal', 'purchase', 'refund', 'commission', 'reward', 'subscription'], required: true },
-    subtype: { type: String },
+    userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    type: { type: String, enum: ['referral_bonus', 'affiliate_commission', 'course_purchase', 'withdrawal', 'bonus', 'subscription'], required: true },
     amount: { type: Number, required: true },
-    currency: { type: String, default: 'NGN' },
-    status: { type: String, enum: ['pending', 'completed', 'failed', 'refunded'], default: 'pending' },
-    description: { type: String, required: true },
-    metadata: { type: Schema.Types.Mixed, default: {} },
-    reference: { type: String, required: true, unique: true },
-    paymentMethod: { type: String, enum: ['stripe', 'paystack', 'wallet', 'bank_transfer'] },
-    paymentGatewayReference: { type: String },
-    fromUserId: { type: Schema.Types.ObjectId, ref: 'User' },
-    toUserId: { type: Schema.Types.ObjectId, ref: 'User' },
-    courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
-    enrollmentId: { type: Schema.Types.ObjectId, ref: 'Enrollment' },
-    withdrawalDetails: { type: Schema.Types.Mixed },
-    processedAt: { type: Date },
-    completedAt: { type: Date },
+    status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
+    description: String,
+    reference: String,
+    metadata: Schema.Types.Mixed,
   },
   { timestamps: true }
 );
 
-TransactionSchema.index({ reference: 1 }, { unique: true });
-TransactionSchema.index({ user: 1, createdAt: -1 });
-TransactionSchema.index({ status: 1, type: 1 });
-TransactionSchema.index({ createdAt: -1 });
+TransactionSchema.index({ userId: 1, createdAt: -1 });
 
-export const Transaction = mongoose.model<ITransaction>('Transaction', TransactionSchema);
+export default mongoose.model<ITransaction>('Transaction', TransactionSchema);
