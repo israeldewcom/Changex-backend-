@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/routes/public.ts (Complete – for affiliate click tracking)
-// ============================================
 import { Router } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
 import { Course } from '../models/Course';
