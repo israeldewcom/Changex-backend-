@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/routes/affiliate.ts (Complete)
+// ============================================
 import { Router } from 'express';
 import { AffiliateController } from '../controllers/AffiliateController';
 import { authenticate } from '../middleware/auth';
@@ -6,6 +9,7 @@ const router = Router();
 const controller = new AffiliateController();
 
 router.get('/generate-link', authenticate, controller.generateLink);
+router.post('/accept', authenticate, controller.acceptOffer);
 router.get('/my-links', authenticate, controller.getMyLinks);
 router.get('/stats', authenticate, controller.getStats);
 router.get('/leaderboard', controller.getLeaderboard);
