@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/routes/index.ts (Update - add affiliate routes)
+// FILE: src/routes/index.ts (Complete – includes all routes)
 // ============================================
 import { Router } from 'express';
 import authRoutes from './auth';
@@ -15,7 +15,11 @@ import referralRoutes from './referrals';
 import { generalRateLimit } from '../middleware/rateLimit';
 
 const router = Router();
-router.get('/health', (req, res) => { res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime() }); });
+
+router.get('/health', (req, res) => { 
+  res.json({ status: 'healthy', timestamp: new Date().toISOString(), uptime: process.uptime() }); 
+});
+
 router.use('/v1/auth', generalRateLimit, authRoutes);
 router.use('/v1/courses', generalRateLimit, courseRoutes);
 router.use('/v1/users', generalRateLimit, userRoutes);
@@ -26,4 +30,5 @@ router.use('/v1/admin', generalRateLimit, adminRoutes);
 router.use('/v1/affiliate', generalRateLimit, affiliateRoutes);
 router.use('/v1/referrals', generalRateLimit, referralRoutes);
 router.use('/webhooks', webhookRoutes);
+
 export default router;
