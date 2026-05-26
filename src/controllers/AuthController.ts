@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/controllers/AuthController.ts (Updated - with referral code fix)
-// ============================================
 import { Request, Response } from 'express';
 import { AuthService } from '../services/AuthService';
 import { validationResult } from 'express-validator';
@@ -36,23 +33,21 @@ export class AuthController {
         return;
       }
       
-      const user = await this.authService.registerUser({ email, password, firstName, lastName, referralCode });
-      
-      // Process referral signup if referral code was provided
-      if (referralCode) {
-        try {
-          await this.affiliateService.processReferralSignup(referralCode, user._id.toString());
-        } catch (refError) {
-          logger.warn('Referral processing failed but registration continues:', refError);
-        }
-      }
+      // Create user (the AuthService will handle referral processing internally)
+      const user = await this.authService.registerUser({ 
+        email, 
+        password, 
+        firstName, 
+        lastName, 
+        referralCode 
+      });
       
       await AuditLog.create({ 
         user: user._id, 
         action: 'REGISTER', 
         resource: 'User', 
         resourceId: user._id.toString(), 
-        details: { email: user.email }, 
+        details: { email: user.email, referralCode: referralCode || 'none' }, 
         ip: req.ip || req.socket.remoteAddress || '', 
         userAgent: req.get('user-agent') || '', 
         status: 'success' 
@@ -269,6 +264,7 @@ export class AuthController {
     }
   };
 
+  // OAuth handlers
   googleAuth = (req: Request, res: Response, next: any) => {
     if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
       return res.redirect(`${process.env.FRONTEND_URL}/login?error=oauth_not_configured`);
