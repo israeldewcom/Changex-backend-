@@ -1,95 +1,42 @@
+// File: src/middlewares/auth.ts
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { config } from '../config';
-import { User } from '../models/User';
-import { logger } from '../utils/logger';
+import { verifyAccessToken } from '../utils/jwt.js';
+import User, { IUser } from '../models/User.js';
 
-export interface AuthRequest extends Request {
-  user?: { userId: string; email: string; roles: string[] };
+declare global {
+  namespace Express {
+    interface Request {
+      user?: IUser;
+    }
+  }
 }
 
-export const authenticate = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({ success: false, message: 'No token provided' });
-      return;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, message: 'Access token required' });
     }
-    const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, config.jwt.accessSecret) as { userId: string };
-    const user = await User.findById(decoded.userId).select('email roles isActive isBanned');
+
+    const token = authHeader.split(' ')[1];
+    const decoded = verifyAccessToken(token);
+    const user = await User.findById(decoded.userId);
     if (!user) {
-      res.status(401).json({ success: false, message: 'User not found' });
-      return;
+      return res.status(401).json({ success: false, message: 'User not found' });
     }
-    if (!user.isActive || user.isBanned) {
-      res.status(401).json({ success: false, message: 'Account is disabled' });
-      return;
-    }
-    req.user = { userId: user._id.toString(), email: user.email, roles: user.roles };
+
+    req.user = user;
     next();
-  } catch (error: any) {
-    if (error.name === 'TokenExpiredError') res.status(401).json({ success: false, message: 'Token expired' });
-    else if (error.name === 'JsonWebTokenError') res.status(401).json({ success: false, message: 'Invalid token' });
-    else {
-      logger.error('Auth error:', error);
-      res.status(500).json({ success: false, message: 'Authentication error' });
-    }
+  } catch (err) {
+    return res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
 };
 
-export const requireAdmin = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
-  if (!req.user) {
-    res.status(401).json({ success: false, message: 'Not authenticated' });
-    return;
-  }
-  const user = await User.findById(req.user.userId);
-  if (!user || !user.roles.includes('admin')) {
-    logger.warn(`Admin access denied for ${req.user.userId} – roles: ${user?.roles}`);
-    res.status(403).json({ success: false, message: 'Admin access required' });
-    return;
-  }
-  next();
-};
-
-export const requireCreator = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
-  if (!req.user) {
-    res.status(401).json({ success: false, message: 'Not authenticated' });
-    return;
-  }
-  const user = await User.findById(req.user.userId);
-  if (!user) {
-    res.status(401).json({ success: false, message: 'User not found' });
-    return;
-  }
-  const isAdmin = user.roles.includes('admin');
-  const isApprovedInstructor = user.roles.includes('creator') && user.isApprovedInstructor === true;
-  const hasActivePremium = (user.subscriptionTier === 'premium' || user.subscriptionTier === 'elite') &&
-                            user.subscriptionStatus === 'active' &&
-                            (!user.subscriptionExpiresAt || user.subscriptionExpiresAt > new Date());
-  if (isAdmin || isApprovedInstructor || hasActivePremium) {
-    next();
-  } else {
-    res.status(403).json({
-      success: false,
-      message: 'Insufficient permissions. You need an active Premium subscription or be an approved instructor to create courses.'
-    });
-  }
-};
-
-export const optionalAuth = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
-      const decoded = jwt.verify(token, config.jwt.accessSecret) as { userId: string };
-      const user = await User.findById(decoded.userId).select('email roles');
-      if (user && user.isActive && !user.isBanned) {
-        req.user = { userId: user._id.toString(), email: user.email, roles: user.roles };
-      }
+export const authorize = (...roles: string[]) => {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || !roles.some(role => req.user!.roles.includes(role))) {
+      return res.status(403).json({ success: false, message: 'Insufficient permissions' });
     }
     next();
-  } catch (error) {
-    next();
-  }
+  };
 };
