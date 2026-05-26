@@ -1,3 +1,6 @@
+// ============================================
+// FILE: src/models/Referral.ts (Ensure it exists)
+// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IReferral extends Document {
@@ -40,5 +43,8 @@ const ReferralSchema = new Schema<IReferral>(
   },
   { timestamps: true }
 );
+
+ReferralSchema.index({ referrer: 1, level: 1 });
+ReferralSchema.index({ expiresAt: 1 });
 
 export const Referral = mongoose.model<IReferral>('Referral', ReferralSchema);
