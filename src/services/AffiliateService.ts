@@ -1,5 +1,5 @@
 // ============================================
-// FILE: src/services/AffiliateService.ts (Complete - with proper click tracking and commission)
+// FILE: src/services/AffiliateService.ts (Complete)
 // ============================================
 import mongoose from 'mongoose';
 import { AffiliateClick } from '../models/AffiliateClick';
@@ -56,6 +56,10 @@ export class AffiliateService {
     return { code, link: fullLink };
   }
 
+  async acceptAffiliateOffer(userId: string, courseId: string): Promise<{ code: string; link: string }> {
+    return this.generateAffiliateLink(userId, courseId);
+  }
+
   async trackClick(affiliateUserId: string, courseId: string, code: string, req: any): Promise<void> {
     const user = await User.findById(affiliateUserId);
     if (!user) throw new Error('Affiliate user not found');
@@ -63,11 +67,9 @@ export class AffiliateService {
     const affiliateLink = user.affiliateLinks.find(l => l.courseId.toString() === courseId && l.code === code);
     if (!affiliateLink) throw new Error('Invalid affiliate link');
     
-    // Increment click count
     affiliateLink.clicks += 1;
     await user.save();
     
-    // Record click
     await AffiliateClick.create({
       affiliateLinkId: affiliateLink._id!,
       affiliateUserId: affiliateUserId,
@@ -79,10 +81,6 @@ export class AffiliateService {
     });
     
     logger.info(`Affiliate click tracked: ${affiliateUserId}, course ${courseId}, code ${code}`);
-  }
-
-  async acceptAffiliateOffer(userId: string, courseId: string): Promise<{ code: string; link: string }> {
-    return this.generateAffiliateLink(userId, courseId);
   }
 
   async getAffiliateStats(userId: string): Promise<any> {
@@ -104,6 +102,21 @@ export class AffiliateService {
     }));
     
     return { totalClicks, totalConversions, totalEarned, linksCount: user.affiliateLinks.length, links };
+  }
+
+  async getMyAffiliateLinks(userId: string): Promise<any[]> {
+    const user = await User.findById(userId).populate('affiliateLinks.courseId', 'title');
+    if (!user) return [];
+    return user.affiliateLinks.map(link => ({
+      id: link._id,
+      courseId: link.courseId,
+      courseTitle: (link.courseId as any)?.title || 'Course',
+      code: link.code,
+      clicks: link.clicks,
+      conversions: link.conversions,
+      totalEarned: link.totalEarned,
+      link: `${process.env.FRONTEND_URL}/aff/${userId}/${link.courseId}/${link.code}`
+    }));
   }
 
   async processAffiliateConversion(buyerId: string, courseId: string, transactionId: mongoose.Types.ObjectId, session: mongoose.ClientSession): Promise<void> {
