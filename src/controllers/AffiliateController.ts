@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/controllers/AffiliateController.ts (Complete)
-// ============================================
 import { Request, Response } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
 import { User } from '../models/User';
@@ -66,8 +63,7 @@ export class AffiliateController {
     try {
       const leaders = await User.aggregate([
         { $unwind: '$affiliateLinks' },
-        {
-          $group: {
+        { $group: {
             _id: '$_id',
             firstName: { $first: '$firstName' },
             lastName: { $first: '$lastName' },
@@ -75,8 +71,7 @@ export class AffiliateController {
             totalAffiliateEarnings: { $sum: '$affiliateLinks.totalEarned' },
             totalAffiliateConversions: { $sum: '$affiliateLinks.conversions' },
             affiliateLinksCount: { $sum: 1 }
-          }
-        },
+          } },
         { $sort: { totalAffiliateEarnings: -1 } },
         { $limit: 20 }
       ]);
