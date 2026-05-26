@@ -1,10 +1,9 @@
 // ============================================
-// FILE: src/controllers/AffiliateController.ts (Complete - with accept offer endpoint)
+// FILE: src/controllers/AffiliateController.ts (Complete)
 // ============================================
 import { Request, Response } from 'express';
 import { AffiliateService } from '../services/AffiliateService';
 import { User } from '../models/User';
-import { Course } from '../models/Course';
 
 export class AffiliateController {
   private affiliateService: AffiliateService;
@@ -46,25 +45,8 @@ export class AffiliateController {
   getMyLinks = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = (req as any).user?.userId;
-      const stats = await this.affiliateService.getAffiliateStats(userId);
-      // Add course titles to links
-      const linksWithTitles = await Promise.all(stats.links.map(async (link: any) => {
-        const course = await Course.findById(link.courseId).select('title');
-        return {
-          ...link,
-          courseTitle: course?.title || 'Course'
-        };
-      }));
-      res.json({ 
-        success: true, 
-        data: {
-          totalClicks: stats.totalClicks,
-          totalConversions: stats.totalConversions,
-          totalEarned: stats.totalEarned,
-          linksCount: stats.linksCount,
-          links: linksWithTitles
-        }
-      });
+      const links = await this.affiliateService.getMyAffiliateLinks(userId);
+      res.json({ success: true, data: { links } });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
