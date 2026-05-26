@@ -12,10 +12,6 @@ export interface IUser extends Document {
   bio?: string;
   subscriptionTier: 'free' | 'premium' | 'elite';
   subscriptionStatus: 'active' | 'canceled' | 'expired' | 'trialing';
-  subscriptionId?: string;
-  subscriptionExpiresAt?: Date;
-  stripeCustomerId?: string;
-  paystackCustomerCode?: string;
   walletBalance: number;
   totalEarned: number;
   totalWithdrawn: number;
@@ -33,7 +29,7 @@ export interface IUser extends Document {
   affiliateLinks: Array<{
     _id?: mongoose.Types.ObjectId;
     courseId: mongoose.Types.ObjectId;
-    code: string;
+    code?: string;
     clicks: number;
     conversions: number;
     totalEarned: number;
@@ -67,7 +63,7 @@ export interface IUser extends Document {
 
 const AffiliateLinkSchema = new Schema({
   courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
-  code: { type: String, required: false, default: () => crypto.randomBytes(6).toString('hex').toUpperCase() },
+  code: { type: String, required: false },   // ✅ NOT required anymore
   clicks: { type: Number, default: 0 },
   conversions: { type: Number, default: 0 },
   totalEarned: { type: Number, default: 0 },
@@ -85,10 +81,6 @@ const UserSchema = new Schema<IUser>(
     bio: { type: String, maxlength: 500 },
     subscriptionTier: { type: String, enum: ['free', 'premium', 'elite'], default: 'free' },
     subscriptionStatus: { type: String, enum: ['active', 'canceled', 'expired', 'trialing'], default: 'active' },
-    subscriptionId: { type: String, sparse: true },
-    subscriptionExpiresAt: { type: Date },
-    stripeCustomerId: { type: String, sparse: true },
-    paystackCustomerCode: { type: String, sparse: true },
     walletBalance: { type: Number, default: 0, min: 0 },
     totalEarned: { type: Number, default: 0 },
     totalWithdrawn: { type: Number, default: 0 },
@@ -145,7 +137,6 @@ UserSchema.methods.comparePassword = async function(candidatePassword: string): 
 UserSchema.methods.canAccessPremium = function(): boolean {
   if (this.subscriptionTier === 'free') return false;
   if (this.subscriptionStatus !== 'active') return false;
-  if (this.subscriptionExpiresAt && new Date() > this.subscriptionExpiresAt) return false;
   return true;
 };
 
