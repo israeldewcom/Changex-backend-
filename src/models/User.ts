@@ -63,7 +63,7 @@ export interface IUser extends Document {
 
 const AffiliateLinkSchema = new Schema({
   courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
-  code: { type: String, required: false },   // ✅ NOT required anymore
+  code: { type: String, required: false },
   clicks: { type: Number, default: 0 },
   conversions: { type: Number, default: 0 },
   totalEarned: { type: Number, default: 0 },
