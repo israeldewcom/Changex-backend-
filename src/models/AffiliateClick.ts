@@ -1,6 +1,3 @@
-// ============================================
-// FILE: src/models/AffiliateClick.ts (Ensure it exists)
-// ============================================
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IAffiliateClick extends Document {
