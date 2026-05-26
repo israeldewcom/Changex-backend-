@@ -44,6 +44,14 @@ export class AuthService {
       displayName: `${userData.firstName} ${userData.lastName}`,
       referralCode,
       emailVerificationToken: crypto.randomBytes(32).toString('hex'),
+      subscriptionTier: 'free',
+      subscriptionStatus: 'active',
+      walletBalance: 0,
+      xp: 0,
+      level: 1,
+      streak: 0,
+      roles: ['user'],
+      isActive: true,
     });
     await user.save();
 
@@ -60,24 +68,37 @@ export class AuthService {
   }
 
   async loginUser(email: string, password: string, ipAddress: string, twoFactorCode?: string): Promise<{ user: IUser; accessToken: string; refreshToken: string; requiresTwoFactor?: boolean }> {
+    console.log(`[LOGIN ATTEMPT] Email: ${email}`);
     const user = await User.findOne({ email }).select('+password');
-    if (!user) throw new Error('Invalid credentials');
+    if (!user) {
+      console.log(`[LOGIN FAILED] User not found: ${email}`);
+      throw new Error('Invalid credentials');
+    }
     if (user.isBanned) throw new Error('Account has been banned');
+    
     const isValidPassword = await user.comparePassword(password);
+    console.log(`[LOGIN] Password valid: ${isValidPassword}`);
     if (!isValidPassword) throw new Error('Invalid credentials');
+    
     if (user.twoFactorEnabled) {
       if (!twoFactorCode) return { user, accessToken: '', refreshToken: '', requiresTwoFactor: true };
       const verified = speakeasy.totp.verify({ secret: user.twoFactorSecret!, encoding: 'base32', token: twoFactorCode });
       if (!verified) throw new Error('Invalid two-factor code');
     }
+    
     user.lastLoginAt = new Date();
-    await user.updateStreak();
+    if (typeof user.updateStreak === 'function') {
+      await user.updateStreak();
+    }
     await user.save();
+    
     const { accessToken, refreshToken } = this.generateTokens(user._id.toString());
     user.refreshTokens.push(refreshToken);
     if (user.refreshTokens.length > 5) user.refreshTokens.shift();
     await user.save();
+    
     await this.redis.setex(`user:${user._id}:session`, 3600 * 24, refreshToken);
+    console.log(`[LOGIN SUCCESS] User: ${email}`);
     return { user, accessToken, refreshToken, requiresTwoFactor: false };
   }
 
