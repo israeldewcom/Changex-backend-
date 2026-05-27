@@ -44,7 +44,6 @@
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/bull": "^4.10.1",
-    "@types/cloudinary": "^1.0.0",
     "@types/cookie-parser": "^1.4.7",
     "@types/cors": "^2.8.17",
     "@types/dompurify": "^3.0.5",
