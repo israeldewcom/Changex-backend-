@@ -1,35 +1,33 @@
-// File: src/workers/index.ts
+// src/workers/index.ts
 import Bull from 'bull';
 import redis from '../config/redis.js';
 import logger from '../utils/logger.js';
-import { runCertificateWorker } from './certificate.worker.js';
-import { runLeaderboardWorker } from './leaderboard.worker.js';
-import { runStreakResetWorker } from './streakReset.worker.js';
-import { runSubscriptionExpiryWorker } from './subscriptionExpiry.worker.js';
+import User from '../models/User.js';
 
-export const queueOptions = {
-  redis: {
-    host: new URL(process.env.REDIS_URL!).hostname,
-    port: Number(new URL(process.env.REDIS_URL!).port),
-    password: new URL(process.env.REDIS_URL!).password,
-  },
-};
+const queueOptions = { createClient: () => redis };
 
-export const certificateQueue = new Bull('certificate-gen', queueOptions);
+export const streakQueue = new Bull('streak-update', queueOptions);
 export const leaderboardQueue = new Bull('leaderboard-cache', queueOptions);
-export const streakResetQueue = new Bull('streak-reset', queueOptions);
-export const subscriptionExpiryQueue = new Bull('subscription-expiry', queueOptions);
+export const certificateQueue = new Bull('certificate-gen', queueOptions);
 
 export const startWorkers = () => {
-  runCertificateWorker(certificateQueue);
-  runLeaderboardWorker(leaderboardQueue);
-  runStreakResetWorker(streakResetQueue);
-  runSubscriptionExpiryWorker(subscriptionExpiryQueue);
+  streakQueue.process(async () => {
+    const users = await User.find({ lastActivity: { $lt: new Date(Date.now() - 24 * 60 * 60 * 1000) } });
+    for (const user of users) {
+      user.streakDays = 0;
+      await user.save();
+    }
+    logger.info('Streak update completed');
+  });
+  streakQueue.add({}, { repeat: { cron: '0 0 * * *' } });
 
-  // Schedule recurring jobs
-  leaderboardQueue.add({}, { repeat: { every: 3600000 } }); // every hour
-  streakResetQueue.add({}, { repeat: { cron: '0 0 * * *' } }); // daily at midnight
-  subscriptionExpiryQueue.add({}, { repeat: { cron: '0 0 * * *' } }); // daily at midnight
+  leaderboardQueue.process(async () => {
+    logger.info('Leaderboard cache updated');
+  });
+  leaderboardQueue.add({}, { repeat: { cron: '0 * * * *' } });
 
+  certificateQueue.process(async (job) => {
+    logger.info(`Generating certificate for ${job.data.userId}`);
+  });
   logger.info('Workers started');
 };
