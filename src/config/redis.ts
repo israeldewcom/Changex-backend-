@@ -28,7 +28,7 @@ const redis = new RedisConstructor(redisUrl, {
 
 redis.on('connect', () => logger.info('Redis connecting...'));
 redis.on('ready', () => logger.info('Redis ready'));
-redis.on('error', (err) => logger.error('Redis error:', err));
+redis.on('error', (err: Error) => logger.error('Redis error:', err));
 
 export const connectRedis = async () => {
   try {
