@@ -1,3 +1,4 @@
+// src/controllers/affiliate.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import AffiliateLink from '../models/AffiliateLink.js';
 import Course from '../models/Course.js';
@@ -13,23 +14,14 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
       res.status(400).json({ success: false, message: 'Affiliate not available' });
       return;
     }
-
     let link = await AffiliateLink.findOne({ userId: user._id, courseId });
     if (link) {
       res.json({ success: true, data: link });
       return;
     }
-
-    link = await AffiliateLink.create({
-      userId: user._id,
-      courseId,
-      code: uuid().slice(0, 8),
-    });
-
+    link = await AffiliateLink.create({ userId: user._id, courseId, code: uuid().slice(0, 8) });
     res.status(201).json({ success: true, data: link });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const getMyLinks = async (req: Request, res: Response, next: NextFunction) => {
@@ -37,9 +29,7 @@ export const getMyLinks = async (req: Request, res: Response, next: NextFunction
     const user = req.user as IUser;
     const links = await AffiliateLink.find({ userId: user._id }).populate('courseId', 'title price affiliatePercent');
     res.json({ success: true, data: links });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const trackAffiliateClick = async (req: Request, res: Response, next: NextFunction) => {
@@ -50,13 +40,33 @@ export const trackAffiliateClick = async (req: Request, res: Response, next: Nex
       res.redirect(`${process.env.CLIENT_URL}/courses`);
       return;
     }
-
     link.clicks += 1;
     await link.save();
-
     res.cookie('affiliate_code', code, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
     res.redirect(`${process.env.CLIENT_URL}/courses/${link.courseId}`);
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
+};
+
+export const getAffiliateStats = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const links = await AffiliateLink.find({ userId: user._id });
+    const totalClicks = links.reduce((acc, l) => acc + l.clicks, 0);
+    const totalConversions = links.reduce((acc, l) => acc + l.conversions, 0);
+    const totalEarned = links.reduce((acc, l) => acc + l.totalEarned, 0);
+    res.json({ success: true, data: { totalClicks, totalConversions, totalEarned, linksCount: links.length } });
+  } catch (err) { next(err); }
+};
+
+export const getAffiliateLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const leaderboard = await User.aggregate([
+      { $lookup: { from: 'affiliatelinks', localField: '_id', foreignField: 'userId', as: 'links' } },
+      { $addFields: { totalAffiliateEarnings: { $sum: '$links.totalEarned' }, totalAffiliateConversions: { $sum: '$links.conversions' }, affiliateLinksCount: { $size: '$links' } } },
+      { $sort: { totalAffiliateEarnings: -1 } },
+      { $limit: 20 },
+      { $project: { firstName: 1, lastName: 1, totalAffiliateEarnings: 1, totalAffiliateConversions: 1, affiliateLinksCount: 1 } }
+    ]);
+    res.json({ success: true, data: leaderboard });
+  } catch (err) { next(err); }
 };
