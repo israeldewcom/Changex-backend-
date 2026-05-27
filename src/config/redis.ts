@@ -1,7 +1,8 @@
-import Redis from 'ioredis';
+import * as Redis from 'ioredis';
 import logger from '../utils/logger.js';
 
-const redis = new Redis(process.env.REDIS_URL!, {
+const RedisConstructor = (Redis as any).default || Redis;
+const redis = new RedisConstructor(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
   retryStrategy: (times: number) => {
