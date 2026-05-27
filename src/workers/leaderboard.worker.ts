@@ -1,5 +1,4 @@
 // File: src/workers/leaderboard.worker.ts
-import Bull from 'bull';
 import redis from '../config/redis.js';
 import User from '../models/User.js';
 import logger from '../utils/logger.js';
