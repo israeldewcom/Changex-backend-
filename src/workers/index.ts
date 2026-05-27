@@ -1,10 +1,16 @@
-// src/workers/index.ts
 import Bull from 'bull';
-import redis from '../config/redis.js';
+import Redis from 'ioredis';
 import logger from '../utils/logger.js';
 import User from '../models/User.js';
 
-const queueOptions = { createClient: () => redis };
+// Create a dedicated Redis client for Bull (do not reuse the main one)
+const bullRedis = new Redis(process.env.REDIS_URL!, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+  retryStrategy: (times: number) => Math.min(times * 50, 2000),
+});
+
+const queueOptions = { createClient: () => bullRedis };
 
 export const streakQueue = new Bull('streak-update', queueOptions);
 export const leaderboardQueue = new Bull('leaderboard-cache', queueOptions);
@@ -29,5 +35,6 @@ export const startWorkers = () => {
   certificateQueue.process(async (job) => {
     logger.info(`Generating certificate for ${job.data.userId}`);
   });
+
   logger.info('Workers started');
 };
