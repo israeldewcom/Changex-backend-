@@ -1,16 +1,21 @@
-// File: src/config/redis.ts
 import Redis from 'ioredis';
 import logger from '../utils/logger.js';
 
-const redisClient = new Redis(process.env.REDIS_URL!, {
+const redis = new Redis(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
-  lazyConnect: true,
+  retryStrategy: (times) => {
+    if (times > 3) {
+      logger.error('Redis connection failed after 3 retries');
+      return null;
+    }
+    return Math.min(times * 100, 3000);
+  },
 });
 
 export const connectRedis = async () => {
   try {
-    await redisClient.connect();
+    await redis.ping();
     logger.info('Redis connected');
   } catch (error) {
     logger.error('Redis connection error:', error);
@@ -18,5 +23,4 @@ export const connectRedis = async () => {
   }
 };
 
-export { redisClient };
-export default redisClient;
+export default redis;
