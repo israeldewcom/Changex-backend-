@@ -1,7 +1,7 @@
-// File: src/models/User.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IUser extends Document {
+  _id: mongoose.Types.ObjectId;
   email: string;
   passwordHash?: string;
   firstName: string;
@@ -48,18 +48,21 @@ const UserSchema = new Schema<IUser>(
     referredBy: String,
     walletBalance: { type: Number, default: 0 },
     pendingWithdrawal: { type: Number, default: 0 },
-    xp: { type: Number, default: 0, index: true },
+    xp: { type: Number, default: 0 },
     level: { type: Number, default: 1 },
     streakDays: { type: Number, default: 0 },
     lastActivity: { type: Date, default: Date.now },
     bio: String,
     location: String,
     bankAccount: {
-      type: new Schema({
-        bankName: String,
-        accountNumber: String,
-        accountName: String,
-      }, { _id: false }),
+      type: new Schema(
+        {
+          bankName: String,
+          accountNumber: String,
+          accountName: String,
+        },
+        { _id: false }
+      ),
     },
     preferredCurrency: { type: String, default: 'NGN' },
   },
@@ -68,7 +71,5 @@ const UserSchema = new Schema<IUser>(
 
 UserSchema.index({ email: 1 });
 UserSchema.index({ referralCode: 1 });
-UserSchema.index({ walletBalance: -1 });
-UserSchema.index({ roles: 1 });
 
 export default mongoose.model<IUser>('User', UserSchema);
