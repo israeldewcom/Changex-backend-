@@ -3,8 +3,11 @@ import Redis from 'ioredis';
 import logger from '../utils/logger.js';
 import User from '../models/User.js';
 
-// Create a dedicated Redis client for Bull (do not reuse the main one)
-const bullRedis = new Redis(process.env.REDIS_URL!, {
+// ioredis v5 ESM compatibility (same as in config/redis.ts)
+const RedisConstructor = (Redis as any).default || Redis;
+
+// Create a dedicated Redis client for Bull
+const bullRedis = new RedisConstructor(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
   retryStrategy: (times: number) => Math.min(times * 50, 2000),
