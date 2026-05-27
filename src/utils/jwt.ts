@@ -1,5 +1,4 @@
-// File: src/utils/jwt.ts
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 import crypto from 'crypto';
 
 interface TokenPayload {
@@ -10,14 +9,14 @@ interface TokenPayload {
 export const signAccessToken = (payload: TokenPayload): string => {
   return jwt.sign(payload, process.env.JWT_ACCESS_SECRET!, {
     expiresIn: process.env.JWT_ACCESS_EXPIRES || '15m',
-  });
+  } as SignOptions);
 };
 
-export const signRefreshToken = (payload: TokenPayload): { token: string; hash: string } => {
-  const token = jwt.sign(payload, process.env.JWT_REFRESH_SECRET!, {
+export const signRefreshToken = (payload: TokenPayload) => {
+  const options: SignOptions = {
     expiresIn: process.env.JWT_REFRESH_EXPIRES || '30d',
-  });
-  // Create a hash of the token to store in Redis for rotation
+  };
+  const token = jwt.sign(payload, process.env.JWT_REFRESH_SECRET!, options);
   const hash = crypto.createHash('sha256').update(token).digest('hex');
   return { token, hash };
 };
