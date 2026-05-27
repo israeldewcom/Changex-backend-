@@ -1,28 +1,22 @@
-// File: src/controllers/admin.controller.ts
 import { Request, Response, NextFunction } from 'express';
-import User from '../models/User.js';
+import User, { IUser } from '../models/User.js';
 import Course from '../models/Course.js';
 import Transaction from '../models/Transaction.js';
 import Notification from '../models/Notification.js';
 import AdminCoupon from '../models/AdminCoupon.js';
 import Announcement from '../models/Announcement.js';
 import { getIO } from '../socket.js';
-import { sendTemplatedEmail } from '../services/email.js';
-import AuditLog from '../models/AuditLog.js';
 
 export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const [users, courses, pendingCourses, revenueResult] = await Promise.all([
-      User.countDocuments(),
-      Course.countDocuments({ approvalStatus: 'approved' }),
-      Course.countDocuments({ approvalStatus: 'pending' }),
-      Transaction.aggregate([
-        { $match: { type: { $ne: 'withdrawal' }, status: 'completed' } },
-        { $group: { _id: null, total: { $sum: '$amount' } } },
-      ]),
+    const users = await User.countDocuments();
+    const courses = await Course.countDocuments({ approvalStatus: 'approved' });
+    const pendingCourses = await Course.countDocuments({ approvalStatus: 'pending' });
+    const revenue = await Transaction.aggregate([
+      { $match: { type: { $ne: 'withdrawal' }, status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } },
     ]);
-    const revenue = revenueResult[0]?.total || 0;
-    res.json({ success: true, data: { users, courses, pendingCourses, revenue } });
+    res.json({ success: true, data: { users, courses, pendingCourses, revenue: revenue[0]?.total || 0 } });
   } catch (err) {
     next(err);
   }
@@ -30,54 +24,31 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
 
 export const getUsers = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { limit = 20, offset = 0, role, search } = req.query;
-    const filter: any = {};
-    if (role) filter.roles = role;
-    if (search) {
-      filter.$or = [
-        { email: { $regex: search, $options: 'i' } },
-        { firstName: { $regex: search, $options: 'i' } },
-        { lastName: { $regex: search, $options: 'i' } },
-      ];
-    }
-    const [users, total] = await Promise.all([
-      User.find(filter).skip(Number(offset)).limit(Number(limit)).lean(),
-      User.countDocuments(filter),
-    ]);
-    res.json({ success: true, data: users, meta: { total } });
+    const users = await User.find({}).select('-passwordHash').limit(100);
+    res.json({ success: true, data: users });
   } catch (err) {
     next(err);
   }
 };
 
-export const updateUser = async (req: Request, res: Response, next: NextFunction) => {
+export const updateUserRole = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const update = req.body;
-    delete update.passwordHash; // prevent password update via admin directly
-
-    if (update.roles && !Array.isArray(update.roles)) {
-      return res.status(400).json({ success: false, message: 'Roles must be an array' });
+    const { roles } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { roles }, { new: true });
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
     }
-
-    const user = await User.findByIdAndUpdate(id, update, { new: true });
-    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     res.json({ success: true, data: user });
   } catch (err) {
     next(err);
   }
 };
 
-export const getCourses = async (req: Request, res: Response, next: NextFunction) => {
+export const getAdminCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, limit = 20, offset = 0 } = req.query;
-    const filter: any = {};
-    if (status) filter.approvalStatus = status;
-    const [courses, total] = await Promise.all([
-      Course.find(filter).skip(Number(offset)).limit(Number(limit)).populate('instructorId', 'firstName lastName email').lean(),
-      Course.countDocuments(filter),
-    ]);
-    res.json({ success: true, data: courses, meta: { total } });
+    const courses = await Course.find({}).populate('instructorId', 'firstName lastName email').limit(100);
+    res.json({ success: true, data: courses });
   } catch (err) {
     next(err);
   }
@@ -85,29 +56,21 @@ export const getCourses = async (req: Request, res: Response, next: NextFunction
 
 export const approveCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const course = await Course.findByIdAndUpdate(
-      req.params.id,
-      { approvalStatus: 'approved', isPublished: true },
-      { new: true }
-    ).populate('instructorId', 'email firstName');
-    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    const course = await Course.findByIdAndUpdate(req.params.id, { approvalStatus: 'approved', isPublished: true }, { new: true });
+    if (!course) {
+      res.status(404).json({ success: false, message: 'Course not found' });
+      return;
+    }
 
-    // Notify instructor via email and in-app
-    const instructor = course.instructorId as any;
     await Notification.create({
-      userId: instructor._id,
+      userId: course.instructorId,
       title: 'Course Approved',
       message: `Your course "${course.title}" has been approved and is now live.`,
       type: 'system',
     });
-    sendTemplatedEmail(instructor.email, 'Your Course is Live!', 'course-approved', {
-      firstName: instructor.firstName,
-      courseTitle: course.title,
-      courseUrl: `${process.env.CLIENT_URL}/courses/${course._id}`,
-    }).catch(err => console.error);
 
     const io = getIO();
-    io.to(`user:${instructor._id}`).emit('notification', {
+    io.to(`user:${course.instructorId}`).emit('notification', {
       title: 'Course Approved',
       message: `Your course "${course.title}" has been approved.`,
     });
@@ -121,15 +84,14 @@ export const approveCourse = async (req: Request, res: Response, next: NextFunct
 export const rejectCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { reason } = req.body;
-    const course = await Course.findByIdAndUpdate(
-      req.params.id,
-      { approvalStatus: 'rejected', rejectionReason: reason },
-      { new: true }
-    ).populate('instructorId', 'email firstName');
-    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    const course = await Course.findByIdAndUpdate(req.params.id, { approvalStatus: 'rejected', rejectionReason: reason }, { new: true });
+    if (!course) {
+      res.status(404).json({ success: false, message: 'Course not found' });
+      return;
+    }
 
     await Notification.create({
-      userId: (course.instructorId as any)._id,
+      userId: course.instructorId,
       title: 'Course Rejected',
       message: `Your course "${course.title}" was rejected. Reason: ${reason}`,
       type: 'system',
@@ -143,50 +105,41 @@ export const rejectCourse = async (req: Request, res: Response, next: NextFuncti
 
 export const getWithdrawals = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status = 'pending', limit = 20, offset = 0 } = req.query;
-    const withdrawals = await Transaction.find({ type: 'withdrawal', status })
-      .skip(Number(offset))
-      .limit(Number(limit))
-      .populate('userId', 'email firstName lastName bankAccount pendingWithdrawal')
-      .lean();
-    const total = await Transaction.countDocuments({ type: 'withdrawal', status });
-    res.json({ success: true, data: withdrawals, meta: { total } });
+    const users = await User.find({ pendingWithdrawal: { $gt: 0 } }).select('firstName lastName email pendingWithdrawal bankAccount');
+    res.json({ success: true, data: users });
   } catch (err) {
     next(err);
   }
 };
 
-export const processWithdrawal = async (req: Request, res: Response, next: NextFunction) => {
+export const approveWithdrawal = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const transaction = await Transaction.findById(id).populate('userId');
-    if (!transaction || transaction.type !== 'withdrawal' || transaction.status !== 'pending') {
-      return res.status(400).json({ success: false, message: 'Invalid withdrawal request' });
+    const user = await User.findById(req.params.userId);
+    if (!user || user.pendingWithdrawal <= 0) {
+      res.status(400).json({ success: false, message: 'No pending withdrawal' });
+      return;
     }
 
-    const user = transaction.userId as any;
-    // In a real scenario, you'd call Paystack transfer API here. For now, just mark as completed.
-    transaction.status = 'completed';
-    transaction.description = (transaction.description || '') + ' (processed)';
-    await transaction.save();
-
-    // Deduct from user's pending withdrawal (already deducted when requested)
-    user.pendingWithdrawal -= Math.abs(transaction.amount);
+    const amount = user.pendingWithdrawal;
+    user.pendingWithdrawal = 0;
     await user.save();
+
+    await Transaction.create({
+      userId: user._id,
+      type: 'withdrawal',
+      amount: -amount,
+      status: 'completed',
+      description: 'Withdrawal processed',
+    });
 
     await Notification.create({
       userId: user._id,
       title: 'Withdrawal Processed',
-      message: `Your withdrawal of ₦${Math.abs(transaction.amount)} has been processed.`,
+      message: `Your withdrawal of ₦${amount} has been processed.`,
       type: 'payment',
     });
 
-    // Send email notification
-    sendTemplatedEmail(user.email, 'Withdrawal Processed', 'withdrawal-processed', {
-      amount: Math.abs(transaction.amount),
-    }).catch(err => console.error);
-
-    res.json({ success: true, message: 'Withdrawal processed' });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -200,7 +153,6 @@ export const createAnnouncement = async (req: Request, res: Response, next: Next
     const io = getIO();
     io.emit('announcement', { title, message });
 
-    // Notify all users (bulk insert for efficiency)
     const users = await User.find({}, '_id');
     const notifications = users.map(u => ({
       userId: u._id,
@@ -227,7 +179,7 @@ export const createCoupon = async (req: Request, res: Response, next: NextFuncti
 
 export const getCoupons = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const coupons = await AdminCoupon.find().lean();
+    const coupons = await AdminCoupon.find({});
     res.json({ success: true, data: coupons });
   } catch (err) {
     next(err);
@@ -237,22 +189,7 @@ export const getCoupons = async (req: Request, res: Response, next: NextFunction
 export const deleteCoupon = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await AdminCoupon.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: 'Coupon deleted' });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const getAuditLogs = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { limit = 50, offset = 0 } = req.query;
-    const logs = await AuditLog.find()
-      .sort({ timestamp: -1 })
-      .skip(Number(offset))
-      .limit(Number(limit))
-      .populate('userId', 'email')
-      .lean();
-    res.json({ success: true, data: logs });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }
