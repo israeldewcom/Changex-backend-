@@ -1,8 +1,7 @@
-// File: src/config/passport.ts
 import { Express } from 'express';
 import passport from 'passport';
-import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
-import { Strategy as GitHubStrategy } from 'passport-github2';
+import { Strategy as GoogleStrategy, Profile as GoogleProfile } from 'passport-google-oauth20';
+import { Strategy as GitHubStrategy, Profile as GitHubProfile } from 'passport-github2';
 import User from '../models/User.js';
 import { generateReferralCode } from '../utils/referralCode.js';
 
@@ -19,7 +18,6 @@ export const initializePassport = (app: Express) => {
     }
   });
 
-  // Google
   if (process.env.GOOGLE_CLIENT_ID) {
     passport.use(
       new GoogleStrategy(
@@ -28,7 +26,7 @@ export const initializePassport = (app: Express) => {
           clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
           callbackURL: process.env.GOOGLE_CALLBACK_URL!,
         },
-        async (accessToken, refreshToken, profile, done) => {
+        async (accessToken: string, refreshToken: string, profile: GoogleProfile, done: any) => {
           try {
             let user = await User.findOne({ email: profile.emails?.[0].value });
             if (!user) {
@@ -49,7 +47,6 @@ export const initializePassport = (app: Express) => {
     );
   }
 
-  // GitHub
   if (process.env.GITHUB_CLIENT_ID) {
     passport.use(
       new GitHubStrategy(
@@ -57,13 +54,18 @@ export const initializePassport = (app: Express) => {
           clientID: process.env.GITHUB_CLIENT_ID!,
           clientSecret: process.env.GITHUB_CLIENT_SECRET!,
           callbackURL: process.env.GITHUB_CALLBACK_URL!,
+          scope: ['user:email'],
         },
-        async (accessToken, refreshToken, profile, done) => {
+        async (accessToken: string, refreshToken: string, profile: GitHubProfile, done: any) => {
           try {
-            let user = await User.findOne({ email: profile.emails?.[0].value });
+            const email = profile.emails?.[0]?.value;
+            if (!email) {
+              return done(new Error('No email associated with GitHub account'));
+            }
+            let user = await User.findOne({ email });
             if (!user) {
               user = await User.create({
-                email: profile.emails?.[0].value,
+                email,
                 firstName: profile.displayName?.split(' ')[0] || '',
                 lastName: profile.displayName?.split(' ')[1] || '',
                 avatarUrl: profile.photos?.[0]?.value,
