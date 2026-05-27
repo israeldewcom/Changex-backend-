@@ -1,3 +1,4 @@
+// src/routes/admin.routes.ts
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
@@ -14,10 +15,10 @@ router.get('/courses', adminController.getAdminCourses);
 router.post('/courses/:id/approve', adminController.approveCourse);
 router.post('/courses/:id/reject', adminController.rejectCourse);
 router.get('/withdrawals', adminController.getWithdrawals);
-router.post('/withdrawals/:userId/process', adminController.approveWithdrawal);
+router.post('/withdrawals/:id/process', adminController.processWithdrawal);
 router.post('/announcements', adminController.createAnnouncement);
-router.post('/coupons', adminController.createCoupon);
 router.get('/coupons', adminController.getCoupons);
+router.post('/coupons', adminController.createCoupon);
 router.delete('/coupons/:id', adminController.deleteCoupon);
 
 export default router;
