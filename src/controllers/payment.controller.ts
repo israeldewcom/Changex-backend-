@@ -1,3 +1,4 @@
+// src/controllers/payment.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { IUser } from '../models/User.js';
@@ -73,7 +74,7 @@ export const subscribe = async (req: Request, res: Response, next: NextFunction)
   try {
     const user = req.user as IUser;
     const { plan = 'premium' } = req.body;
-    const amount = 5000; // ₦5,000
+    const amount = 5000;
     const metadata = { userId: user._id, type: 'subscription', plan };
     const response = await axios.post(
       `${PAYSTACK_BASE}/transaction/initialize`,
@@ -92,9 +93,7 @@ export const getTransactions = async (req: Request, res: Response, next: NextFun
     const { limit = 50 } = req.query;
     const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(Number(limit));
     res.json({ success: true, data: transactions });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const withdraw = async (req: Request, res: Response, next: NextFunction) => {
@@ -120,7 +119,5 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
       description: 'Withdrawal request',
     });
     res.json({ success: true, message: 'Withdrawal request submitted' });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
