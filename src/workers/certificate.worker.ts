@@ -1,5 +1,4 @@
-// File: src/workers/
-import Bull from 'bull';
+// File:
 import { generateCertificate } from '../services/pdfGenerator.js';
 import Notification from '../models/Notification.js';
 import logger from '../utils/logger.js';
