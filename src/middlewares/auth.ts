@@ -2,11 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken } from '../utils/jwt.js';
 import User, { IUser } from '../models/User.js';
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: IUser;
-    }
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: IUser;
   }
 }
 
