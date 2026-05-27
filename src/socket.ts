@@ -1,8 +1,6 @@
-// File: src/socket.ts
-import logger from "./utils/logger.js";
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { verifyAccessToken } from './utils/jwt.js';
-import User from './models/User.js';
+import User, { IUser } from './models/User.js';
 
 let io: SocketIOServer;
 
@@ -12,11 +10,17 @@ export const setupSocket = (server: SocketIOServer) => {
   io.use(async (socket: Socket, next) => {
     try {
       const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
-      if (!token) return next(new Error('Authentication required'));
+      if (!token) {
+        next(new Error('Authentication required'));
+        return;
+      }
 
       const decoded = verifyAccessToken(token);
       const user = await User.findById(decoded.userId);
-      if (!user) return next(new Error('User not found'));
+      if (!user) {
+        next(new Error('User not found'));
+        return;
+      }
 
       (socket as any).user = user;
       next();
@@ -26,12 +30,16 @@ export const setupSocket = (server: SocketIOServer) => {
   });
 
   io.on('connection', (socket: Socket) => {
-    const user = (socket as any).user;
-    socket.join(`user:${user.id}`);
-    logger.info(`User ${user.id} connected`);
+    const user = (socket as any).user as IUser;
+    if (user) {
+      socket.join(`user:${user._id}`);
+      console.log(`User ${user._id} connected`);
+    }
 
     socket.on('disconnect', () => {
-      logger.info(`User ${user.id} disconnected`);
+      if (user) {
+        console.log(`User ${user._id} disconnected`);
+      }
     });
   });
 };
