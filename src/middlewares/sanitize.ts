@@ -1,3 +1,4 @@
+// src/middlewares/sanitize.ts
 import createDOMPurify from 'dompurify';
 import { JSDOM } from 'jsdom';
 
