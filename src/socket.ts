@@ -1,3 +1,4 @@
+// src/socket.ts
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { verifyAccessToken } from './utils/jwt.js';
 import User, { IUser } from './models/User.js';
@@ -14,14 +15,12 @@ export const setupSocket = (server: SocketIOServer) => {
         next(new Error('Authentication required'));
         return;
       }
-
       const decoded = verifyAccessToken(token);
       const user = await User.findById(decoded.userId);
       if (!user) {
         next(new Error('User not found'));
         return;
       }
-
       (socket as any).user = user;
       next();
     } catch (err) {
@@ -35,11 +34,8 @@ export const setupSocket = (server: SocketIOServer) => {
       socket.join(`user:${user._id}`);
       console.log(`User ${user._id} connected`);
     }
-
     socket.on('disconnect', () => {
-      if (user) {
-        console.log(`User ${user._id} disconnected`);
-      }
+      if (user) console.log(`User ${user._id} disconnected`);
     });
   });
 };
