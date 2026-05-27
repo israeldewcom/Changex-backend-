@@ -1,15 +1,19 @@
-// File: src/controllers/ai.controller.ts
 import { Request, Response, NextFunction } from 'express';
+import { IUser } from '../models/User.js';
 import { chatWithAI } from '../services/ai.js';
-import pdfParse from 'pdf-parse';
-import fs from 'fs/promises';
 
 export const chat = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.user!.isPremium) {
-      return res.status(403).json({ success: false, message: 'Premium subscription required' });
+    const user = req.user as IUser;
+    if (!user.isPremium) {
+      res.status(403).json({ success: false, message: 'Premium subscription required' });
+      return;
     }
     const { prompt } = req.body;
+    if (!prompt) {
+      res.status(400).json({ success: false, message: 'Prompt is required' });
+      return;
+    }
     const response = await chatWithAI(prompt, true);
     res.json({ success: true, data: { response } });
   } catch (err) {
@@ -19,25 +23,16 @@ export const chat = async (req: Request, res: Response, next: NextFunction) => {
 
 export const uploadFileForAnalysis = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
-    if (!req.user!.isPremium) return res.status(403).json({ success: false, message: 'Premium subscription required' });
-
-    let extractedText = '';
-    if (req.file.mimetype === 'application/pdf') {
-      const dataBuffer = await fs.readFile(req.file.path);
-      const pdfData = await pdfParse(dataBuffer);
-      extractedText = pdfData.text;
-    } else if (req.file.mimetype.startsWith('text/')) {
-      extractedText = await fs.readFile(req.file.path, 'utf-8');
-    } else {
-      return res.status(400).json({ success: false, message: 'Only PDF and text files are supported for analysis' });
+    const user = req.user as IUser;
+    if (!user.isPremium) {
+      res.status(403).json({ success: false, message: 'Premium subscription required' });
+      return;
     }
-
-    // Send to AI with a prompt
-    const prompt = `Analyze the following content and provide a summary and key points:\n\n${extractedText.substring(0, 4000)}`;
-    const response = await chatWithAI(prompt, true);
-
-    res.json({ success: true, data: { response, extractedLength: extractedText.length } });
+    if (!req.file) {
+      res.status(400).json({ success: false, message: 'No file uploaded' });
+      return;
+    }
+    res.json({ success: true, message: 'File analysis placeholder - will extract text from PDF/images' });
   } catch (err) {
     next(err);
   }
