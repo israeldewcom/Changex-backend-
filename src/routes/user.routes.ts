@@ -1,4 +1,3 @@
-// File: src/routes/user.routes.ts
 import { Router } from 'express';
 import * as userController from '../controllers/user.controller.js';
 import { authenticate } from '../middlewares/auth.js';
@@ -15,8 +14,8 @@ router.get('/wallet', userController.getWallet);
 router.post('/withdraw', userController.requestWithdrawal);
 router.get('/notifications', userController.getNotifications);
 router.put('/notifications/:id/read', userController.markNotificationRead);
-router.put('/notifications/read-all', userController.markAllNotificationsRead);
+router.put('/notifications/read-all', userController.markAllNotificationsRead); // fixed
+router.get('/badges', userController.getUserBadges); // fixed
 router.get('/leaderboard', userController.getLeaderboard);
-router.get('/badges', userController.getUserBadges);
 
 export default router;
