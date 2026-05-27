@@ -1,12 +1,10 @@
-// File: src/models/LessonProgress.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ILessonProgress extends Document {
   enrollmentId: mongoose.Types.ObjectId;
   lessonId: mongoose.Types.ObjectId;
   completed: boolean;
-  timeSpent: number; // seconds
-  lastAccessed: Date;
+  timeSpent: number;
 }
 
 const LessonProgressSchema = new Schema<ILessonProgress>(
@@ -15,7 +13,6 @@ const LessonProgressSchema = new Schema<ILessonProgress>(
     lessonId: { type: Schema.Types.ObjectId, ref: 'Lesson', required: true },
     completed: { type: Boolean, default: false },
     timeSpent: { type: Number, default: 0 },
-    lastAccessed: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
