@@ -1,10 +1,11 @@
+// src/config/redis.ts
 import Redis from 'ioredis';
 import logger from '../utils/logger.js';
 
 const redis = new Redis(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
   enableReadyCheck: false,
-  retryStrategy: (times) => {
+  retryStrategy: (times: number) => {
     if (times > 3) {
       logger.error('Redis connection failed after 3 retries');
       return null;
