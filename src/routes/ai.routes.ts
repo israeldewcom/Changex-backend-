@@ -1,4 +1,3 @@
-// File: src/routes/ai.routes.ts
 import { Router } from 'express';
 import * as aiController from '../controllers/ai.controller.js';
 import { authenticate } from '../middlewares/auth.js';
