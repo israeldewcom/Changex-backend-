@@ -1,4 +1,5 @@
 // File: src/socket.ts
+import logger from "./utils/logger.js";
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { verifyAccessToken } from './utils/jwt.js';
 import User from './models/User.js';
