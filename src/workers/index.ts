@@ -19,7 +19,7 @@ cron.schedule('0 0 * * *', async () => {
 // Update leaderboard cache every hour
 cron.schedule('0 * * * *', async () => {
   logger.info('Leaderboard cache update triggered');
-  // Optional: implement Redis caching logic here
+  // Optional: implement logic to recompute leaderboard and store in Redis
 });
 
 export const startWorkers = () => {
