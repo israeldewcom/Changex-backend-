@@ -1,8 +1,7 @@
-// src/controllers/affiliate.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import AffiliateLink from '../models/AffiliateLink.js';
 import Course from '../models/Course.js';
-import { IUser } from '../models/User.js';
+import User, { IUser } from '../models/User.js';
 import { v4 as uuid } from 'uuid';
 
 export const acceptAffiliateOffer = async (req: Request, res: Response, next: NextFunction) => {
@@ -51,9 +50,9 @@ export const getAffiliateStats = async (req: Request, res: Response, next: NextF
   try {
     const user = req.user as IUser;
     const links = await AffiliateLink.find({ userId: user._id });
-    const totalClicks = links.reduce((acc, l) => acc + l.clicks, 0);
-    const totalConversions = links.reduce((acc, l) => acc + l.conversions, 0);
-    const totalEarned = links.reduce((acc, l) => acc + l.totalEarned, 0);
+    const totalClicks = links.reduce((acc: number, l) => acc + l.clicks, 0);
+    const totalConversions = links.reduce((acc: number, l) => acc + l.conversions, 0);
+    const totalEarned = links.reduce((acc: number, l) => acc + l.totalEarned, 0);
     res.json({ success: true, data: { totalClicks, totalConversions, totalEarned, linksCount: links.length } });
   } catch (err) { next(err); }
 };
