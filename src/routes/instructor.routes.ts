@@ -1,17 +1,22 @@
 import { Router } from 'express';
-import { InstructorController } from '../controllers/InstructorController';
-import { authenticate, requireCreator } from '../middleware/auth';
-import multer from 'multer';
+import * as instructorController from '../controllers/instructor.controller.js';
+import { authenticate, authorize } from '../middlewares/auth.js';
+import { upload } from '../middlewares/upload.js';
 
 const router = Router();
-const instructorController = new InstructorController();
-const upload = multer({ storage: multer.memoryStorage() });
 
-// All instructor routes require authentication and creator/premium access
-router.use(authenticate, requireCreator);
+router.use(authenticate);
+router.use(authorize('instructor', 'admin'));
 
-router.get('/dashboard', instructorController.getDashboardStats);
-router.post('/courses/:courseId/submit', instructorController.submitCourseForApproval);
-router.post('/courses/:courseId/media/:type', upload.single('file'), instructorController.uploadCourseMedia);
+router.get('/dashboard', instructorController.getInstructorDashboard);
+router.get('/courses/:courseId/analytics', instructorController.getCourseAnalytics);
+router.post('/courses', instructorController.createCourse);
+router.put('/courses/:id', instructorController.updateCourse);
+router.post('/courses/:id/submit', instructorController.submitForReview);
+router.post('/media/upload', upload.single('file'), instructorController.uploadCourseMedia);
+router.post('/courses/:courseId/lessons', instructorController.createLesson);
+router.put('/lessons/:lessonId', instructorController.updateLesson);
+router.delete('/lessons/:lessonId', instructorController.deleteLesson);
+router.put('/courses/:courseId/reorder', instructorController.reorderLessons);
 
 export default router;
