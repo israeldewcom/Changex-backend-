@@ -1,4 +1,3 @@
-// src/middlewares/auth.ts
 import { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken } from '../utils/jwt.js';
 import User, { IUser } from '../models/User.js';
