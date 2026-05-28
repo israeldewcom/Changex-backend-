@@ -1,3 +1,4 @@
+// src/index.ts – updated CORS to allow any origin with credentials
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -32,7 +33,18 @@ const server = http.createServer(app);
 
 // Security
 app.use(helmet());
-app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:3000', credentials: true }));
+
+// CORS – allow any origin (for testing) while preserving credentials
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g., mobile apps, curl)
+    if (!origin) return callback(null, true);
+    // Allow any origin
+    return callback(null, true);
+  },
+  credentials: true
+}));
+
 app.use(cookieParser());
 
 // Rate limiting
@@ -65,7 +77,7 @@ app.get('/health', (_, res) => res.json({ status: 'ok' }));
 app.use(errorHandler);
 
 // Socket.IO
-const io = new SocketIOServer(server, { cors: { origin: process.env.CLIENT_URL, methods: ['GET', 'POST'] } });
+const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
 setupSocket(io);
 
 // Start services
