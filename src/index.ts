@@ -1,4 +1,3 @@
-// src/index.ts – updated CORS to allow any origin with credentials
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -34,16 +33,21 @@ const server = http.createServer(app);
 // Security
 app.use(helmet());
 
-// CORS – allow any origin (for testing) while preserving credentials
+// ✅ BULLETPROOF CORS – allows any origin with credentials
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (e.g., mobile apps, curl)
+    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
-    // Allow any origin
+    // Allow any origin – for production you can restrict to your frontend URL
     return callback(null, true);
   },
-  credentials: true
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
 }));
+
+// Handle preflight requests explicitly
+app.options('*', cors());
 
 app.use(cookieParser());
 
@@ -94,7 +98,6 @@ async function bootstrap() {
   }
 }
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
   server.close(async () => {
