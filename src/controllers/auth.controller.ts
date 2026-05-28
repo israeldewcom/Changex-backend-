@@ -1,4 +1,3 @@
-// src/controllers/auth.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
@@ -9,6 +8,7 @@ import crypto from 'crypto';
 import Referral from '../models/Referral.js';
 import redis from '../config/redis.js';
 
+// ---------- EXISTING FUNCTIONS (unchanged) ----------
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password, firstName, lastName, referralCode } = req.body;
@@ -135,3 +135,17 @@ export const googleCallback = async (req: Request, res: Response) => {
 };
 
 export const githubCallback = googleCallback;
+
+// ---------- NEW WORKAROUND: Accept GET requests for login (temporary) ----------
+export const loginGet = async (req: Request, res: Response, next: NextFunction) => {
+  console.warn('⚠️ GET login received – frontend is sending GET instead of POST. Treating as POST.');
+  // Copy query parameters to body (if any)
+  req.body = { ...req.query, ...req.body };
+  // Ensure email and password are present
+  if (!req.body.email || !req.body.password) {
+    res.status(400).json({ success: false, message: 'Email and password required (as query params or body)' });
+    return;
+  }
+  // Call the original login function
+  return login(req, res, next);
+};
