@@ -20,26 +20,26 @@ const getRefreshSecret = (): string => {
 };
 
 export const signAccessToken = (payload: TokenPayload): string => {
-  // Use a type assertion to bypass strict overload issue
-  const secret = getAccessSecret() as string;
+  // Use `as any` to bypass type issues with jsonwebtoken overloads
+  const secret = getAccessSecret() as any;
   return jwt.sign(payload, secret, {
     expiresIn: process.env.JWT_ACCESS_EXPIRES || '15m',
-  });
+  } as any);
 };
 
 export const signRefreshToken = (payload: TokenPayload): string => {
-  const secret = getRefreshSecret() as string;
+  const secret = getRefreshSecret() as any;
   return jwt.sign(payload, secret, {
     expiresIn: process.env.JWT_REFRESH_EXPIRES || '30d',
-  });
+  } as any);
 };
 
 export const verifyAccessToken = (token: string): TokenPayload => {
-  const secret = getAccessSecret() as string;
+  const secret = getAccessSecret() as any;
   return jwt.verify(token, secret) as TokenPayload;
 };
 
 export const verifyRefreshToken = (token: string): TokenPayload => {
-  const secret = getRefreshSecret() as string;
+  const secret = getRefreshSecret() as any;
   return jwt.verify(token, secret) as TokenPayload;
 };
