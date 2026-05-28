@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import Referral from '../models/Referral.js';
 import redis from '../config/redis.js';
 
-// ---------- EXISTING FUNCTIONS (unchanged) ----------
+// ---------- EXISTING FUNCTIONS (unchanged except email try/catch) ----------
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password, firstName, lastName, referralCode } = req.body;
@@ -29,7 +29,12 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
         await Referral.create({ referrerId: referrer._id, referredId: user._id });
       }
     }
-    await sendEmail(email, 'Welcome to ChangeX Academy', '<h1>Welcome!</h1><p>Start learning and earning.</p>');
+    // ✅ Email sending is non‑blocking – registration succeeds even if email fails
+    try {
+      await sendEmail(email, 'Welcome to ChangeX Academy', '<h1>Welcome!</h1><p>Start learning and earning.</p>');
+    } catch (emailError) {
+      console.error('Failed to send welcome email:', emailError);
+    }
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
@@ -136,16 +141,13 @@ export const googleCallback = async (req: Request, res: Response) => {
 
 export const githubCallback = googleCallback;
 
-// ---------- NEW WORKAROUND: Accept GET requests for login (temporary) ----------
+// ---------- WORKAROUND: Accept GET requests for login (temporary) ----------
 export const loginGet = async (req: Request, res: Response, next: NextFunction) => {
   console.warn('⚠️ GET login received – frontend is sending GET instead of POST. Treating as POST.');
-  // Copy query parameters to body (if any)
   req.body = { ...req.query, ...req.body };
-  // Ensure email and password are present
   if (!req.body.email || !req.body.password) {
     res.status(400).json({ success: false, message: 'Email and password required (as query params or body)' });
     return;
   }
-  // Call the original login function
   return login(req, res, next);
 };
