@@ -5,34 +5,41 @@ interface TokenPayload {
   email: string;
 }
 
-// Fallback secrets – CHANGE THESE IN PRODUCTION after env vars work
+// Fallback secrets – used ONLY if environment variables are missing
 const FALLBACK_ACCESS_SECRET = 'changex_access_fallback_2026_secure';
 const FALLBACK_REFRESH_SECRET = 'changex_refresh_fallback_2026_secure';
 
 const getAccessSecret = (): string => {
-  return process.env.JWT_ACCESS_SECRET || FALLBACK_ACCESS_SECRET;
+  const secret = process.env.JWT_ACCESS_SECRET;
+  return secret && secret.trim() !== '' ? secret : FALLBACK_ACCESS_SECRET;
 };
 
 const getRefreshSecret = (): string => {
-  return process.env.JWT_REFRESH_SECRET || FALLBACK_REFRESH_SECRET;
+  const secret = process.env.JWT_REFRESH_SECRET;
+  return secret && secret.trim() !== '' ? secret : FALLBACK_REFRESH_SECRET;
 };
 
 export const signAccessToken = (payload: TokenPayload): string => {
-  return jwt.sign(payload, getAccessSecret(), {
+  // Use a type assertion to bypass strict overload issue
+  const secret = getAccessSecret() as string;
+  return jwt.sign(payload, secret, {
     expiresIn: process.env.JWT_ACCESS_EXPIRES || '15m',
   });
 };
 
 export const signRefreshToken = (payload: TokenPayload): string => {
-  return jwt.sign(payload, getRefreshSecret(), {
+  const secret = getRefreshSecret() as string;
+  return jwt.sign(payload, secret, {
     expiresIn: process.env.JWT_REFRESH_EXPIRES || '30d',
   });
 };
 
 export const verifyAccessToken = (token: string): TokenPayload => {
-  return jwt.verify(token, getAccessSecret()) as TokenPayload;
+  const secret = getAccessSecret() as string;
+  return jwt.verify(token, secret) as TokenPayload;
 };
 
 export const verifyRefreshToken = (token: string): TokenPayload => {
-  return jwt.verify(token, getRefreshSecret()) as TokenPayload;
+  const secret = getRefreshSecret() as string;
+  return jwt.verify(token, secret) as TokenPayload;
 };
