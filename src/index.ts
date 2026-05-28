@@ -1,3 +1,4 @@
+// src/index.ts – with temporary public endpoint to check referral codes (no other changes)
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -26,6 +27,7 @@ import { startWorkers } from './workers/index.js';
 import logger from './utils/logger.js';
 import mongoose from 'mongoose';
 import redis from './config/redis.js';
+import User from './models/User.js';   // <-- ADDED for referral check endpoint
 
 const app = express();
 const server = http.createServer(app);
@@ -33,20 +35,16 @@ const server = http.createServer(app);
 // Security
 app.use(helmet());
 
-// ✅ BULLETPROOF CORS – allows any origin with credentials
+// CORS – allow any origin (for testing) while preserving credentials
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl)
     if (!origin) return callback(null, true);
-    // Allow any origin – for production you can restrict to your frontend URL
     return callback(null, true);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
 }));
-
-// Handle preflight requests explicitly
 app.options('*', cors());
 
 app.use(cookieParser());
@@ -62,6 +60,21 @@ app.use(express.urlencoded({ extended: true }));
 
 // Passport
 initializePassport(app);
+
+// TEMPORARY: Public endpoint to check if a referral code exists (no authentication required)
+app.get('/api/v1/check-referral/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    const user = await User.findOne({ referralCode: code });
+    if (user) {
+      res.json({ success: true, exists: true, message: 'Referral code is valid' });
+    } else {
+      res.json({ success: true, exists: false, message: 'Referral code not found' });
+    }
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
 
 // Routes
 app.use('/api/v1/auth', authRoutes);
@@ -98,6 +111,7 @@ async function bootstrap() {
   }
 }
 
+// Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
   server.close(async () => {
