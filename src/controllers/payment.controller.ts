@@ -1,4 +1,3 @@
-// src/controllers/payment.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { IUser } from '../models/User.js';
@@ -13,14 +12,25 @@ const PAYSTACK_BASE = 'https://api.paystack.co';
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const { email, amount, currency = 'NGN', metadata } = req.body;
-    if (!email || !amount) {
-      res.status(400).json({ success: false, message: 'Email and amount required' });
+    if (!user) {
+      res.status(401).json({ success: false, message: 'User not authenticated' });
       return;
     }
+
+    const { email, amount, currency = 'NGN', metadata } = req.body;
+    const userEmail = email || user.email;
+    if (!userEmail) {
+      res.status(400).json({ success: false, message: 'Email is required' });
+      return;
+    }
+    if (!amount || amount <= 0) {
+      res.status(400).json({ success: false, message: 'Valid amount is required' });
+      return;
+    }
+
     const response = await axios.post(
       `${PAYSTACK_BASE}/transaction/initialize`,
-      { email, amount: amount * 100, currency, metadata },
+      { email: userEmail, amount: amount * 100, currency, metadata },
       { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}`, 'Content-Type': 'application/json' } }
     );
     res.json({ success: true, data: response.data.data });
@@ -73,6 +83,10 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
 export const subscribe = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
+    if (!user) {
+      res.status(401).json({ success: false, message: 'User not authenticated' });
+      return;
+    }
     const { plan = 'premium' } = req.body;
     const amount = 5000;
     const metadata = { userId: user._id, type: 'subscription', plan };
