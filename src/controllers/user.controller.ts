@@ -144,3 +144,29 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
     res.json({ success: true });
   } catch (err) { next(err); }
 };
+
+// ✅ NEW: Claim welcome bonus (moved from bonus.controller.ts)
+export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    if ((user as any).welcomeBonusClaimed) {
+      res.status(400).json({ success: false, message: 'Bonus already claimed' });
+      return;
+    }
+    if (!user.bio && !user.location) {
+      res.status(400).json({ success: false, message: 'Please complete your profile first' });
+      return;
+    }
+    user.walletBalance += 500;
+    (user as any).welcomeBonusClaimed = true;
+    await user.save();
+    await Transaction.create({
+      userId: user._id,
+      type: 'bonus',
+      amount: 500,
+      status: 'completed',
+      description: 'Welcome bonus for completing profile',
+    });
+    res.json({ success: true, message: '₦500 added to your wallet', balance: user.walletBalance });
+  } catch (err) { next(err); }
+};
