@@ -1,6 +1,5 @@
 import { Router } from 'express';
 import * as userController from '../controllers/user.controller.js';
-import { claimWelcomeBonus } from '../controllers/bonus.controller.js';
 import { authenticate } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
 
@@ -19,7 +18,7 @@ router.put('/notifications/read-all', userController.markAllNotificationsRead);
 router.get('/referrals', userController.getReferrals);
 router.get('/leaderboard', userController.getLeaderboard);
 router.get('/badges', userController.getUserBadges);
-router.post('/claim-welcome-bonus', claimWelcomeBonus);
+router.post('/claim-welcome-bonus', userController.claimWelcomeBonus);   // ✅ Now uses userController
 router.post('/update-premium-status', userController.updatePremiumStatus);
 
 export default router;
