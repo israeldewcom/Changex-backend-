@@ -1,4 +1,3 @@
-// src/index.ts – with temporary public endpoint to check referral codes (no other changes)
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -21,21 +20,19 @@ import paymentRoutes from './routes/payment.routes.js';
 import affiliateRoutes from './routes/affiliate.routes.js';
 import aiRoutes from './routes/ai.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
+import feedbackRoutes from './routes/feedback.routes.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 import { setupSocket } from './socket.js';
 import { startWorkers } from './workers/index.js';
 import logger from './utils/logger.js';
 import mongoose from 'mongoose';
 import redis from './config/redis.js';
-import User from './models/User.js';   // <-- ADDED for referral check endpoint
+import User from './models/User.js';
 
 const app = express();
 const server = http.createServer(app);
 
-// Security
 app.use(helmet());
-
-// CORS – allow any origin (for testing) while preserving credentials
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
@@ -49,19 +46,16 @@ app.options('*', cors());
 
 app.use(cookieParser());
 
-// Rate limiting
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });
 app.use('/api/', limiter);
 app.use('/api/v1/auth/login', rateLimit({ windowMs: 60 * 1000, max: 20 }));
 
-// Body parser
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Passport
 initializePassport(app);
 
-// TEMPORARY: Public endpoint to check if a referral code exists (no authentication required)
+// Public referral check endpoint
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
     const { code } = req.params;
@@ -76,7 +70,6 @@ app.get('/api/v1/check-referral/:code', async (req, res) => {
   }
 });
 
-// Routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/courses', courseRoutes);
@@ -86,18 +79,15 @@ app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/affiliate', affiliateRoutes);
 app.use('/api/v1/ai', aiRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
+app.use('/api/v1/feedback', feedbackRoutes);
 
-// Health check
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
-// Error handling
 app.use(errorHandler);
 
-// Socket.IO
 const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
 setupSocket(io);
 
-// Start services
 async function bootstrap() {
   try {
     await connectDB();
@@ -111,7 +101,6 @@ async function bootstrap() {
   }
 }
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
   server.close(async () => {
