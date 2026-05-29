@@ -1,4 +1,3 @@
-// src/routes/admin.routes.ts
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
@@ -20,5 +19,7 @@ router.post('/announcements', adminController.createAnnouncement);
 router.get('/coupons', adminController.getCoupons);
 router.post('/coupons', adminController.createCoupon);
 router.delete('/coupons/:id', adminController.deleteCoupon);
+// ✅ NEW: Instructor approval route
+router.post('/users/:userId/approve-instructor', adminController.approveInstructor);
 
 export default router;
