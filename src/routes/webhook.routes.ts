@@ -31,10 +31,9 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           {},
           { upsert: true, new: true }
         );
-        await Course.findByIdAndUpdate(meta.courseId, { $inc: { totalStudents: 1 } });
+        const course = await Course.findByIdAndUpdate(meta.courseId, { $inc: { totalStudents: 1 } }, { new: true });
         
         // ✅ INSTRUCTOR EARNINGS (80% of price)
-        const course = await Course.findById(meta.courseId).populate('instructorId');
         if (course && course.instructorId) {
           const price = course.salePrice || course.price || 0;
           const instructorShare = price * 0.8; // 80% to instructor
@@ -55,28 +54,27 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         // ✅ AFFILIATE COMMISSION (if affiliate code provided in metadata)
         const affiliateCode = meta.affiliateCode;
         if (affiliateCode) {
-          const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode }).populate('courseId');
-          if (affiliateLink) {
-            const course = await Course.findById(affiliateLink.courseId);
-            if (course) {
-              const price = course.salePrice || course.price || 0;
-              const percent = affiliateLink.courseId?.affiliatePercent || 15;
-              const commission = price * (percent / 100);
-              affiliateLink.conversions += 1;
-              affiliateLink.totalEarned += commission;
-              await affiliateLink.save();
-              const affiliate = await User.findById(affiliateLink.userId);
-              if (affiliate) {
-                affiliate.walletBalance = (affiliate.walletBalance || 0) + commission;
-                await affiliate.save();
-                await Transaction.create({
-                  userId: affiliate._id,
-                  type: 'affiliate_commission',
-                  amount: commission,
-                  status: 'completed',
-                  description: `Commission for course: ${course.title}`,
-                });
-              }
+          // Populate courseId to access affiliatePercent
+          const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode }).populate<{ courseId: ICourse }>('courseId');
+          if (affiliateLink && affiliateLink.courseId) {
+            const course = affiliateLink.courseId as any; // course document
+            const price = course.salePrice || course.price || 0;
+            const percent = course.affiliatePercent || 15;
+            const commission = price * (percent / 100);
+            affiliateLink.conversions += 1;
+            affiliateLink.totalEarned += commission;
+            await affiliateLink.save();
+            const affiliate = await User.findById(affiliateLink.userId);
+            if (affiliate) {
+              affiliate.walletBalance = (affiliate.walletBalance || 0) + commission;
+              await affiliate.save();
+              await Transaction.create({
+                userId: affiliate._id,
+                type: 'affiliate_commission',
+                amount: commission,
+                status: 'completed',
+                description: `Commission for course: ${course.title}`,
+              });
             }
           }
         }
@@ -110,7 +108,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         }
       }
 
-      // Record main transaction (already in your original code – keep it)
+      // Record main transaction (keep original)
       await Transaction.create({
         userId: meta.userId,
         type: meta.type,
