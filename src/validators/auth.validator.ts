@@ -1,3 +1,4 @@
+// src/validators/auth.validator.ts
 import Joi from 'joi';
 
 export const registerSchema = Joi.object({
@@ -6,7 +7,7 @@ export const registerSchema = Joi.object({
   firstName: Joi.string().required(),
   lastName: Joi.string().required(),
   referralCode: Joi.string().optional(),
-}).unknown(true);   // ✅ allows fields like phone, acceptTerms without causing 422
+}).unknown(true);
 
 export const loginSchema = Joi.object({
   email: Joi.string().email().required(),
