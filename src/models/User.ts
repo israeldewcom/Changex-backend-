@@ -28,6 +28,7 @@ export interface IUser extends Document {
     accountName: string;
   };
   preferredCurrency: string;
+  welcomeBonusClaimed: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -65,6 +66,7 @@ const UserSchema = new Schema<IUser>(
       ),
     },
     preferredCurrency: { type: String, default: 'NGN' },
+    welcomeBonusClaimed: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
