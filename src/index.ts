@@ -33,22 +33,12 @@ const app = express();
 const server = http.createServer(app);
 
 app.use(helmet());
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    return callback(null, true);
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-}));
+app.use(cors({ origin: (origin, cb) => cb(null, true), credentials: true, methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization','Cookie'] }));
 app.options('*', cors());
-
 app.use(cookieParser());
 
-const limiter = rateLimit({ windowMs: 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false });
+const limiter = rateLimit({ windowMs: 60 * 1000, max: 100 });
 app.use('/api/', limiter);
-app.use('/api/v1/auth/login', rateLimit({ windowMs: 60 * 1000, max: 20 }));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -58,16 +48,9 @@ initializePassport(app);
 // Public referral check endpoint
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
-    const { code } = req.params;
-    const user = await User.findOne({ referralCode: code });
-    if (user) {
-      res.json({ success: true, exists: true, message: 'Referral code is valid' });
-    } else {
-      res.json({ success: true, exists: false, message: 'Referral code not found' });
-    }
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
+    const user = await User.findOne({ referralCode: req.params.code });
+    res.json({ success: true, exists: !!user, message: user ? 'Valid' : 'Not found' });
+  } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 });
 
 app.use('/api/v1/auth', authRoutes);
@@ -102,7 +85,6 @@ async function bootstrap() {
 }
 
 process.on('SIGTERM', () => {
-  logger.info('SIGTERM received. Shutting down gracefully...');
   server.close(async () => {
     await mongoose.connection.close();
     await redis.quit();
