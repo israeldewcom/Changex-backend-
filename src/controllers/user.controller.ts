@@ -130,3 +130,17 @@ export const getUserBadges = async (req: Request, res: Response, next: NextFunct
     res.json({ success: true, data: [] });
   } catch (err) { next(err); }
 };
+
+// ✅ NEW: Update premium status (for subscription expiry)
+export const updatePremiumStatus = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { isPremium } = req.body;
+    const user = req.user as IUser;
+    if (isPremium === false && user.isPremium) {
+      user.isPremium = false;
+      user.subscriptionExpires = undefined;
+      await user.save();
+    }
+    res.json({ success: true });
+  } catch (err) { next(err); }
+};
