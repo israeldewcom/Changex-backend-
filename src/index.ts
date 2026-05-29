@@ -1,4 +1,3 @@
-// src/index.ts
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -9,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import mongoose from 'mongoose';
 import { connectDB } from './config/db.js';
 import { connectRedis } from './config/redis.js';
 import { initializePassport } from './config/passport.js';
@@ -26,13 +26,12 @@ import { errorHandler } from './middlewares/errorHandler.js';
 import { setupSocket } from './socket.js';
 import { startWorkers } from './workers/index.js';
 import logger from './utils/logger.js';
-import mongoose from 'mongoose';
 import redis from './config/redis.js';
-import User from './models/User.js';
 
 const app = express();
 const server = http.createServer(app);
 
+// Security
 app.use(helmet());
 app.use(cors({
   origin: (origin, cb) => cb(null, true),
@@ -43,23 +42,17 @@ app.use(cors({
 app.options('*', cors());
 app.use(cookieParser());
 
+// Rate limiting
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 100 });
 app.use('/api/', limiter);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Passport
 initializePassport(app);
 
-app.get('/api/v1/check-referral/:code', async (req, res) => {
-  try {
-    const user = await User.findOne({ referralCode: req.params.code });
-    res.json({ success: true, exists: !!user, message: user ? 'Valid' : 'Not found' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: String(err) });
-  }
-});
-
+// Routes – order matters: auth first, then user, then courses
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/courses', courseRoutes);
@@ -71,13 +64,35 @@ app.use('/api/v1/ai', aiRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/feedback', feedbackRoutes);
 
+// Public check-referral endpoint
+app.get('/api/v1/check-referral/:code', async (req, res) => {
+  try {
+    const user = await User.findOne({ referralCode: req.params.code.toUpperCase() });
+    res.json({ success: true, exists: !!user, message: user ? 'Valid' : 'Not found' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+});
+
+// Health check
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
+// ✅ Global CastError handler for ObjectId failures
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (err instanceof mongoose.Error.CastError && err.path === '_id') {
+    return res.status(400).json({ success: false, message: 'Invalid ID format' });
+  }
+  next(err);
+});
+
+// Final error handler
 app.use(errorHandler);
 
+// Socket.io
 const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
 setupSocket(io);
 
+// Bootstrap
 async function bootstrap() {
   try {
     await connectDB();
