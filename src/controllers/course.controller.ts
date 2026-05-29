@@ -1,3 +1,4 @@
+// src/controllers/course.controller.ts (add guards at enrollCourse)
 import { Request, Response, NextFunction } from 'express';
 import Course from '../models/Course.js';
 import Enrollment from '../models/Enrollment.js';
@@ -16,12 +17,10 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
     if (category) filter.category = category;
     if (level) filter.level = level;
     if (search) filter.title = { $regex: search, $options: 'i' };
-
     const courses = await Course.find(filter)
       .skip(Number(offset))
       .limit(Number(limit))
       .populate('instructorId', 'firstName lastName');
-
     const total = await Course.countDocuments(filter);
     res.json({ success: true, data: courses, meta: { total } });
   } catch (err) { next(err); }
@@ -30,10 +29,7 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
 export const getCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const course = await Course.findById(req.params.id).populate('instructorId', 'firstName lastName bio').lean();
-    if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found' });
-      return;
-    }
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     const lessons = await Lesson.find({ courseId: course._id }).sort('order');
     const ratings = await Rating.find({ courseId: course._id }).populate('userId', 'firstName lastName');
     res.json({ success: true, data: { ...course, lessons, ratings } });
@@ -43,25 +39,14 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if (!user || !user._id) {
-      res.status(401).json({ success: false, message: 'User not authenticated' });
-      return;
-    }
+    if (!user || !user._id) return res.status(401).json({ success: false, message: 'Authentication required' });
     const course = await Course.findById(req.params.id);
-    if (!course || !course.isPublished) {
-      res.status(404).json({ success: false, message: 'Course not available' });
-      return;
-    }
+    if (!course || !course.isPublished) return res.status(404).json({ success: false, message: 'Course not available' });
     const existing = await Enrollment.findOne({ userId: user._id, courseId: course._id });
-    if (existing) {
-      res.status(400).json({ success: false, message: 'Already enrolled' });
-      return;
-    }
+    if (existing) return res.status(400).json({ success: false, message: 'Already enrolled' });
     if (course.price > 0) {
-      res.json({ success: true, requirePayment: true, price: course.salePrice || course.price });
-      return;
+      return res.json({ success: true, requirePayment: true, price: course.salePrice || course.price });
     }
-    // ✅ Free enrollment: ensure user._id and course._id are not null
     await Enrollment.create({ userId: user._id, courseId: course._id });
     course.totalStudents += 1;
     await course.save();
@@ -75,10 +60,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
     const { lessonId } = req.params;
     const { completed, timeSpent } = req.body;
     const enrollment = await Enrollment.findOne({ userId: user._id, courseId: req.params.id });
-    if (!enrollment) {
-      res.status(400).json({ success: false, message: 'Not enrolled' });
-      return;
-    }
+    if (!enrollment) return res.status(400).json({ success: false, message: 'Not enrolled' });
     let progress = await LessonProgress.findOne({ enrollmentId: enrollment._id, lessonId });
     if (!progress) {
       progress = new LessonProgress({ enrollmentId: enrollment._id, lessonId, completed, timeSpent: timeSpent || 0 });
@@ -120,14 +102,10 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
     const user = req.user as IUser;
     const { rating, review } = req.body;
     const course = await Course.findById(req.params.id);
-    if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found' });
-      return;
-    }
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     const enrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id });
     if (!enrollment || enrollment.status !== 'completed') {
-      res.status(400).json({ success: false, message: 'Complete the course to rate' });
-      return;
+      return res.status(400).json({ success: false, message: 'Complete the course to rate' });
     }
     const existing = await Rating.findOne({ userId: user._id, courseId: course._id });
     if (existing) {
