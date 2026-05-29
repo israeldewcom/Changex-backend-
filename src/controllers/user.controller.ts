@@ -1,4 +1,3 @@
-// src/controllers/user.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
@@ -20,9 +19,7 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
     }
     await user.save();
     res.json({ success: true, data: user });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const uploadAvatar = async (req: Request, res: Response, next: NextFunction) => {
@@ -38,9 +35,7 @@ export const uploadAvatar = async (req: Request, res: Response, next: NextFuncti
     user.avatarUrl = result.secure_url;
     await user.save();
     res.json({ success: true, data: { avatarUrl: result.secure_url } });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const getWallet = async (req: Request, res: Response, next: NextFunction) => {
@@ -49,11 +44,13 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
     const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(50);
     res.json({
       success: true,
-      data: { balance: user.walletBalance, pending: user.pendingWithdrawal, transactions },
+      data: {
+        balance: Number(user.walletBalance) || 0,
+        pending: Number(user.pendingWithdrawal) || 0,
+        transactions,
+      },
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const requestWithdrawal = async (req: Request, res: Response, next: NextFunction) => {
@@ -75,17 +72,9 @@ export const requestWithdrawal = async (req: Request, res: Response, next: NextF
     user.walletBalance -= amount;
     user.pendingWithdrawal += amount;
     await user.save();
-    await Transaction.create({
-      userId: user._id,
-      type: 'withdrawal',
-      amount: -amount,
-      status: 'pending',
-      description: 'Withdrawal request',
-    });
+    await Transaction.create({ userId: user._id, type: 'withdrawal', amount: -amount, status: 'pending', description: 'Withdrawal request' });
     res.json({ success: true, message: 'Withdrawal request submitted' });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const getNotifications = async (req: Request, res: Response, next: NextFunction) => {
@@ -93,37 +82,22 @@ export const getNotifications = async (req: Request, res: Response, next: NextFu
     const user = req.user as IUser;
     const notifications = await Notification.find({ userId: user._id }).sort('-createdAt').limit(50);
     res.json({ success: true, data: notifications });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const markNotificationRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await Notification.findByIdAndUpdate(req.params.id, { read: true });
     res.json({ success: true });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const markAllNotificationsRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     await Notification.updateMany({ userId: user._id, read: false }, { read: true });
-    res.json({ success: true, message: 'All notifications marked as read' });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const getUserBadges = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    // Placeholder – implement badge logic if a Badge model exists later
-    res.json({ success: true, data: [] });
-  } catch (err) {
-    next(err);
-  }
+    res.json({ success: true });
+  } catch (err) { next(err); }
 };
 
 export const getLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -131,14 +105,9 @@ export const getLeaderboard = async (req: Request, res: Response, next: NextFunc
     const { type = 'xp', limit = 20 } = req.query;
     let sortField = 'xp';
     if (type === 'earnings') sortField = 'walletBalance';
-    const users = await User.find({})
-      .sort({ [sortField]: -1 })
-      .limit(Number(limit))
-      .select('firstName lastName xp walletBalance level avatarUrl streakDays');
+    const users = await User.find({}).sort({ [sortField]: -1 }).limit(Number(limit)).select('firstName lastName xp walletBalance level avatarUrl streakDays');
     res.json({ success: true, data: users });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
 export const getReferrals = async (req: Request, res: Response, next: NextFunction) => {
@@ -153,7 +122,11 @@ export const getReferrals = async (req: Request, res: Response, next: NextFuncti
       earned: r.earned,
     }));
     res.json({ success: true, data: formatted });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
+};
+
+export const getUserBadges = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    res.json({ success: true, data: [] });
+  } catch (err) { next(err); }
 };
