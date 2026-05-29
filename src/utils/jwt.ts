@@ -1,3 +1,4 @@
+// src/utils/jwt.ts
 import jwt from 'jsonwebtoken';
 
 interface TokenPayload {
@@ -5,7 +6,6 @@ interface TokenPayload {
   email: string;
 }
 
-// Fallback secrets – used ONLY if environment variables are missing
 const FALLBACK_ACCESS_SECRET = 'changex_access_fallback_2026_secure';
 const FALLBACK_REFRESH_SECRET = 'changex_refresh_fallback_2026_secure';
 
@@ -20,7 +20,6 @@ const getRefreshSecret = (): string => {
 };
 
 export const signAccessToken = (payload: TokenPayload): string => {
-  // Use `as any` to bypass type issues with jsonwebtoken overloads
   const secret = getAccessSecret() as any;
   return jwt.sign(payload, secret, {
     expiresIn: process.env.JWT_ACCESS_EXPIRES || '15m',
