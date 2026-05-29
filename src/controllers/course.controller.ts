@@ -4,7 +4,6 @@ import Enrollment from '../models/Enrollment.js';
 import LessonProgress from '../models/LessonProgress.js';
 import Lesson from '../models/Lesson.js';
 import Rating from '../models/Rating.js';
-import Notification from '../models/Notification.js';
 import Transaction from '../models/Transaction.js';
 import { IUser } from '../models/User.js';
 import { sanitizeHtml } from '../middlewares/sanitize.js';
