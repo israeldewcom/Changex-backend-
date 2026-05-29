@@ -21,7 +21,8 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
     res.json({ success: true, data: { totalUsers, totalCourses, pendingCourses, totalRevenue, pendingWithdrawals } });
   } catch (err) {
     console.error('Admin dashboard error:', err);
-    res.status(500).json({ success: false, message: 'Failed to load dashboard stats', error: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: 'Failed to load dashboard stats', error: errorMessage });
   }
 };
 
@@ -30,7 +31,8 @@ export const getUsers = async (req: Request, res: Response, next: NextFunction) 
     const users = await User.find({}).select('-passwordHash').limit(100);
     res.json({ success: true, data: users });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -44,7 +46,8 @@ export const updateUserRole = async (req: Request, res: Response, next: NextFunc
     }
     res.json({ success: true, data: user });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -53,7 +56,8 @@ export const getAdminCourses = async (req: Request, res: Response, next: NextFun
     const courses = await Course.find({}).populate('instructorId', 'firstName lastName email').limit(100);
     res.json({ success: true, data: courses });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -84,7 +88,8 @@ export const approveCourse = async (req: Request, res: Response, next: NextFunct
     }
     res.json({ success: true, data: course });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -110,7 +115,8 @@ export const rejectCourse = async (req: Request, res: Response, next: NextFuncti
     }
     res.json({ success: true, data: course });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -119,7 +125,8 @@ export const getWithdrawals = async (req: Request, res: Response, next: NextFunc
     const withdrawals = await Transaction.find({ type: 'withdrawal', status: 'pending' }).populate('userId', 'firstName lastName email bankAccount');
     res.json({ success: true, data: withdrawals });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -149,7 +156,8 @@ export const processWithdrawal = async (req: Request, res: Response, next: NextF
     await transaction.save();
     res.json({ success: true, message: `Withdrawal ${action}d` });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -164,7 +172,8 @@ export const createAnnouncement = async (req: Request, res: Response, next: Next
     await Notification.insertMany(notifications);
     res.status(201).json({ success: true, data: announcement });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -173,7 +182,8 @@ export const getCoupons = async (req: Request, res: Response, next: NextFunction
     const coupons = await AdminCoupon.find({});
     res.json({ success: true, data: coupons });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -182,7 +192,8 @@ export const createCoupon = async (req: Request, res: Response, next: NextFuncti
     const coupon = await AdminCoupon.create(req.body);
     res.status(201).json({ success: true, data: coupon });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
@@ -191,11 +202,11 @@ export const deleteCoupon = async (req: Request, res: Response, next: NextFuncti
     await AdminCoupon.findByIdAndDelete(req.params.id);
     res.json({ success: true });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
 
-// ✅ Instructor approval endpoint
 export const approveInstructor = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params;
@@ -216,6 +227,7 @@ export const approveInstructor = async (req: Request, res: Response, next: NextF
     });
     res.json({ success: true, data: user });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    res.status(500).json({ success: false, message: errorMessage });
   }
 };
