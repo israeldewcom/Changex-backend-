@@ -5,6 +5,7 @@ import LessonProgress from '../models/LessonProgress.js';
 import Lesson from '../models/Lesson.js';
 import Rating from '../models/Rating.js';
 import Notification from '../models/Notification.js';
+import Transaction from '../models/Transaction.js';
 import { IUser } from '../models/User.js';
 import { sanitizeHtml } from '../middlewares/sanitize.js';
 
@@ -111,9 +112,20 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       completed: true,
     });
     enrollment.progress = Math.round((completedLessons / totalLessons) * 100);
-    if (enrollment.progress === 100) {
+    if (enrollment.progress === 100 && enrollment.status !== 'completed') {
       enrollment.status = 'completed';
       enrollment.completedAt = new Date();
+      
+      // ✅ ADD COURSE COMPLETION BONUS (₦100)
+      user.walletBalance = (user.walletBalance || 0) + 100;
+      await user.save();
+      await Transaction.create({
+        userId: user._id,
+        type: 'bonus',
+        amount: 100,
+        status: 'completed',
+        description: 'Course completion bonus',
+      });
     }
     await enrollment.save();
 
