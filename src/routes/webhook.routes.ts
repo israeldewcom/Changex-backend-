@@ -1,3 +1,4 @@
+// src/routes/webhook.routes.ts
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import Transaction from '../models/Transaction.js';
@@ -15,10 +16,8 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
     const hash = crypto.createHmac('sha512', paystackConfig.webhookSecret)
       .update(JSON.stringify(req.body))
       .digest('hex');
-    
     if (hash !== req.headers['x-paystack-signature']) {
-      res.status(400).send('Invalid signature');
-      return;
+      return res.status(400).send('Invalid signature');
     }
 
     const event = req.body;
@@ -31,8 +30,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           { upsert: true, new: true }
         );
         const course = await Course.findByIdAndUpdate(meta.courseId, { $inc: { totalStudents: 1 } }, { new: true });
-        
-        // Instructor earnings
+
         if (course && course.instructorId) {
           const price = course.salePrice || course.price || 0;
           const instructorShare = price * 0.8;
@@ -49,8 +47,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
             });
           }
         }
-        
-        // Affiliate commission
+
         const affiliateCode = meta.affiliateCode;
         if (affiliateCode) {
           const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
@@ -84,8 +81,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           user.isPremium = true;
           user.subscriptionExpires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
           await user.save();
-          
-          // Referral bonus for the referrer
+
           const referral = await Referral.findOne({ referredId: user._id, status: 'pending' });
           if (referral) {
             referral.status = 'converted';
@@ -107,7 +103,6 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         }
       }
 
-      // Record main transaction
       await Transaction.create({
         userId: meta.userId,
         type: meta.type,
