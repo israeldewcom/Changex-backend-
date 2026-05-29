@@ -1,4 +1,3 @@
-// src/controllers/course.controller.ts (add guards at enrollCourse)
 import { Request, Response, NextFunction } from 'express';
 import Course from '../models/Course.js';
 import Enrollment from '../models/Enrollment.js';
@@ -84,13 +83,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       enrollment.completedAt = new Date();
       user.walletBalance = (user.walletBalance || 0) + 100;
       await user.save();
-      await Transaction.create({
-        userId: user._id,
-        type: 'bonus',
-        amount: 100,
-        status: 'completed',
-        description: 'Course completion bonus',
-      });
+      await Transaction.create({ userId: user._id, type: 'bonus', amount: 100, status: 'completed', description: 'Course completion bonus' });
     }
     await enrollment.save();
     res.json({ success: true, data: { progress: enrollment.progress } });
