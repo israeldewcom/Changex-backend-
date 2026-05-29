@@ -1,3 +1,4 @@
+// src/routes/course.routes.ts
 import { Router } from 'express';
 import * as courseController from '../controllers/course.controller.js';
 import { authenticate } from '../middlewares/auth.js';
