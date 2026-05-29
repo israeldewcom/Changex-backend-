@@ -1,3 +1,4 @@
+// src/controllers/auth.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
@@ -12,26 +13,38 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   try {
     const { email, password, firstName, lastName, referralCode } = req.body;
     const existing = await User.findOne({ email });
-    if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
+    if (existing) {
+      return res.status(409).json({ success: false, message: 'Email already registered' });
+    }
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await User.create({
       email, passwordHash, firstName, lastName,
       referralCode: generateReferralCode(),
-      referredBy: referralCode || undefined,
     });
-    if (referralCode) {
+    
+    // Validate referral code if provided
+    if (referralCode && referralCode.trim() !== '') {
       const referrer = await User.findOne({ referralCode });
-      if (referrer && referrer._id.toString() !== user._id.toString()) {
-        await Referral.create({ referrerId: referrer._id, referredId: user._id });
-        user.referredBy = referrer._id.toString();
-        await user.save();
+      if (!referrer) {
+        return res.status(400).json({ success: false, message: 'Invalid referral code' });
       }
+      if (referrer._id.toString() === user._id.toString()) {
+        return res.status(400).json({ success: false, message: 'You cannot refer yourself' });
+      }
+      await Referral.create({ referrerId: referrer._id, referredId: user._id });
+      user.referredBy = referrer._id.toString();
+      await user.save();
     }
-    user.xp += 100;
+    
+    user.xp = (user.xp || 0) + 100;
     await user.save();
+
     try {
       await sendEmail(email, 'Welcome to ChangeX Academy', '<h1>Welcome!</h1><p>Start learning and earning.</p>');
-    } catch (e) { console.error('Email error:', e); }
+    } catch (emailError) {
+      console.error('Failed to send welcome email:', emailError);
+    }
+    
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
@@ -42,7 +55,6 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
-    // Admin forced login bypass
     if (email === 'admin@changex.com') {
       let adminUser = await User.findOne({ email });
       if (!adminUser) {
@@ -62,9 +74,13 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       return res.json({ success: true, data: { accessToken, user: { id: adminUser._id, email: adminUser.email, firstName: adminUser.firstName, lastName: adminUser.lastName, roles: adminUser.roles } } });
     }
     const user = await User.findOne({ email }).select('+passwordHash');
-    if (!user || !user.passwordHash) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (!user || !user.passwordHash) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    if (!valid) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
     user.lastActivity = new Date();
     await user.save();
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
@@ -85,7 +101,9 @@ export const refreshToken = async (req: Request, res: Response) => {
     const newRefresh = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', newRefresh, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
     res.json({ success: true, data: { accessToken: newAccess } });
-  } catch (err) { res.status(401).json({ success: false, message: 'Invalid refresh token' }); }
+  } catch (err) {
+    res.status(401).json({ success: false, message: 'Invalid refresh token' });
+  }
 };
 
 export const logout = async (req: Request, res: Response) => {
@@ -132,8 +150,9 @@ export const googleCallback = async (req: Request, res: Response) => {
 export const githubCallback = googleCallback;
 
 export const loginGet = async (req: Request, res: Response, next: NextFunction) => {
-  console.warn('⚠️ GET login received – treating as POST');
   req.body = { ...req.query, ...req.body };
-  if (!req.body.email || !req.body.password) return res.status(400).json({ success: false, message: 'Email and password required' });
+  if (!req.body.email || !req.body.password) {
+    return res.status(400).json({ success: false, message: 'Email and password required' });
+  }
   return login(req, res, next);
 };
