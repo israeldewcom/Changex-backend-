@@ -1,4 +1,4 @@
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
 import User from '../models/User.js';
 import Course from '../models/Course.js';
 import Transaction from '../models/Transaction.js';
@@ -117,11 +117,9 @@ export const createAnnouncement = async (req: Request, res: Response) => {
 export const getCoupons = async (req: Request, res: Response) => {
   try { res.json({ success: true, data: await AdminCoupon.find({}) }); } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
-
 export const createCoupon = async (req: Request, res: Response) => {
   try { res.status(201).json({ success: true, data: await AdminCoupon.create(req.body) }); } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
-
 export const deleteCoupon = async (req: Request, res: Response) => {
   try { await AdminCoupon.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
