@@ -24,10 +24,7 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
 
 export const uploadAvatar = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.file) {
-      res.status(400).json({ success: false, message: 'No file uploaded' });
-      return;
-    }
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const user = req.user as IUser;
     const result = await uploadToCloudinary(req.file.buffer, 'avatars', {
       transformation: [{ width: 256, height: 256, crop: 'fill' }],
@@ -55,20 +52,11 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
 
 export const requestWithdrawal = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { amount, bankAccount } = req.body;
+    const { amount } = req.body;
     const user = req.user as IUser;
-    if (!user.bankAccount && !bankAccount) {
-      res.status(400).json({ success: false, message: 'Bank account required' });
-      return;
-    }
-    if (amount < 2000) {
-      res.status(400).json({ success: false, message: 'Minimum withdrawal is ₦2,000' });
-      return;
-    }
-    if (amount > user.walletBalance) {
-      res.status(400).json({ success: false, message: 'Insufficient balance' });
-      return;
-    }
+    if (!user.bankAccount) return res.status(400).json({ success: false, message: 'Bank account required' });
+    if (amount < 2000) return res.status(400).json({ success: false, message: 'Minimum withdrawal is ₦2,000' });
+    if (amount > user.walletBalance) return res.status(400).json({ success: false, message: 'Insufficient balance' });
     user.walletBalance -= amount;
     user.pendingWithdrawal += amount;
     await user.save();
@@ -77,7 +65,6 @@ export const requestWithdrawal = async (req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 };
 
-// ✅ NOTIFICATION FUNCTIONS (ensuring users can view all notifications)
 export const getNotifications = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -88,16 +75,8 @@ export const getNotifications = async (req: Request, res: Response, next: NextFu
 
 export const markNotificationRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const notification = await Notification.findOneAndUpdate(
-      { _id: req.params.id, userId: (req.user as IUser)._id },
-      { read: true },
-      { new: true }
-    );
-    if (!notification) {
-      res.status(404).json({ success: false, message: 'Notification not found' });
-      return;
-    }
-    res.json({ success: true, data: notification });
+    await Notification.findByIdAndUpdate(req.params.id, { read: true });
+    res.json({ success: true });
   } catch (err) { next(err); }
 };
 
@@ -105,7 +84,7 @@ export const markAllNotificationsRead = async (req: Request, res: Response, next
   try {
     const user = req.user as IUser;
     await Notification.updateMany({ userId: user._id, read: false }, { read: true });
-    res.json({ success: true, message: 'All notifications marked as read' });
+    res.json({ success: true });
   } catch (err) { next(err); }
 };
 
@@ -156,24 +135,12 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
 export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if ((user as any).welcomeBonusClaimed) {
-      res.status(400).json({ success: false, message: 'Bonus already claimed' });
-      return;
-    }
-    if (!user.bio && !user.location) {
-      res.status(400).json({ success: false, message: 'Please complete your profile first' });
-      return;
-    }
+    if ((user as any).welcomeBonusClaimed) return res.status(400).json({ success: false, message: 'Bonus already claimed' });
+    if (!user.bio && !user.location) return res.status(400).json({ success: false, message: 'Complete your profile first' });
     user.walletBalance += 500;
     (user as any).welcomeBonusClaimed = true;
     await user.save();
-    await Transaction.create({
-      userId: user._id,
-      type: 'bonus',
-      amount: 500,
-      status: 'completed',
-      description: 'Welcome bonus for completing profile',
-    });
+    await Transaction.create({ userId: user._id, type: 'bonus', amount: 500, status: 'completed', description: 'Welcome bonus' });
     res.json({ success: true, message: '₦500 added to your wallet', balance: user.walletBalance });
   } catch (err) { next(err); }
 };
