@@ -10,7 +10,7 @@ router.use(authorize('admin'));
 router.get('/dashboard', adminController.getDashboard);
 router.get('/users', adminController.getUsers);
 router.patch('/users/:id', adminController.updateUserRole);
-router.post('/users/:userId/approve-instructor', adminController.approveInstructor); // ✅ instructor approval
+router.post('/users/:userId/approve-instructor', adminController.approveInstructor);
 router.get('/courses', adminController.getAdminCourses);
 router.post('/courses/:id/approve', adminController.approveCourse);
 router.post('/courses/:id/reject', adminController.rejectCourse);
