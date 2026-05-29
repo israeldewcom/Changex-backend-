@@ -26,7 +26,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       const referrer = await User.findOne({ referralCode });
       if (referrer && referrer._id.toString() !== user._id.toString()) {
         await Referral.create({ referrerId: referrer._id, referredId: user._id });
-        user.referredBy = referrer._id;
+        user.referredBy = referrer._id.toString(); // ✅ fix: convert ObjectId to string
         await user.save();
       }
     }
