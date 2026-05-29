@@ -1,24 +1,24 @@
 import { Router } from 'express';
-import * as userController from '../controllers/user.controller.js';
-import { authenticate } from '../middlewares/auth.js';
-import { upload } from '../middlewares/upload.js';
+import * as adminController from '../controllers/admin.controller.js';
+import { authenticate, authorize } from '../middlewares/auth.js';
 
 const router = Router();
 
 router.use(authenticate);
+router.use(authorize('admin'));
 
-router.get('/profile', userController.getProfile);
-router.put('/profile', userController.updateProfile);
-router.post('/avatar', upload.single('avatar'), userController.uploadAvatar);
-router.get('/wallet', userController.getWallet);
-router.post('/withdraw', userController.requestWithdrawal);
-router.get('/notifications', userController.getNotifications);
-router.put('/notifications/:id/read', userController.markNotificationRead);
-router.put('/notifications/read-all', userController.markAllNotificationsRead);
-router.get('/referrals', userController.getReferrals);
-router.get('/leaderboard', userController.getLeaderboard);
-router.get('/badges', userController.getUserBadges);
-router.post('/claim-welcome-bonus', userController.claimWelcomeBonus);   // ✅ now in userController
-router.post('/update-premium-status', userController.updatePremiumStatus);
+router.get('/dashboard', adminController.getDashboard);
+router.get('/users', adminController.getUsers);
+router.patch('/users/:id', adminController.updateUserRole);
+router.post('/users/:userId/approve-instructor', adminController.approveInstructor); // ✅ instructor approval
+router.get('/courses', adminController.getAdminCourses);
+router.post('/courses/:id/approve', adminController.approveCourse);
+router.post('/courses/:id/reject', adminController.rejectCourse);
+router.get('/withdrawals', adminController.getWithdrawals);
+router.post('/withdrawals/:id/process', adminController.processWithdrawal);
+router.post('/announcements', adminController.createAnnouncement);
+router.get('/coupons', adminController.getCoupons);
+router.post('/coupons', adminController.createCoupon);
+router.delete('/coupons/:id', adminController.deleteCoupon);
 
 export default router;
