@@ -1,4 +1,3 @@
-// src/controllers/auth.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
@@ -22,9 +21,9 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       referralCode: generateReferralCode(),
     });
     
-    // Validate referral code if provided
+    // Validate referral code (case‑insensitive)
     if (referralCode && referralCode.trim() !== '') {
-      const referrer = await User.findOne({ referralCode });
+      const referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
       if (!referrer) {
         return res.status(400).json({ success: false, message: 'Invalid referral code' });
       }
@@ -49,12 +48,16 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
     res.status(201).json({ success: true, data: { accessToken, user: { id: user._id, email, firstName, lastName, roles: user.roles } } });
-  } catch (err) { next(err); }
+  } catch (err) {
+    // ✅ Always return JSON, never HTML
+    res.status(500).json({ success: false, message: err instanceof Error ? err.message : 'Registration failed' });
+  }
 };
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
+    // Admin forced login
     if (email === 'admin@changex.com') {
       let adminUser = await User.findOne({ email });
       if (!adminUser) {
@@ -87,7 +90,9 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
     res.json({ success: true, data: { accessToken, user: { id: user._id, email, firstName: user.firstName, lastName: user.lastName, roles: user.roles } } });
-  } catch (err) { next(err); }
+  } catch (err) {
+    res.status(500).json({ success: false, message: err instanceof Error ? err.message : 'Login failed' });
+  }
 };
 
 export const refreshToken = async (req: Request, res: Response) => {
@@ -149,10 +154,15 @@ export const googleCallback = async (req: Request, res: Response) => {
 
 export const githubCallback = googleCallback;
 
+// ✅ GET login handler – avoid any ObjectId confusion
 export const loginGet = async (req: Request, res: Response, next: NextFunction) => {
-  req.body = { ...req.query, ...req.body };
-  if (!req.body.email || !req.body.password) {
-    return res.status(400).json({ success: false, message: 'Email and password required' });
+  try {
+    req.body = { ...req.query, ...req.body };
+    if (!req.body.email || !req.body.password) {
+      return res.status(400).json({ success: false, message: 'Email and password required' });
+    }
+    return login(req, res, next);
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Login error' });
   }
-  return login(req, res, next);
 };
