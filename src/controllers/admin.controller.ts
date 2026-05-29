@@ -1,4 +1,3 @@
-// src/controllers/admin.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import User, { IUser } from '../models/User.js';
 import Course from '../models/Course.js';
@@ -53,9 +52,23 @@ export const approveCourse = async (req: Request, res: Response, next: NextFunct
       res.status(404).json({ success: false, message: 'Course not found' });
       return;
     }
-    await Notification.create({ userId: course.instructorId, title: 'Course Approved', message: `Your course "${course.title}" is now live.`, type: 'system' });
-    const io = getIO();
-    io.to(`user:${course.instructorId}`).emit('notification', { title: 'Course Approved' });
+    
+    // ✅ Send notification only if instructorId exists
+    if (course.instructorId) {
+      try {
+        await Notification.create({
+          userId: course.instructorId,
+          title: 'Course Approved',
+          message: `Your course "${course.title}" is now live.`,
+          type: 'system',
+        });
+        const io = getIO();
+        io.to(`user:${course.instructorId}`).emit('notification', { title: 'Course Approved', message: `Your course "${course.title}" is now live.` });
+      } catch (notifError) {
+        console.error('Failed to send approval notification:', notifError);
+      }
+    }
+    
     res.json({ success: true, data: course });
   } catch (err) { next(err); }
 };
@@ -68,7 +81,16 @@ export const rejectCourse = async (req: Request, res: Response, next: NextFuncti
       res.status(404).json({ success: false, message: 'Course not found' });
       return;
     }
-    await Notification.create({ userId: course.instructorId, title: 'Course Rejected', message: `Your course "${course.title}" was rejected. Reason: ${reason}`, type: 'system' });
+    
+    if (course.instructorId) {
+      await Notification.create({
+        userId: course.instructorId,
+        title: 'Course Rejected',
+        message: `Your course "${course.title}" was rejected. Reason: ${reason || 'Not specified'}`,
+        type: 'system',
+      });
+    }
+    
     res.json({ success: true, data: course });
   } catch (err) { next(err); }
 };
@@ -139,5 +161,24 @@ export const deleteCoupon = async (req: Request, res: Response, next: NextFuncti
   try {
     await AdminCoupon.findByIdAndDelete(req.params.id);
     res.json({ success: true });
+  } catch (err) { next(err); }
+};
+
+// ✅ NEW: Approve instructor (add this function)
+export const approveInstructor = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findByIdAndUpdate(userId, { isApprovedInstructor: true, roles: [...(await User.findById(userId))?.roles || [], 'instructor'] }, { new: true });
+    if (!user) {
+      res.status(404).json({ success: false, message: 'User not found' });
+      return;
+    }
+    await Notification.create({
+      userId: user._id,
+      title: 'Instructor Approval',
+      message: 'Congratulations! You have been approved as an instructor.',
+      type: 'system',
+    });
+    res.json({ success: true, data: user });
   } catch (err) { next(err); }
 };
