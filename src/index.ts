@@ -1,3 +1,4 @@
+// src/index.ts
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -50,7 +51,6 @@ app.use(express.urlencoded({ extended: true }));
 
 initializePassport(app);
 
-// Public referral code check
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
     const user = await User.findOne({ referralCode: req.params.code });
