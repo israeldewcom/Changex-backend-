@@ -33,7 +33,12 @@ const app = express();
 const server = http.createServer(app);
 
 app.use(helmet());
-app.use(cors({ origin: (origin, cb) => cb(null, true), credentials: true, methods: ['GET','POST','PUT','DELETE','OPTIONS'], allowedHeaders: ['Content-Type','Authorization','Cookie'] }));
+app.use(cors({
+  origin: (origin, cb) => cb(null, true),
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+}));
 app.options('*', cors());
 app.use(cookieParser());
 
@@ -45,12 +50,14 @@ app.use(express.urlencoded({ extended: true }));
 
 initializePassport(app);
 
-// Public referral check endpoint
+// Public referral code check
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
     const user = await User.findOne({ referralCode: req.params.code });
     res.json({ success: true, exists: !!user, message: user ? 'Valid' : 'Not found' });
-  } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
 });
 
 app.use('/api/v1/auth', authRoutes);
