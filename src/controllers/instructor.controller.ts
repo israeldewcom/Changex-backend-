@@ -1,3 +1,4 @@
+// src/controllers/instructor.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import Course from '../models/Course.js';
 import Lesson from '../models/Lesson.js';
