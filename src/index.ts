@@ -27,6 +27,7 @@ import { setupSocket } from './socket.js';
 import { startWorkers } from './workers/index.js';
 import logger from './utils/logger.js';
 import redis from './config/redis.js';
+import User from './models/User.js';   // ✅ ADD THIS LINE
 
 const app = express();
 const server = http.createServer(app);
@@ -77,7 +78,7 @@ app.get('/api/v1/check-referral/:code', async (req, res) => {
 // Health check
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
-// ✅ Global CastError handler for ObjectId failures
+// Global CastError handler for ObjectId failures
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (err instanceof mongoose.Error.CastError && err.path === '_id') {
     return res.status(400).json({ success: false, message: 'Invalid ID format' });
