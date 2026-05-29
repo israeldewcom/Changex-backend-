@@ -1,3 +1,4 @@
+// src/controllers/course.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import Course from '../models/Course.js';
 import Enrollment from '../models/Enrollment.js';
@@ -6,7 +7,6 @@ import Lesson from '../models/Lesson.js';
 import Rating from '../models/Rating.js';
 import Transaction from '../models/Transaction.js';
 import { IUser } from '../models/User.js';
-import { sanitizeHtml } from '../middlewares/sanitize.js';
 
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
