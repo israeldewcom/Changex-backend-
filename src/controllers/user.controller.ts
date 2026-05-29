@@ -1,4 +1,3 @@
-// src/controllers/user.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
@@ -78,18 +77,27 @@ export const requestWithdrawal = async (req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 };
 
+// ✅ NOTIFICATION FUNCTIONS (ensuring users can view all notifications)
 export const getNotifications = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const notifications = await Notification.find({ userId: user._id }).sort('-createdAt').limit(50);
+    const notifications = await Notification.find({ userId: user._id }).sort('-createdAt').limit(100);
     res.json({ success: true, data: notifications });
   } catch (err) { next(err); }
 };
 
 export const markNotificationRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    await Notification.findByIdAndUpdate(req.params.id, { read: true });
-    res.json({ success: true });
+    const notification = await Notification.findOneAndUpdate(
+      { _id: req.params.id, userId: (req.user as IUser)._id },
+      { read: true },
+      { new: true }
+    );
+    if (!notification) {
+      res.status(404).json({ success: false, message: 'Notification not found' });
+      return;
+    }
+    res.json({ success: true, data: notification });
   } catch (err) { next(err); }
 };
 
@@ -97,7 +105,7 @@ export const markAllNotificationsRead = async (req: Request, res: Response, next
   try {
     const user = req.user as IUser;
     await Notification.updateMany({ userId: user._id, read: false }, { read: true });
-    res.json({ success: true });
+    res.json({ success: true, message: 'All notifications marked as read' });
   } catch (err) { next(err); }
 };
 
@@ -128,12 +136,10 @@ export const getReferrals = async (req: Request, res: Response, next: NextFuncti
 
 export const getUserBadges = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Placeholder – implement badge logic later
     res.json({ success: true, data: [] });
   } catch (err) { next(err); }
 };
 
-// ✅ NEW: Update premium status (for subscription expiry)
 export const updatePremiumStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { isPremium } = req.body;
@@ -147,7 +153,6 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
   } catch (err) { next(err); }
 };
 
-// ✅ NEW: Claim welcome bonus (moved from bonus.controller.ts)
 export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
