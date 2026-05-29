@@ -1,10 +1,9 @@
-// File: src/models/Enrollment.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IEnrollment extends Document {
   userId: mongoose.Types.ObjectId;
   courseId: mongoose.Types.ObjectId;
-  progress: number; // 0-100
+  progress: number;
   status: 'active' | 'completed' | 'dropped';
   startedAt: Date;
   completedAt?: Date;
@@ -21,7 +20,7 @@ const EnrollmentSchema = new Schema<IEnrollment>(
   { timestamps: { createdAt: 'startedAt', updatedAt: false } }
 );
 
+// ✅ Ensure compound index with non‑null values (MongoDB will reject null)
 EnrollmentSchema.index({ userId: 1, courseId: 1 }, { unique: true });
-EnrollmentSchema.index({ status: 1 });
 
 export default mongoose.model<IEnrollment>('Enrollment', EnrollmentSchema);
