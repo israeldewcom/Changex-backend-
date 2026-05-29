@@ -54,27 +54,29 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         // ✅ AFFILIATE COMMISSION (if affiliate code provided in metadata)
         const affiliateCode = meta.affiliateCode;
         if (affiliateCode) {
-          // Populate courseId to access affiliatePercent
-          const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode }).populate<{ courseId: ICourse }>('courseId');
-          if (affiliateLink && affiliateLink.courseId) {
-            const course = affiliateLink.courseId as any; // course document
-            const price = course.salePrice || course.price || 0;
-            const percent = course.affiliatePercent || 15;
-            const commission = price * (percent / 100);
-            affiliateLink.conversions += 1;
-            affiliateLink.totalEarned += commission;
-            await affiliateLink.save();
-            const affiliate = await User.findById(affiliateLink.userId);
-            if (affiliate) {
-              affiliate.walletBalance = (affiliate.walletBalance || 0) + commission;
-              await affiliate.save();
-              await Transaction.create({
-                userId: affiliate._id,
-                type: 'affiliate_commission',
-                amount: commission,
-                status: 'completed',
-                description: `Commission for course: ${course.title}`,
-              });
+          const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
+          if (affiliateLink) {
+            // Fetch the course separately to get affiliatePercent
+            const courseForAffiliate = await Course.findById(affiliateLink.courseId);
+            if (courseForAffiliate) {
+              const price = courseForAffiliate.salePrice || courseForAffiliate.price || 0;
+              const percent = courseForAffiliate.affiliatePercent || 15;
+              const commission = price * (percent / 100);
+              affiliateLink.conversions += 1;
+              affiliateLink.totalEarned += commission;
+              await affiliateLink.save();
+              const affiliate = await User.findById(affiliateLink.userId);
+              if (affiliate) {
+                affiliate.walletBalance = (affiliate.walletBalance || 0) + commission;
+                await affiliate.save();
+                await Transaction.create({
+                  userId: affiliate._id,
+                  type: 'affiliate_commission',
+                  amount: commission,
+                  status: 'completed',
+                  description: `Commission for course: ${courseForAffiliate.title}`,
+                });
+              }
             }
           }
         }
