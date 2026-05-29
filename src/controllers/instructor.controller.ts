@@ -24,10 +24,13 @@ export const getInstructorDashboard = async (req: Request, res: Response, next: 
 export const createCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
+    if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
     const courseData = { ...req.body, instructorId: user._id, description: sanitizeHtml(req.body.description || '') };
     const course = await Course.create(courseData);
     res.status(201).json({ success: true, data: course });
-  } catch (err) { next(err); }
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
 };
 
 export const updateCourse = async (req: Request, res: Response, next: NextFunction) => {
@@ -40,7 +43,9 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
     );
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     res.json({ success: true, data: course });
-  } catch (err) { next(err); }
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
 };
 
 export const submitForReview = async (req: Request, res: Response, next: NextFunction) => {
@@ -96,7 +101,7 @@ export const uploadMedia = async (req: Request, res: Response, next: NextFunctio
     const user = req.user as IUser;
     const { courseId } = req.params;
     const course = await Course.findOne({ _id: courseId, instructorId: user._id });
-    if (!course) return res.status(404).json({ success: false, message: 'Course not found or not yours' });
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const result = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
