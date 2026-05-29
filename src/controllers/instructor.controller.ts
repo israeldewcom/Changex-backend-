@@ -1,4 +1,3 @@
-// src/controllers/instructor.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import Course from '../models/Course.js';
 import Lesson from '../models/Lesson.js';
@@ -50,16 +49,24 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
 export const submitForReview = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const course = await Course.findOneAndUpdate(
-      { _id: req.params.id, instructorId: user._id },
-      { approvalStatus: 'pending' },
-      { new: true }
-    );
+    const courseId = req.params.id;
+    const course = await Course.findOne({ _id: courseId, instructorId: user._id });
     if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found' });
+      res.status(404).json({ success: false, message: 'Course not found or not yours' });
       return;
     }
-    res.json({ success: true, message: 'Submitted for review' });
+    const lessonCount = await Lesson.countDocuments({ courseId: course._id });
+    if (lessonCount < 20) {
+      res.status(400).json({ success: false, message: 'Course must have at least 20 lessons before submission' });
+      return;
+    }
+    if (!course.title || !course.description) {
+      res.status(400).json({ success: false, message: 'Course title and description are required' });
+      return;
+    }
+    course.approvalStatus = 'pending';
+    await course.save();
+    res.json({ success: true, message: 'Course submitted for review successfully' });
   } catch (err) { next(err); }
 };
 
