@@ -1,3 +1,4 @@
+// src/controllers/admin.controller.ts
 import { Request, Response } from 'express';
 import User from '../models/User.js';
 import Course from '../models/Course.js';
