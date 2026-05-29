@@ -1,4 +1,3 @@
-// src/controllers/admin.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import User from '../models/User.js';
 import Course from '../models/Course.js';
@@ -8,7 +7,7 @@ import AdminCoupon from '../models/AdminCoupon.js';
 import Announcement from '../models/Announcement.js';
 import { getIO } from '../socket.js';
 
-export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
+export const getDashboard = async (req: Request, res: Response) => {
   try {
     const totalUsers = await User.countDocuments();
     const totalCourses = await Course.countDocuments({ approvalStatus: 'approved' });
@@ -25,14 +24,14 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-export const getUsers = async (req: Request, res: Response, next: NextFunction) => {
+export const getUsers = async (req: Request, res: Response) => {
   try {
     const users = await User.find({}).select('-passwordHash').limit(100);
     res.json({ success: true, data: users });
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-export const updateUserRole = async (req: Request, res: Response, next: NextFunction) => {
+export const updateUserRole = async (req: Request, res: Response) => {
   try {
     const { roles, isApprovedInstructor, isBanned } = req.body;
     const user = await User.findByIdAndUpdate(req.params.id, { roles, isApprovedInstructor, isBanned }, { new: true });
@@ -41,14 +40,14 @@ export const updateUserRole = async (req: Request, res: Response, next: NextFunc
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-export const getAdminCourses = async (req: Request, res: Response, next: NextFunction) => {
+export const getAdminCourses = async (req: Request, res: Response) => {
   try {
     const courses = await Course.find({}).populate('instructorId', 'firstName lastName email').limit(100);
     res.json({ success: true, data: courses });
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-export const approveCourse = async (req: Request, res: Response, next: NextFunction) => {
+export const approveCourse = async (req: Request, res: Response) => {
   try {
     const course = await Course.findByIdAndUpdate(req.params.id, { approvalStatus: 'approved', isPublished: true }, { new: true });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
@@ -60,7 +59,7 @@ export const approveCourse = async (req: Request, res: Response, next: NextFunct
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-export const rejectCourse = async (req: Request, res: Response, next: NextFunction) => {
+export const rejectCourse = async (req: Request, res: Response) => {
   try {
     const { reason } = req.body;
     const course = await Course.findByIdAndUpdate(req.params.id, { approvalStatus: 'rejected', rejectionReason: reason }, { new: true });
@@ -72,14 +71,14 @@ export const rejectCourse = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-export const getWithdrawals = async (req: Request, res: Response, next: NextFunction) => {
+export const getWithdrawals = async (req: Request, res: Response) => {
   try {
     const withdrawals = await Transaction.find({ type: 'withdrawal', status: 'pending' }).populate('userId', 'firstName lastName email');
     res.json({ success: true, data: withdrawals });
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-export const processWithdrawal = async (req: Request, res: Response, next: NextFunction) => {
+export const processWithdrawal = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { action } = req.body;
@@ -104,7 +103,7 @@ export const processWithdrawal = async (req: Request, res: Response, next: NextF
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-export const createAnnouncement = async (req: Request, res: Response, next: NextFunction) => {
+export const createAnnouncement = async (req: Request, res: Response) => {
   try {
     const { title, message } = req.body;
     const announcement = await Announcement.create({ title, message });
@@ -115,17 +114,19 @@ export const createAnnouncement = async (req: Request, res: Response, next: Next
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-export const getCoupons = async (req: Request, res: Response, next: NextFunction) => {
+export const getCoupons = async (req: Request, res: Response) => {
   try { res.json({ success: true, data: await AdminCoupon.find({}) }); } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
-export const createCoupon = async (req: Request, res: Response, next: NextFunction) => {
+
+export const createCoupon = async (req: Request, res: Response) => {
   try { res.status(201).json({ success: true, data: await AdminCoupon.create(req.body) }); } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
-export const deleteCoupon = async (req: Request, res: Response, next: NextFunction) => {
+
+export const deleteCoupon = async (req: Request, res: Response) => {
   try { await AdminCoupon.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-export const approveInstructor = async (req: Request, res: Response, next: NextFunction) => {
+export const approveInstructor = async (req: Request, res: Response) => {
   try {
     const user = await User.findByIdAndUpdate(req.params.userId, { isApprovedInstructor: true, $addToSet: { roles: 'instructor' } }, { new: true });
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
