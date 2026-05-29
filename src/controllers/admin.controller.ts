@@ -1,4 +1,3 @@
-// src/controllers/admin.controller.ts
 import { Request, Response } from 'express';
 import User from '../models/User.js';
 import Course from '../models/Course.js';
@@ -13,11 +12,16 @@ export const getDashboard = async (req: Request, res: Response) => {
     const totalUsers = await User.countDocuments();
     const totalCourses = await Course.countDocuments({ approvalStatus: 'approved' });
     const pendingCourses = await Course.countDocuments({ approvalStatus: 'pending' });
-    const revenueAgg = await Transaction.aggregate([
-      { $match: { type: { $ne: 'withdrawal' }, status: 'completed' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const totalRevenue = revenueAgg[0]?.total || 0;
+    let totalRevenue = 0;
+    try {
+      const revenueAgg = await Transaction.aggregate([
+        { $match: { type: { $ne: 'withdrawal' }, status: 'completed' } },
+        { $group: { _id: null, total: { $sum: '$amount' } } }
+      ]);
+      totalRevenue = revenueAgg[0]?.total || 0;
+    } catch (aggErr) {
+      console.error('Aggregation error:', aggErr);
+    }
     const pendingWithdrawals = await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' });
     res.json({ success: true, data: { totalUsers, totalCourses, pendingCourses, totalRevenue, pendingWithdrawals } });
   } catch (err) {
