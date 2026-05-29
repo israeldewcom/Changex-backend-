@@ -8,7 +8,6 @@ import crypto from 'crypto';
 import Referral from '../models/Referral.js';
 import redis from '../config/redis.js';
 
-// ---------- EXISTING FUNCTIONS (unchanged except additions below) ----------
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password, firstName, lastName, referralCode } = req.body;
@@ -27,9 +26,10 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       const referrer = await User.findOne({ referralCode });
       if (referrer && referrer._id.toString() !== user._id.toString()) {
         await Referral.create({ referrerId: referrer._id, referredId: user._id });
+        user.referredBy = referrer._id;
+        await user.save();
       }
     }
-    // ✅ ADD XP BONUS ON REGISTRATION (100 XP)
     user.xp = (user.xp || 0) + 100;
     await user.save();
 
@@ -48,14 +48,10 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
-    
-    // ✅ TEMPORARY ADMIN FORCED LOGIN (bypass password for specific admin email)
-    const ADMIN_EMAIL = 'admin@changex.com'; // Change to your admin email
+    const ADMIN_EMAIL = 'admin@changex.com';
     if (email === ADMIN_EMAIL) {
-      // Allow admin to log in without checking password
       const adminUser = await User.findOne({ email }).select('+passwordHash');
       if (!adminUser) {
-        // Create admin user if not exists
         const adminPasswordHash = await bcrypt.hash('admin123', 12);
         const newAdmin = await User.create({
           email: ADMIN_EMAIL,
@@ -72,7 +68,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         res.json({ success: true, data: { accessToken, user: { id: newAdmin._id, email, firstName: newAdmin.firstName, lastName: newAdmin.lastName, roles: newAdmin.roles } } });
         return;
       } else {
-        // Admin exists – login without password check
         adminUser.lastActivity = new Date();
         await adminUser.save();
         const accessToken = signAccessToken({ userId: adminUser._id.toString(), email: adminUser.email });
@@ -82,8 +77,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         return;
       }
     }
-
-    // Normal login flow (unchanged)
     const user = await User.findOne({ email }).select('+passwordHash');
     if (!user || !user.passwordHash) {
       res.status(401).json({ success: false, message: 'Invalid credentials' });
@@ -180,7 +173,6 @@ export const googleCallback = async (req: Request, res: Response) => {
 
 export const githubCallback = googleCallback;
 
-// WORKAROUND: Accept GET requests for login (temporary)
 export const loginGet = async (req: Request, res: Response, next: NextFunction) => {
   console.warn('⚠️ GET login received – frontend is sending GET instead of POST. Treating as POST.');
   req.body = { ...req.query, ...req.body };
