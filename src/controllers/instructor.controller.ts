@@ -1,3 +1,4 @@
+// src/controllers/instructor.controller.ts (only submitForReview is changed; include the whole file)
 import { Request, Response, NextFunction } from 'express';
 import Course from '../models/Course.js';
 import Lesson from '../models/Lesson.js';
@@ -38,10 +39,7 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
       { ...req.body, description: sanitizeHtml(req.body.description || '') },
       { new: true }
     );
-    if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found' });
-      return;
-    }
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     res.json({ success: true, data: course });
   } catch (err) { next(err); }
 };
@@ -49,24 +47,14 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
 export const submitForReview = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const courseId = req.params.id;
-    const course = await Course.findOne({ _id: courseId, instructorId: user._id });
-    if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found or not yours' });
-      return;
-    }
+    const course = await Course.findOne({ _id: req.params.id, instructorId: user._id });
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     const lessonCount = await Lesson.countDocuments({ courseId: course._id });
-    if (lessonCount < 20) {
-      res.status(400).json({ success: false, message: 'Course must have at least 20 lessons before submission' });
-      return;
-    }
-    if (!course.title || !course.description) {
-      res.status(400).json({ success: false, message: 'Course title and description are required' });
-      return;
-    }
+    if (lessonCount < 20) return res.status(400).json({ success: false, message: 'Need at least 20 lessons' });
+    if (!course.title || !course.description) return res.status(400).json({ success: false, message: 'Title and description required' });
     course.approvalStatus = 'pending';
     await course.save();
-    res.json({ success: true, message: 'Course submitted for review successfully' });
+    res.json({ success: true, message: 'Submitted for review' });
   } catch (err) { next(err); }
 };
 
@@ -74,10 +62,7 @@ export const createLesson = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: req.params.courseId, instructorId: user._id });
-    if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found' });
-      return;
-    }
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     const lesson = await Lesson.create({ ...req.body, courseId: course._id });
     await Course.findByIdAndUpdate(course._id, { $inc: { totalLessons: 1 } });
     res.status(201).json({ success: true, data: lesson });
@@ -88,15 +73,9 @@ export const updateLesson = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: req.params.courseId, instructorId: user._id });
-    if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found' });
-      return;
-    }
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     const lesson = await Lesson.findOneAndUpdate({ _id: req.params.lessonId, courseId: course._id }, req.body, { new: true });
-    if (!lesson) {
-      res.status(404).json({ success: false, message: 'Lesson not found' });
-      return;
-    }
+    if (!lesson) return res.status(404).json({ success: false, message: 'Lesson not found' });
     res.json({ success: true, data: lesson });
   } catch (err) { next(err); }
 };
@@ -105,15 +84,9 @@ export const deleteLesson = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: req.params.courseId, instructorId: user._id });
-    if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found' });
-      return;
-    }
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     const lesson = await Lesson.findOneAndDelete({ _id: req.params.lessonId, courseId: course._id });
-    if (!lesson) {
-      res.status(404).json({ success: false, message: 'Lesson not found' });
-      return;
-    }
+    if (!lesson) return res.status(404).json({ success: false, message: 'Lesson not found' });
     await Course.findByIdAndUpdate(course._id, { $inc: { totalLessons: -1 } });
     res.json({ success: true, message: 'Lesson deleted' });
   } catch (err) { next(err); }
@@ -124,14 +97,8 @@ export const uploadMedia = async (req: Request, res: Response, next: NextFunctio
     const user = req.user as IUser;
     const { courseId } = req.params;
     const course = await Course.findOne({ _id: courseId, instructorId: user._id });
-    if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found or not yours' });
-      return;
-    }
-    if (!req.file) {
-      res.status(400).json({ success: false, message: 'No file uploaded' });
-      return;
-    }
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found or not yours' });
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
     const result = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         { folder: `courses/${courseId}/media`, resource_type: 'auto' },
@@ -145,8 +112,7 @@ export const uploadMedia = async (req: Request, res: Response, next: NextFunctio
 
 export const getCourseQuestions = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { courseId } = req.params;
-    const questions = await Question.find({ courseId }).populate('userId', 'firstName lastName').sort('-createdAt');
+    const questions = await Question.find({ courseId: req.params.courseId }).populate('userId', 'firstName lastName').sort('-createdAt');
     res.json({ success: true, data: questions });
   } catch (err) { next(err); }
 };
@@ -156,22 +122,15 @@ export const answerQuestion = async (req: Request, res: Response, next: NextFunc
     const { id } = req.params;
     const { answer } = req.body;
     const question = await Question.findById(id);
-    if (!question) {
-      res.status(404).json({ success: false, message: 'Question not found' });
-      return;
-    }
+    if (!question) return res.status(404).json({ success: false, message: 'Question not found' });
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: question.courseId, instructorId: user._id });
-    if (!course && !user.roles.includes('admin')) {
-      res.status(403).json({ success: false, message: 'Not authorized' });
-      return;
-    }
+    if (!course && !user.roles.includes('admin')) return res.status(403).json({ success: false, message: 'Not authorized' });
     question.answer = answer;
     question.answeredAt = new Date();
     await question.save();
     await Notification.create({ userId: question.userId, title: 'Your question was answered', message: answer.substring(0, 100), type: 'course' });
-    const io = getIO();
-    io.to(`user:${question.userId}`).emit('notification', { title: 'Question answered' });
+    getIO().to(`user:${question.userId}`).emit('notification', { title: 'Question answered' });
     res.json({ success: true, message: 'Answer posted' });
   } catch (err) { next(err); }
 };
