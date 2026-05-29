@@ -1,3 +1,4 @@
+// src/controllers/user.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
@@ -127,6 +128,7 @@ export const getReferrals = async (req: Request, res: Response, next: NextFuncti
 
 export const getUserBadges = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Placeholder – implement badge logic later
     res.json({ success: true, data: [] });
   } catch (err) { next(err); }
 };
