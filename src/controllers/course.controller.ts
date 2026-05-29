@@ -1,4 +1,3 @@
-// src/controllers/course.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import Course from '../models/Course.js';
 import Enrollment from '../models/Enrollment.js';
@@ -7,6 +6,7 @@ import Lesson from '../models/Lesson.js';
 import Rating from '../models/Rating.js';
 import Transaction from '../models/Transaction.js';
 import { IUser } from '../models/User.js';
+import { sanitizeHtml } from '../middlewares/sanitize.js';
 
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -37,11 +37,18 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if (!user || !user._id) return res.status(401).json({ success: false, message: 'Authentication required' });
+    // ✅ FIX: authentication guard
+    if (!user || !user._id) {
+      return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
+    }
     const course = await Course.findById(req.params.id);
-    if (!course || !course.isPublished) return res.status(404).json({ success: false, message: 'Course not available' });
+    if (!course || !course.isPublished) {
+      return res.status(404).json({ success: false, message: 'Course not available' });
+    }
     const existing = await Enrollment.findOne({ userId: user._id, courseId: course._id });
-    if (existing) return res.status(400).json({ success: false, message: 'Already enrolled' });
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Already enrolled' });
+    }
     if (course.price > 0) {
       return res.json({ success: true, requirePayment: true, price: course.salePrice || course.price });
     }
@@ -112,5 +119,14 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
     course.avgRating = avg;
     await course.save();
     res.json({ success: true });
+  } catch (err) { next(err); }
+};
+
+// ✅ NEW: Get user's enrollments
+export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const enrollments = await Enrollment.find({ userId: user._id }).populate('courseId');
+    res.json({ success: true, data: enrollments });
   } catch (err) { next(err); }
 };
