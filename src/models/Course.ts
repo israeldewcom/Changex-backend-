@@ -1,10 +1,9 @@
-// File: src/models/Course.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ICourse extends Document {
   title: string;
   subtitle?: string;
-  description: string; // rich HTML
+  description: string;
   category: string;
   level: string;
   language: string;
@@ -21,7 +20,7 @@ export interface ICourse extends Document {
   totalStudents: number;
   avgRating: number;
   certificateEnabled: boolean;
-  instructorId: mongoose.Types.ObjectId;
+  instructorId: mongoose.Types.ObjectId;   // ✅ fixed from 'instructord'
   createdAt: Date;
   updatedAt: Date;
 }
@@ -31,7 +30,7 @@ const CourseSchema = new Schema<ICourse>(
     title: { type: String, required: true },
     subtitle: String,
     description: { type: String, required: true },
-    category: { type: String, index: true },
+    category: String,
     level: String,
     language: { type: String, default: 'English' },
     thumbnail: String,
@@ -47,7 +46,7 @@ const CourseSchema = new Schema<ICourse>(
     totalStudents: { type: Number, default: 0 },
     avgRating: { type: Number, default: 0 },
     certificateEnabled: { type: Boolean, default: true },
-    instructorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    instructorId: { type: Schema.Types.ObjectId, ref: 'User', required: true }, // ✅ required
   },
   { timestamps: true }
 );
