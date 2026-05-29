@@ -12,10 +12,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   try {
     const { email, password, firstName, lastName, referralCode } = req.body;
     const existing = await User.findOne({ email });
-    if (existing) {
-      res.status(409).json({ success: false, message: 'Email already registered' });
-      return;
-    }
+    if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await User.create({
       email, passwordHash, firstName, lastName,
@@ -26,18 +23,15 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       const referrer = await User.findOne({ referralCode });
       if (referrer && referrer._id.toString() !== user._id.toString()) {
         await Referral.create({ referrerId: referrer._id, referredId: user._id });
-        user.referredBy = referrer._id.toString(); // ✅ fix: convert ObjectId to string
+        user.referredBy = referrer._id.toString();
         await user.save();
       }
     }
-    user.xp = (user.xp || 0) + 100;
+    user.xp += 100;
     await user.save();
-
     try {
       await sendEmail(email, 'Welcome to ChangeX Academy', '<h1>Welcome!</h1><p>Start learning and earning.</p>');
-    } catch (emailError) {
-      console.error('Failed to send welcome email:', emailError);
-    }
+    } catch (e) { console.error('Email error:', e); }
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
@@ -48,45 +42,29 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
-    const ADMIN_EMAIL = 'admin@changex.com';
-    if (email === ADMIN_EMAIL) {
-      const adminUser = await User.findOne({ email }).select('+passwordHash');
+    // Admin forced login bypass
+    if (email === 'admin@changex.com') {
+      let adminUser = await User.findOne({ email });
       if (!adminUser) {
-        const adminPasswordHash = await bcrypt.hash('admin123', 12);
-        const newAdmin = await User.create({
-          email: ADMIN_EMAIL,
-          passwordHash: adminPasswordHash,
+        adminUser = await User.create({
+          email: 'admin@changex.com',
+          passwordHash: await bcrypt.hash('admin123', 12),
           firstName: 'Admin',
           lastName: 'User',
           roles: ['admin'],
           referralCode: generateReferralCode(),
           isApprovedInstructor: true,
         });
-        const accessToken = signAccessToken({ userId: newAdmin._id.toString(), email: newAdmin.email });
-        const refreshToken = signRefreshToken({ userId: newAdmin._id.toString(), email: newAdmin.email });
-        res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
-        res.json({ success: true, data: { accessToken, user: { id: newAdmin._id, email, firstName: newAdmin.firstName, lastName: newAdmin.lastName, roles: newAdmin.roles } } });
-        return;
-      } else {
-        adminUser.lastActivity = new Date();
-        await adminUser.save();
-        const accessToken = signAccessToken({ userId: adminUser._id.toString(), email: adminUser.email });
-        const refreshToken = signRefreshToken({ userId: adminUser._id.toString(), email: adminUser.email });
-        res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
-        res.json({ success: true, data: { accessToken, user: { id: adminUser._id, email, firstName: adminUser.firstName, lastName: adminUser.lastName, roles: adminUser.roles } } });
-        return;
       }
+      const accessToken = signAccessToken({ userId: adminUser._id.toString(), email: adminUser.email });
+      const refreshToken = signRefreshToken({ userId: adminUser._id.toString(), email: adminUser.email });
+      res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
+      return res.json({ success: true, data: { accessToken, user: { id: adminUser._id, email: adminUser.email, firstName: adminUser.firstName, lastName: adminUser.lastName, roles: adminUser.roles } } });
     }
     const user = await User.findOne({ email }).select('+passwordHash');
-    if (!user || !user.passwordHash) {
-      res.status(401).json({ success: false, message: 'Invalid credentials' });
-      return;
-    }
+    if (!user || !user.passwordHash) return res.status(401).json({ success: false, message: 'Invalid credentials' });
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) {
-      res.status(401).json({ success: false, message: 'Invalid credentials' });
-      return;
-    }
+    if (!valid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
     user.lastActivity = new Date();
     await user.save();
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
@@ -99,23 +77,15 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 export const refreshToken = async (req: Request, res: Response) => {
   try {
     const token = req.cookies.refreshToken;
-    if (!token) {
-      res.status(401).json({ success: false, message: 'Refresh token missing' });
-      return;
-    }
+    if (!token) return res.status(401).json({ success: false, message: 'Refresh token missing' });
     const decoded = verifyRefreshToken(token);
     const user = await User.findById(decoded.userId);
-    if (!user) {
-      res.status(401).json({ success: false, message: 'User not found' });
-      return;
-    }
+    if (!user) return res.status(401).json({ success: false, message: 'User not found' });
     const newAccess = signAccessToken({ userId: user._id.toString(), email: user.email });
     const newRefresh = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', newRefresh, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
     res.json({ success: true, data: { accessToken: newAccess } });
-  } catch (err) {
-    res.status(401).json({ success: false, message: 'Invalid refresh token' });
-  }
+  } catch (err) { res.status(401).json({ success: false, message: 'Invalid refresh token' }); }
 };
 
 export const logout = async (req: Request, res: Response) => {
@@ -127,10 +97,7 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
   try {
     const { email } = req.body;
     const user = await User.findOne({ email });
-    if (!user) {
-      res.json({ success: true, message: 'If the email exists, a reset link has been sent.' });
-      return;
-    }
+    if (!user) return res.json({ success: true, message: 'If the email exists, a reset link has been sent.' });
     const resetToken = crypto.randomBytes(32).toString('hex');
     await redis.setex(`reset:${resetToken}`, 3600, user._id.toString());
     const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
@@ -143,15 +110,9 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
   try {
     const { token, newPassword } = req.body;
     const userId = await redis.get(`reset:${token}`);
-    if (!userId) {
-      res.status(400).json({ success: false, message: 'Invalid or expired token' });
-      return;
-    }
+    if (!userId) return res.status(400).json({ success: false, message: 'Invalid or expired token' });
     const user = await User.findById(userId);
-    if (!user) {
-      res.status(404).json({ success: false, message: 'User not found' });
-      return;
-    }
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     user.passwordHash = await bcrypt.hash(newPassword, 12);
     await user.save();
     await redis.del(`reset:${token}`);
@@ -161,10 +122,7 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
 
 export const googleCallback = async (req: Request, res: Response) => {
   const user = req.user as any;
-  if (!user) {
-    res.redirect(`${process.env.CLIENT_URL}/login`);
-    return;
-  }
+  if (!user) return res.redirect(`${process.env.CLIENT_URL}/login`);
   const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
   const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
   res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
@@ -174,11 +132,8 @@ export const googleCallback = async (req: Request, res: Response) => {
 export const githubCallback = googleCallback;
 
 export const loginGet = async (req: Request, res: Response, next: NextFunction) => {
-  console.warn('⚠️ GET login received – frontend is sending GET instead of POST. Treating as POST.');
+  console.warn('⚠️ GET login received – treating as POST');
   req.body = { ...req.query, ...req.body };
-  if (!req.body.email || !req.body.password) {
-    res.status(400).json({ success: false, message: 'Email and password required (as query params or body)' });
-    return;
-  }
+  if (!req.body.email || !req.body.password) return res.status(400).json({ success: false, message: 'Email and password required' });
   return login(req, res, next);
 };
