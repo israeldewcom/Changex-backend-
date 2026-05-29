@@ -1,3 +1,4 @@
+// src/controllers/user.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
