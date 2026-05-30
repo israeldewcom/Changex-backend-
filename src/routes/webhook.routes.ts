@@ -22,7 +22,15 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
     const event = req.body;
     if (event.event === 'charge.success') {
       const meta = event.data.metadata;
+      const reference = event.data.reference;
+      const amount = event.data.amount / 100;
+
+      // Normalize referral code if present
+      let referralCode = meta.referralCode ? meta.referralCode.trim().toUpperCase() : null;
+      let affiliateCode = meta.affiliateCode ? meta.affiliateCode.trim() : null;
+
       if (meta.type === 'course_purchase') {
+        // Create enrollment (if not exists)
         await Enrollment.findOneAndUpdate(
           { userId: meta.userId, courseId: meta.courseId },
           {},
@@ -30,7 +38,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         );
         const course = await Course.findByIdAndUpdate(meta.courseId, { $inc: { totalStudents: 1 } }, { new: true });
 
-        // Instructor earnings (80%)
+        // Instructor commission (80%)
         if (course && course.instructorId) {
           const price = course.salePrice || course.price || 0;
           const instructorShare = price * 0.8;
@@ -48,8 +56,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
-        // Affiliate commission (from affiliate link cookie)
-        const affiliateCode = meta.affiliateCode;
+        // Affiliate commission (if affiliateCode present)
         if (affiliateCode) {
           const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
           if (affiliateLink) {
@@ -77,13 +84,12 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
-        // Referral commission (from manually entered referral code in discount field)
-        const referralCode = meta.referralCode;
+        // Referral commission (10% of course price) – only if no affiliateCode (to avoid double payout)
         if (referralCode && !affiliateCode) {
-          const referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+          const referrer = await User.findOne({ referralCode });
           if (referrer && referrer._id.toString() !== meta.userId) {
             const price = course?.salePrice || course?.price || 0;
-            const referrerShare = price * 0.1; // 10% referral commission
+            const referrerShare = price * 0.1;
             referrer.walletBalance += referrerShare;
             await referrer.save();
             await Transaction.create({
@@ -95,14 +101,15 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
             });
           }
         }
-      } else if (meta.type === 'subscription') {
+      } 
+      else if (meta.type === 'subscription') {
         const user = await User.findById(meta.userId);
         if (user) {
           user.isPremium = true;
           user.subscriptionExpires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
           await user.save();
 
-          // Referral bonus (₦500) for the referrer
+          // Mark referral as converted and give ₦500 bonus to referrer
           const referral = await Referral.findOne({ referredId: user._id, status: 'pending' });
           if (referral) {
             referral.status = 'converted';
@@ -124,13 +131,13 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         }
       }
 
-      // Record the main transaction
+      // Create transaction record
       await Transaction.create({
         userId: meta.userId,
         type: meta.type,
-        amount: event.data.amount / 100,
+        amount: amount,
         status: 'completed',
-        reference: event.data.reference,
+        reference: reference,
       });
     }
     res.sendStatus(200);
