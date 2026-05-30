@@ -12,18 +12,16 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   try {
     const { email, password, firstName, lastName, referralCode } = req.body;
     const existing = await User.findOne({ email });
-    if (existing) {
-      return res.status(409).json({ success: false, message: 'Email already registered' });
-    }
+    if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await User.create({
       email, passwordHash, firstName, lastName,
       referralCode: generateReferralCode(),
       referredBy: referralCode || undefined,
     });
-    // ✅ Referral code handling – case‑insensitive
+    // FIX: trim and uppercase referral code
     if (referralCode && referralCode.trim() !== '') {
-      const upperCode = referralCode.toUpperCase();
+      const upperCode = referralCode.trim().toUpperCase();
       const referrer = await User.findOne({ referralCode: upperCode });
       if (!referrer) {
         return res.status(400).json({ success: false, message: 'Invalid referral code' });
@@ -67,7 +65,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       const accessToken = signAccessToken({ userId: adminUser._id.toString(), email: adminUser.email });
       const refreshToken = signRefreshToken({ userId: adminUser._id.toString(), email: adminUser.email });
       res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
-      return res.json({ success: true, data: { accessToken, user: { id: adminUser._id, email: adminUser.email, firstName: adminUser.firstName, lastName: adminUser.lastName, roles: adminUser.roles } } });
+      return res.json({ success: true, data: { accessToken, user: { id: adminUser._id, email, firstName: adminUser.firstName, lastName: adminUser.lastName, roles: adminUser.roles } } });
     }
     const user = await User.findOne({ email }).select('+passwordHash');
     if (!user || !user.passwordHash) return res.status(401).json({ success: false, message: 'Invalid credentials' });
