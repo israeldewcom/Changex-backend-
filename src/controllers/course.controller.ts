@@ -34,9 +34,18 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
   } catch (err) { next(err); }
 };
 
+export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const enrollments = await Enrollment.find({ userId: user._id }).populate('courseId');
+    res.json({ success: true, data: enrollments });
+  } catch (err) { next(err); }
+};
+
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
+    // FIX: strong guard
     if (!user || !user._id) {
       return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
     }
@@ -51,14 +60,6 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     course.totalStudents += 1;
     await course.save();
     res.json({ success: true, message: 'Enrolled successfully' });
-  } catch (err) { next(err); }
-};
-
-export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const user = req.user as IUser;
-    const enrollments = await Enrollment.find({ userId: user._id }).populate('courseId');
-    res.json({ success: true, data: enrollments });
   } catch (err) { next(err); }
 };
 
