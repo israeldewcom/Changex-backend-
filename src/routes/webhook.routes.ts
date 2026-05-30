@@ -25,12 +25,10 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
       const reference = event.data.reference;
       const amount = event.data.amount / 100;
 
-      // Normalize referral code if present
       let referralCode = meta.referralCode ? meta.referralCode.trim().toUpperCase() : null;
       let affiliateCode = meta.affiliateCode ? meta.affiliateCode.trim() : null;
 
       if (meta.type === 'course_purchase') {
-        // Create enrollment (if not exists)
         await Enrollment.findOneAndUpdate(
           { userId: meta.userId, courseId: meta.courseId },
           {},
@@ -56,7 +54,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
-        // Affiliate commission (if affiliateCode present)
+        // Affiliate commission
         if (affiliateCode) {
           const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
           if (affiliateLink) {
@@ -84,7 +82,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
-        // Referral commission (10% of course price) – only if no affiliateCode (to avoid double payout)
+        // Referral commission (10%) – only if no affiliate code
         if (referralCode && !affiliateCode) {
           const referrer = await User.findOne({ referralCode });
           if (referrer && referrer._id.toString() !== meta.userId) {
@@ -109,7 +107,6 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           user.subscriptionExpires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
           await user.save();
 
-          // Mark referral as converted and give ₦500 bonus to referrer
           const referral = await Referral.findOne({ referredId: user._id, status: 'pending' });
           if (referral) {
             referral.status = 'converted';
@@ -131,7 +128,6 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         }
       }
 
-      // Create transaction record
       await Transaction.create({
         userId: meta.userId,
         type: meta.type,
