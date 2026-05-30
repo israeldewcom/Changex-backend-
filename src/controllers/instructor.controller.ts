@@ -29,7 +29,6 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
     const course = await Course.create(courseData);
     res.status(201).json({ success: true, data: course });
   } catch (err: any) {
-    // ✅ Ensure JSON error response
     res.status(400).json({ success: false, message: err.message });
   }
 };
