@@ -36,7 +36,6 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         );
         const course = await Course.findByIdAndUpdate(meta.courseId, { $inc: { totalStudents: 1 } }, { new: true });
 
-        // Instructor commission (80%)
         if (course && course.instructorId) {
           const price = course.salePrice || course.price || 0;
           const instructorShare = price * 0.8;
@@ -54,7 +53,6 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
-        // Affiliate commission
         if (affiliateCode) {
           const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
           if (affiliateLink) {
@@ -82,7 +80,6 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
-        // Referral commission (10%) – only if no affiliate code
         if (referralCode && !affiliateCode) {
           const referrer = await User.findOne({ referralCode });
           if (referrer && referrer._id.toString() !== meta.userId) {
