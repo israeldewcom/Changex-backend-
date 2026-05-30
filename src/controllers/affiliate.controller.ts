@@ -1,4 +1,3 @@
-// src/controllers/affiliate.controller.ts
 import { Request, Response, NextFunction } from 'express';
 import AffiliateLink from '../models/AffiliateLink.js';
 import Course from '../models/Course.js';
@@ -10,16 +9,16 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
     const { courseId } = req.body;
     const user = req.user as IUser;
     const course = await Course.findById(courseId);
-    if (!course || !course.hasAffiliate) {
-      return res.status(400).json({ success: false, message: 'Affiliate not available' });
-    }
+    if (!course || !course.hasAffiliate) return res.status(400).json({ success: false, message: 'Affiliate not available' });
     let link = await AffiliateLink.findOne({ userId: user._id, courseId });
     if (link) {
-      return res.json({ success: true, data: link });
+      const fullLink = `${process.env.CLIENT_URL}/aff/${user._id}/${courseId}/${link.code}`;
+      return res.json({ success: true, data: { ...link.toObject(), link: fullLink } });
     }
     const code = uuid().slice(0, 8);
     link = await AffiliateLink.create({ userId: user._id, courseId, code });
-    res.status(201).json({ success: true, data: link });
+    const fullLink = `${process.env.CLIENT_URL}/aff/${user._id}/${courseId}/${code}`;
+    res.status(201).json({ success: true, data: { ...link.toObject(), link: fullLink } });
   } catch (err) { next(err); }
 };
 
@@ -27,7 +26,11 @@ export const getMyLinks = async (req: Request, res: Response, next: NextFunction
   try {
     const user = req.user as IUser;
     const links = await AffiliateLink.find({ userId: user._id }).populate('courseId', 'title price affiliatePercent');
-    res.json({ success: true, data: links });
+    const enriched = links.map(l => ({
+      ...l.toObject(),
+      link: `${process.env.CLIENT_URL}/aff/${user._id}/${l.courseId}/${l.code}`
+    }));
+    res.json({ success: true, data: { links: enriched } });
   } catch (err) { next(err); }
 };
 
@@ -35,9 +38,7 @@ export const trackAffiliateClick = async (req: Request, res: Response, next: Nex
   try {
     const { code } = req.params;
     const link = await AffiliateLink.findOne({ code });
-    if (!link) {
-      return res.redirect(process.env.CLIENT_URL || '/');
-    }
+    if (!link) return res.redirect(process.env.CLIENT_URL || '/');
     link.clicks += 1;
     await link.save();
     res.cookie('affiliate_code', code, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
