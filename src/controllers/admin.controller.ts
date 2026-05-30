@@ -122,9 +122,11 @@ export const createAnnouncement = async (req: Request, res: Response) => {
 export const getCoupons = async (req: Request, res: Response) => {
   try { res.json({ success: true, data: await AdminCoupon.find({}) }); } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
+
 export const createCoupon = async (req: Request, res: Response) => {
   try { res.status(201).json({ success: true, data: await AdminCoupon.create(req.body) }); } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
+
 export const deleteCoupon = async (req: Request, res: Response) => {
   try { await AdminCoupon.findByIdAndDelete(req.params.id); res.json({ success: true }); } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
@@ -135,5 +137,13 @@ export const approveInstructor = async (req: Request, res: Response) => {
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
     await Notification.create({ userId: user._id, title: 'Instructor Approved', message: 'You can now create courses.', type: 'system' });
     res.json({ success: true, data: user });
+  } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
+};
+
+// NEW: Public announcements endpoint (no auth required)
+export const getPublicAnnouncements = async (req: Request, res: Response) => {
+  try {
+    const announcements = await Announcement.find().sort('-createdAt').limit(5);
+    res.json({ success: true, data: announcements });
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
