@@ -1,4 +1,3 @@
-// src/socket.ts
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { verifyAccessToken } from './utils/jwt.js';
 import User, { IUser } from './models/User.js';
@@ -10,7 +9,11 @@ export const setupSocket = (server: SocketIOServer) => {
 
   io.use(async (socket: Socket, next) => {
     try {
-      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.split(' ')[1];
+      // FIX: read token from handshake auth or headers
+      let token = socket.handshake.auth.token;
+      if (!token && socket.handshake.headers.authorization) {
+        token = socket.handshake.headers.authorization.split(' ')[1];
+      }
       if (!token) {
         next(new Error('Authentication required'));
         return;
