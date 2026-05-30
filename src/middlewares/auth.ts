@@ -12,28 +12,29 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
-      res.status(401).json({ success: false, message: 'Access token required' });
-      return;
+      return res.status(401).json({ success: false, message: 'Access token required' });
     }
     const token = authHeader.split(' ')[1];
     const decoded = verifyAccessToken(token);
     const user = await User.findById(decoded.userId);
     if (!user) {
-      res.status(401).json({ success: false, message: 'User not found' });
-      return;
+      return res.status(401).json({ success: false, message: 'User not found' });
+    }
+    // --- FIX: Check if user is banned ---
+    if (user.isBanned) {
+      return res.status(403).json({ success: false, message: 'Your account has been banned. Please contact support.' });
     }
     req.user = user;
     next();
   } catch (err) {
-    res.status(401).json({ success: false, message: 'Invalid or expired token' });
+    return res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
 };
 
 export const authorize = (...roles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user || !roles.some(role => req.user!.roles.includes(role))) {
-      res.status(403).json({ success: false, message: 'Insufficient permissions' });
-      return;
+      return res.status(403).json({ success: false, message: 'Insufficient permissions' });
     }
     next();
   };
