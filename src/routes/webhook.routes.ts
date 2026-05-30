@@ -1,4 +1,3 @@
-// src/routes/webhook.routes.ts
 import { Router, Request, Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import Transaction from '../models/Transaction.js';
@@ -31,6 +30,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         );
         const course = await Course.findByIdAndUpdate(meta.courseId, { $inc: { totalStudents: 1 } }, { new: true });
 
+        // Instructor earnings (80%)
         if (course && course.instructorId) {
           const price = course.salePrice || course.price || 0;
           const instructorShare = price * 0.8;
@@ -48,6 +48,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
+        // Affiliate commission (from affiliate link cookie)
         const affiliateCode = meta.affiliateCode;
         if (affiliateCode) {
           const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
@@ -75,6 +76,25 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
             }
           }
         }
+
+        // Referral commission (from manually entered referral code in discount field)
+        const referralCode = meta.referralCode;
+        if (referralCode && !affiliateCode) {
+          const referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+          if (referrer && referrer._id.toString() !== meta.userId) {
+            const price = course?.salePrice || course?.price || 0;
+            const referrerShare = price * 0.1; // 10% referral commission
+            referrer.walletBalance += referrerShare;
+            await referrer.save();
+            await Transaction.create({
+              userId: referrer._id,
+              type: 'referral_commission',
+              amount: referrerShare,
+              status: 'completed',
+              description: `Referral commission for course: ${course?.title}`,
+            });
+          }
+        }
       } else if (meta.type === 'subscription') {
         const user = await User.findById(meta.userId);
         if (user) {
@@ -82,6 +102,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           user.subscriptionExpires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
           await user.save();
 
+          // Referral bonus (₦500) for the referrer
           const referral = await Referral.findOne({ referredId: user._id, status: 'pending' });
           if (referral) {
             referral.status = 'converted';
@@ -103,6 +124,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         }
       }
 
+      // Record the main transaction
       await Transaction.create({
         userId: meta.userId,
         type: meta.type,
