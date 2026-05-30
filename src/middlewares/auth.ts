@@ -20,7 +20,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not found' });
     }
-    // --- FIX: Check if user is banned ---
+    // Ban check
     if (user.isBanned) {
       return res.status(403).json({ success: false, message: 'Your account has been banned. Please contact support.' });
     }
