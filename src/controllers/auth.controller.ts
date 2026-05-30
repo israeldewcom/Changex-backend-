@@ -19,45 +19,38 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     const user = await User.create({
       email, passwordHash, firstName, lastName,
       referralCode: generateReferralCode(),
+      referredBy: referralCode || undefined,
     });
-    
-    // Validate referral code (case‑insensitive)
+    // ✅ Referral code handling – case‑insensitive
     if (referralCode && referralCode.trim() !== '') {
-      const referrer = await User.findOne({ referralCode: referralCode.toUpperCase() });
+      const upperCode = referralCode.toUpperCase();
+      const referrer = await User.findOne({ referralCode: upperCode });
       if (!referrer) {
         return res.status(400).json({ success: false, message: 'Invalid referral code' });
       }
-      if (referrer._id.toString() === user._id.toString()) {
-        return res.status(400).json({ success: false, message: 'You cannot refer yourself' });
+      if (referrer._id.toString() !== user._id.toString()) {
+        await Referral.create({ referrerId: referrer._id, referredId: user._id });
+        user.referredBy = referrer._id.toString();
+        await user.save();
       }
-      await Referral.create({ referrerId: referrer._id, referredId: user._id });
-      user.referredBy = referrer._id.toString();
-      await user.save();
     }
-    
     user.xp = (user.xp || 0) + 100;
     await user.save();
-
     try {
       await sendEmail(email, 'Welcome to ChangeX Academy', '<h1>Welcome!</h1><p>Start learning and earning.</p>');
     } catch (emailError) {
       console.error('Failed to send welcome email:', emailError);
     }
-    
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
     res.status(201).json({ success: true, data: { accessToken, user: { id: user._id, email, firstName, lastName, roles: user.roles } } });
-  } catch (err) {
-    // ✅ Always return JSON, never HTML
-    res.status(500).json({ success: false, message: err instanceof Error ? err.message : 'Registration failed' });
-  }
+  } catch (err) { next(err); }
 };
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
-    // Admin forced login
     if (email === 'admin@changex.com') {
       let adminUser = await User.findOne({ email });
       if (!adminUser) {
@@ -77,22 +70,16 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       return res.json({ success: true, data: { accessToken, user: { id: adminUser._id, email: adminUser.email, firstName: adminUser.firstName, lastName: adminUser.lastName, roles: adminUser.roles } } });
     }
     const user = await User.findOne({ email }).select('+passwordHash');
-    if (!user || !user.passwordHash) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
+    if (!user || !user.passwordHash) return res.status(401).json({ success: false, message: 'Invalid credentials' });
     const valid = await bcrypt.compare(password, user.passwordHash);
-    if (!valid) {
-      return res.status(401).json({ success: false, message: 'Invalid credentials' });
-    }
+    if (!valid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
     user.lastActivity = new Date();
     await user.save();
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
     res.json({ success: true, data: { accessToken, user: { id: user._id, email, firstName: user.firstName, lastName: user.lastName, roles: user.roles } } });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err instanceof Error ? err.message : 'Login failed' });
-  }
+  } catch (err) { next(err); }
 };
 
 export const refreshToken = async (req: Request, res: Response) => {
@@ -106,9 +93,7 @@ export const refreshToken = async (req: Request, res: Response) => {
     const newRefresh = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', newRefresh, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
     res.json({ success: true, data: { accessToken: newAccess } });
-  } catch (err) {
-    res.status(401).json({ success: false, message: 'Invalid refresh token' });
-  }
+  } catch (err) { res.status(401).json({ success: false, message: 'Invalid refresh token' }); }
 };
 
 export const logout = async (req: Request, res: Response) => {
@@ -154,15 +139,8 @@ export const googleCallback = async (req: Request, res: Response) => {
 
 export const githubCallback = googleCallback;
 
-// ✅ GET login handler – avoid any ObjectId confusion
 export const loginGet = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    req.body = { ...req.query, ...req.body };
-    if (!req.body.email || !req.body.password) {
-      return res.status(400).json({ success: false, message: 'Email and password required' });
-    }
-    return login(req, res, next);
-  } catch (err) {
-    res.status(500).json({ success: false, message: 'Login error' });
-  }
+  req.body = { ...req.query, ...req.body };
+  if (!req.body.email || !req.body.password) return res.status(400).json({ success: false, message: 'Email and password required' });
+  return login(req, res, next);
 };
