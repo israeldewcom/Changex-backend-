@@ -20,7 +20,8 @@ export interface ICourse extends Document {
   totalStudents: number;
   avgRating: number;
   certificateEnabled: boolean;
-  instructorId: mongoose.Types.ObjectId;   // ✅ fixed from 'instructord'
+  instructorId: mongoose.Types.ObjectId;
+  slug?: string;                    // <-- ADDED to avoid null index errors
   createdAt: Date;
   updatedAt: Date;
 }
@@ -46,12 +47,14 @@ const CourseSchema = new Schema<ICourse>(
     totalStudents: { type: Number, default: 0 },
     avgRating: { type: Number, default: 0 },
     certificateEnabled: { type: Boolean, default: true },
-    instructorId: { type: Schema.Types.ObjectId, ref: 'User', required: true }, // ✅ required
+    instructorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    slug: { type: String, unique: true, sparse: true },   // <-- ADDED
   },
   { timestamps: true }
 );
 
 CourseSchema.index({ isPublished: 1, approvalStatus: 1 });
 CourseSchema.index({ category: 1 });
+CourseSchema.index({ slug: 1 }, { unique: true, sparse: true });
 
 export default mongoose.model<ICourse>('Course', CourseSchema);
