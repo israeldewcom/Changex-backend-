@@ -29,7 +29,7 @@ export interface IUser extends Document {
   };
   preferredCurrency: string;
   welcomeBonusClaimed: boolean;
-  isBanned: boolean;                     // <-- ADDED
+  isBanned: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,7 +68,7 @@ const UserSchema = new Schema<IUser>(
     },
     preferredCurrency: { type: String, default: 'NGN' },
     welcomeBonusClaimed: { type: Boolean, default: false },
-    isBanned: { type: Boolean, default: false },   // <-- ADDED
+    isBanned: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
