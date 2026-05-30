@@ -14,7 +14,7 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'User not authenticated' });
     const { email, amount, currency = 'NGN', metadata } = req.body;
-    // FIX: ensure metadata includes referralCode if present
+    // Preserve any referral code sent from frontend
     let finalMetadata = metadata || {};
     if (!finalMetadata.referralCode && user.referredBy) {
       const referrer = await User.findById(user.referredBy);
@@ -73,14 +73,14 @@ export const subscribe = async (req: Request, res: Response, next: NextFunction)
   try {
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'User not authenticated' });
-    const { plan = 'premium' } = req.body;
+    const { plan = 'premium', referralCode } = req.body; // allow referralCode to be passed
     const amount = 5000;
-    let referralCode = null;
-    if (user.referredBy) {
+    let finalReferralCode = referralCode;
+    if (!finalReferralCode && user.referredBy) {
       const referrer = await User.findById(user.referredBy);
-      if (referrer) referralCode = referrer.referralCode;
+      if (referrer) finalReferralCode = referrer.referralCode;
     }
-    const metadata = { userId: user._id, type: 'subscription', plan, referralCode };
+    const metadata = { userId: user._id, type: 'subscription', plan, referralCode: finalReferralCode };
     const response = await axios.post(
       `${PAYSTACK_BASE}/transaction/initialize`,
       { email: user.email, amount: amount * 100, currency: 'NGN', metadata },
