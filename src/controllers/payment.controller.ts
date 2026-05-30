@@ -12,25 +12,20 @@ const PAYSTACK_BASE = 'https://api.paystack.co';
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if (!user) {
-      res.status(401).json({ success: false, message: 'User not authenticated' });
-      return;
-    }
-
+    if (!user) return res.status(401).json({ success: false, message: 'User not authenticated' });
     const { email, amount, currency = 'NGN', metadata } = req.body;
+    // FIX: ensure metadata includes referralCode if present
+    let finalMetadata = metadata || {};
+    if (!finalMetadata.referralCode && user.referredBy) {
+      const referrer = await User.findById(user.referredBy);
+      if (referrer) finalMetadata.referralCode = referrer.referralCode;
+    }
     const userEmail = email || user.email;
-    if (!userEmail) {
-      res.status(400).json({ success: false, message: 'Email is required' });
-      return;
-    }
-    if (!amount || amount <= 0) {
-      res.status(400).json({ success: false, message: 'Valid amount is required' });
-      return;
-    }
-
+    if (!userEmail) return res.status(400).json({ success: false, message: 'Email is required' });
+    if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Valid amount is required' });
     const response = await axios.post(
       `${PAYSTACK_BASE}/transaction/initialize`,
-      { email: userEmail, amount: amount * 100, currency, metadata },
+      { email: userEmail, amount: amount * 100, currency, metadata: finalMetadata },
       { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}`, 'Content-Type': 'application/json' } }
     );
     res.json({ success: true, data: response.data.data });
@@ -43,18 +38,12 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
   try {
     const { reference, courseId } = req.body;
     const user = req.user as IUser;
-    if (!reference) {
-      res.status(400).json({ success: false, message: 'Reference required' });
-      return;
-    }
+    if (!reference) return res.status(400).json({ success: false, message: 'Reference required' });
     const verification = await axios.get(`${PAYSTACK_BASE}/transaction/verify/${reference}`, {
       headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
     });
     const data = verification.data.data;
-    if (data.status !== 'success') {
-      res.status(400).json({ success: false, message: 'Payment not successful' });
-      return;
-    }
+    if (data.status !== 'success') return res.status(400).json({ success: false, message: 'Payment not successful' });
     const meta = data.metadata || {};
     const type = meta.type || 'course_purchase';
     if (type === 'course_purchase' && courseId) {
@@ -83,13 +72,15 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
 export const subscribe = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if (!user) {
-      res.status(401).json({ success: false, message: 'User not authenticated' });
-      return;
-    }
+    if (!user) return res.status(401).json({ success: false, message: 'User not authenticated' });
     const { plan = 'premium' } = req.body;
     const amount = 5000;
-    const metadata = { userId: user._id, type: 'subscription', plan };
+    let referralCode = null;
+    if (user.referredBy) {
+      const referrer = await User.findById(user.referredBy);
+      if (referrer) referralCode = referrer.referralCode;
+    }
+    const metadata = { userId: user._id, type: 'subscription', plan, referralCode };
     const response = await axios.post(
       `${PAYSTACK_BASE}/transaction/initialize`,
       { email: user.email, amount: amount * 100, currency: 'NGN', metadata },
@@ -113,15 +104,9 @@ export const getTransactions = async (req: Request, res: Response, next: NextFun
 export const withdraw = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const { amount, bankAccountId } = req.body;
-    if (amount < 2000) {
-      res.status(400).json({ success: false, message: 'Minimum withdrawal is ₦2,000' });
-      return;
-    }
-    if (amount > user.walletBalance) {
-      res.status(400).json({ success: false, message: 'Insufficient balance' });
-      return;
-    }
+    const { amount } = req.body;
+    if (amount < 2000) return res.status(400).json({ success: false, message: 'Minimum withdrawal is ₦2,000' });
+    if (amount > user.walletBalance) return res.status(400).json({ success: false, message: 'Insufficient balance' });
     user.walletBalance -= amount;
     user.pendingWithdrawal += amount;
     await user.save();
