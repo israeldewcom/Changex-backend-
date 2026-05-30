@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
-import User, { IUser } from '../models/User.js';   // <-- ADDED IUser import
+import User, { IUser } from '../models/User.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
 import { generateReferralCode } from '../utils/referralCode.js';
 import { sendEmail } from '../services/email.js';
@@ -19,14 +19,23 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       referralCode: generateReferralCode(),
       referredBy: referralCode || undefined,
     });
+    // Referral handling with logging
     if (referralCode && referralCode.trim() !== '') {
       const upperCode = referralCode.trim().toUpperCase();
+      console.log(`[REFERRAL] Looking for code: "${upperCode}"`);
       const referrer = await User.findOne({ referralCode: upperCode });
-      if (!referrer) return res.status(400).json({ success: false, message: 'Invalid referral code' });
+      if (!referrer) {
+        console.log(`[REFERRAL] No user found with code: "${upperCode}"`);
+        return res.status(400).json({ success: false, message: 'Invalid referral code' });
+      }
+      console.log(`[REFERRAL] Found referrer: ${referrer._id} (${referrer.email})`);
       if (referrer._id.toString() !== user._id.toString()) {
         await Referral.create({ referrerId: referrer._id, referredId: user._id });
         user.referredBy = referrer._id.toString();
         await user.save();
+        console.log(`[REFERRAL] Referral record created for ${user._id} <- ${referrer._id}`);
+      } else {
+        console.log(`[REFERRAL] User tried to refer themselves – ignored`);
       }
     }
     user.xp = (user.xp || 0) + 100;
@@ -140,7 +149,7 @@ export const loginGet = async (req: Request, res: Response, next: NextFunction) 
   return login(req, res, next);
 };
 
-// --- NEW: Change Password Endpoint (uses IUser) ---
+// --- NEW: Change Password Endpoint ---
 export const changePassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
