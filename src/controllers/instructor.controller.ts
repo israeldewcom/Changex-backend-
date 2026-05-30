@@ -9,6 +9,14 @@ import { sanitizeHtml } from '../middlewares/sanitize.js';
 import cloudinary from '../config/cloudinary.js';
 import { getIO } from '../socket.js';
 
+// Helper to generate slug from title
+function generateSlug(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 export const getInstructorDashboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -26,12 +34,15 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
     const { lessons, ...courseData } = req.body;
+    // Generate slug from title
+    const slug = generateSlug(courseData.title || 'untitled');
     const course = await Course.create({
       ...courseData,
       instructorId: user._id,
-      description: sanitizeHtml(courseData.description || '')
+      description: sanitizeHtml(courseData.description || ''),
+      slug,   // <-- set slug
     });
-    // --- FIX: Save lessons if provided ---
+    // Save lessons if provided
     if (lessons && Array.isArray(lessons) && lessons.length > 0) {
       for (let i = 0; i < lessons.length; i++) {
         const lesson = lessons[i];
@@ -48,6 +59,10 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
     }
     res.status(201).json({ success: true, data: course });
   } catch (err: any) {
+    // Handle duplicate slug error
+    if (err.code === 11000 && err.keyPattern?.slug) {
+      return res.status(400).json({ success: false, message: 'A course with a similar title already exists. Please change the title.' });
+    }
     res.status(400).json({ success: false, message: err.message });
   }
 };
@@ -56,13 +71,18 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     const { lessons, ...updateData } = req.body;
+    // Regenerate slug if title changed
+    let slug: string | undefined;
+    if (updateData.title) {
+      slug = generateSlug(updateData.title);
+    }
     const course = await Course.findOneAndUpdate(
       { _id: req.params.id, instructorId: user._id },
-      { ...updateData, description: sanitizeHtml(updateData.description || '') },
+      { ...updateData, description: sanitizeHtml(updateData.description || ''), slug },
       { new: true }
     );
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    // --- FIX: Update lessons if provided (simplified: replace all) ---
+    // Update lessons if provided (simplified: replace all)
     if (lessons && Array.isArray(lessons)) {
       await Lesson.deleteMany({ courseId: course._id });
       for (let i = 0; i < lessons.length; i++) {
@@ -72,6 +92,9 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
     }
     res.json({ success: true, data: course });
   } catch (err: any) {
+    if (err.code === 11000 && err.keyPattern?.slug) {
+      return res.status(400).json({ success: false, message: 'A course with a similar title already exists. Please change the title.' });
+    }
     res.status(400).json({ success: false, message: err.message });
   }
 };
@@ -81,7 +104,6 @@ export const submitForReview = async (req: Request, res: Response, next: NextFun
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: req.params.id, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    // --- FIX: Count lessons from database, not from request ---
     const lessonCount = await Lesson.countDocuments({ courseId: course._id });
     if (lessonCount < 20) return res.status(400).json({ success: false, message: 'Need at least 20 lessons' });
     if (!course.title || !course.description) return res.status(400).json({ success: false, message: 'Title and description required' });
