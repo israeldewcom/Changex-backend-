@@ -19,13 +19,10 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       referralCode: generateReferralCode(),
       referredBy: referralCode || undefined,
     });
-    // FIX: trim and uppercase referral code
     if (referralCode && referralCode.trim() !== '') {
       const upperCode = referralCode.trim().toUpperCase();
       const referrer = await User.findOne({ referralCode: upperCode });
-      if (!referrer) {
-        return res.status(400).json({ success: false, message: 'Invalid referral code' });
-      }
+      if (!referrer) return res.status(400).json({ success: false, message: 'Invalid referral code' });
       if (referrer._id.toString() !== user._id.toString()) {
         await Referral.create({ referrerId: referrer._id, referredId: user._id });
         user.referredBy = referrer._id.toString();
@@ -141,4 +138,26 @@ export const loginGet = async (req: Request, res: Response, next: NextFunction) 
   req.body = { ...req.query, ...req.body };
   if (!req.body.email || !req.body.password) return res.status(400).json({ success: false, message: 'Email and password required' });
   return login(req, res, next);
+};
+
+// --- NEW: Change Password Endpoint ---
+export const changePassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Current and new password are required' });
+    }
+    const userWithPw = await User.findById(user._id).select('+passwordHash');
+    if (!userWithPw || !userWithPw.passwordHash) {
+      return res.status(401).json({ success: false, message: 'User not found or no password set' });
+    }
+    const valid = await bcrypt.compare(currentPassword, userWithPw.passwordHash);
+    if (!valid) {
+      return res.status(401).json({ success: false, message: 'Current password is incorrect' });
+    }
+    userWithPw.passwordHash = await bcrypt.hash(newPassword, 12);
+    await userWithPw.save();
+    res.json({ success: true, message: 'Password updated successfully' });
+  } catch (err) { next(err); }
 };
