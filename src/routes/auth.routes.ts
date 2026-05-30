@@ -14,9 +14,7 @@ router.post('/refresh-token', authController.refreshToken);
 router.post('/logout', authController.logout);
 router.post('/forgot-password', authController.forgotPassword);
 router.post('/reset-password', authController.resetPassword);
-
-// --- NEW: Change password (requires authentication) ---
-router.put('/change-password', authenticate, authController.changePassword);
+router.put('/change-password', authenticate, authController.changePassword);  // <-- ADDED
 
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 router.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: '/login' }), authController.googleCallback);
