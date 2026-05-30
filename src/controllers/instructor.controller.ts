@@ -27,6 +27,7 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
     if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
     const courseData = { ...req.body, instructorId: user._id, description: sanitizeHtml(req.body.description || '') };
     const course = await Course.create(courseData);
+    // FIX: return full course object as data
     res.status(201).json({ success: true, data: course });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
