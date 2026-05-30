@@ -1,4 +1,3 @@
-// src/routes/course.routes.ts
 import { Router } from 'express';
 import * as courseController from '../controllers/course.controller.js';
 import { authenticate } from '../middlewares/auth.js';
@@ -6,6 +5,7 @@ import { authenticate } from '../middlewares/auth.js';
 const router = Router();
 
 router.get('/', courseController.getPublishedCourses);
+router.get('/my/enrollments', authenticate, courseController.getUserEnrollments);
 router.get('/:id', courseController.getCourse);
 router.post('/:id/enroll', authenticate, courseController.enrollCourse);
 router.post('/:id/lessons/:lessonId/progress', authenticate, courseController.updateLessonProgress);
