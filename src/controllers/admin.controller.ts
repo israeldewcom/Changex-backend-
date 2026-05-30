@@ -45,6 +45,16 @@ export const updateUserRole = async (req: Request, res: Response) => {
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
+// NEW: Dedicated ban/unban endpoint
+export const toggleUserBan = async (req: Request, res: Response) => {
+  try {
+    const { isBanned } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { isBanned }, { new: true });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    res.json({ success: true, data: user });
+  } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
+};
+
 export const getAdminCourses = async (req: Request, res: Response) => {
   try {
     const courses = await Course.find({}).populate('instructorId', 'firstName lastName email').limit(100);
@@ -140,7 +150,6 @@ export const approveInstructor = async (req: Request, res: Response) => {
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-// NEW: Public announcements endpoint (no auth required)
 export const getPublicAnnouncements = async (req: Request, res: Response) => {
   try {
     const announcements = await Announcement.find().sort('-createdAt').limit(5);
