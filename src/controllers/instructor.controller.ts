@@ -25,9 +25,27 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
-    const courseData = { ...req.body, instructorId: user._id, description: sanitizeHtml(req.body.description || '') };
-    const course = await Course.create(courseData);
-    // FIX: return full course object as data
+    const { lessons, ...courseData } = req.body;
+    const course = await Course.create({
+      ...courseData,
+      instructorId: user._id,
+      description: sanitizeHtml(courseData.description || '')
+    });
+    // --- FIX: Save lessons if provided ---
+    if (lessons && Array.isArray(lessons) && lessons.length > 0) {
+      for (let i = 0; i < lessons.length; i++) {
+        const lesson = lessons[i];
+        await Lesson.create({
+          ...lesson,
+          courseId: course._id,
+          order: i + 1,
+          content: lesson.content || '',
+          videoUrl: lesson.videoUrl || '',
+          resources: lesson.resources || []
+        });
+      }
+      await Course.findByIdAndUpdate(course._id, { totalLessons: lessons.length });
+    }
     res.status(201).json({ success: true, data: course });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
@@ -37,12 +55,21 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
 export const updateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
+    const { lessons, ...updateData } = req.body;
     const course = await Course.findOneAndUpdate(
       { _id: req.params.id, instructorId: user._id },
-      { ...req.body, description: sanitizeHtml(req.body.description || '') },
+      { ...updateData, description: sanitizeHtml(updateData.description || '') },
       { new: true }
     );
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    // --- FIX: Update lessons if provided (simplified: replace all) ---
+    if (lessons && Array.isArray(lessons)) {
+      await Lesson.deleteMany({ courseId: course._id });
+      for (let i = 0; i < lessons.length; i++) {
+        await Lesson.create({ ...lessons[i], courseId: course._id, order: i + 1 });
+      }
+      await Course.findByIdAndUpdate(course._id, { totalLessons: lessons.length });
+    }
     res.json({ success: true, data: course });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
@@ -54,6 +81,7 @@ export const submitForReview = async (req: Request, res: Response, next: NextFun
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: req.params.id, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    // --- FIX: Count lessons from database, not from request ---
     const lessonCount = await Lesson.countDocuments({ courseId: course._id });
     if (lessonCount < 20) return res.status(400).json({ success: false, message: 'Need at least 20 lessons' });
     if (!course.title || !course.description) return res.status(400).json({ success: false, message: 'Title and description required' });
