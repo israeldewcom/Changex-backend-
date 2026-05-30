@@ -45,9 +45,10 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    // FIX: strong guard
+    // Strong guard
     if (!user || !user._id) {
-      return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
+      console.error('[ENROLL] No user object - headers:', req.headers.authorization);
+      return res.status(401).json({ success: false, message: 'Authentication required' });
     }
     const course = await Course.findById(req.params.id);
     if (!course || !course.isPublished) return res.status(404).json({ success: false, message: 'Course not available' });
