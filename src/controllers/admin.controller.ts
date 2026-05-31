@@ -45,7 +45,6 @@ export const updateUserRole = async (req: Request, res: Response) => {
   } catch (err) { res.status(500).json({ success: false, message: String(err) }); }
 };
 
-// NEW: Dedicated ban/unban endpoint
 export const toggleUserBan = async (req: Request, res: Response) => {
   try {
     const { isBanned } = req.body;
