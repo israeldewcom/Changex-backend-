@@ -71,7 +71,7 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     await course.save();
 
     res.json({ success: true, message: 'Enrolled successfully' });
-  } catch (err) any {
+  } catch (err: any) {   // <-- FIXED: 'any' inside parentheses
     // Handle duplicate key error (should not happen due to check, but safety)
     if (err.code === 11000 && err.keyPattern?.userId && err.keyPattern?.courseId) {
       return res.status(400).json({ success: false, message: 'Already enrolled' });
