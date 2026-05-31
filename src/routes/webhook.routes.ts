@@ -21,14 +21,15 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
 
     const event = req.body;
     if (event.event === 'charge.success') {
-      const meta = event.data.metadata;
+      const meta = event.data.metadata || {};
       const reference = event.data.reference;
       const amount = event.data.amount / 100;
 
-      let referralCode = meta.referralCode ? meta.referralCode.trim().toUpperCase() : null;
-      let affiliateCode = meta.affiliateCode ? meta.affiliateCode.trim() : null;
+      let referralCode = meta.referralCode ? String(meta.referralCode).trim().toUpperCase() : null;
+      let affiliateCode = meta.affiliateCode ? String(meta.affiliateCode).trim() : null;
 
       if (meta.type === 'course_purchase') {
+        // Create enrollment if not exists
         await Enrollment.findOneAndUpdate(
           { userId: meta.userId, courseId: meta.courseId },
           {},
@@ -36,6 +37,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         );
         const course = await Course.findByIdAndUpdate(meta.courseId, { $inc: { totalStudents: 1 } }, { new: true });
 
+        // Instructor commission (80%)
         if (course && course.instructorId) {
           const price = course.salePrice || course.price || 0;
           const instructorShare = price * 0.8;
@@ -53,6 +55,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
+        // Affiliate commission
         if (affiliateCode) {
           const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
           if (affiliateLink) {
@@ -80,6 +83,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
+        // Referral commission (10%) – only if no affiliate code
         if (referralCode && !affiliateCode) {
           const referrer = await User.findOne({ referralCode });
           if (referrer && referrer._id.toString() !== meta.userId) {
@@ -125,17 +129,20 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         }
       }
 
+      // Record the transaction
       await Transaction.create({
         userId: meta.userId,
         type: meta.type,
         amount: amount,
         status: 'completed',
         reference: reference,
+        description: `Paystack ${meta.type}`,
       });
     }
     res.sendStatus(200);
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    console.error('Webhook error:', error);
+    next(error);
   }
 });
 
