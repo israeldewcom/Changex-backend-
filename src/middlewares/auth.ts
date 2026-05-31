@@ -12,46 +12,33 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
-      console.error('[AUTH] Missing or invalid Authorization header');
       return res.status(401).json({ success: false, message: 'Access token required' });
     }
-
     const token = authHeader.split(' ')[1];
     if (!token) {
-      console.error('[AUTH] Empty token');
       return res.status(401).json({ success: false, message: 'Access token required' });
     }
-
     let decoded;
     try {
       decoded = verifyAccessToken(token);
     } catch (err) {
-      // `err` is unknown – safely access message
       const errorMessage = err instanceof Error ? err.message : 'Unknown token error';
       console.error('[AUTH] Token verification failed:', errorMessage);
       return res.status(401).json({ success: false, message: 'Invalid or expired token' });
     }
-
     if (!decoded || !decoded.userId) {
-      console.error('[AUTH] Token missing userId');
       return res.status(401).json({ success: false, message: 'Invalid token payload' });
     }
-
     const user = await User.findById(decoded.userId);
     if (!user) {
-      console.error('[AUTH] User not found for ID:', decoded.userId);
       return res.status(401).json({ success: false, message: 'User not found' });
     }
-
     if (user.isBanned) {
-      console.error('[AUTH] Banned user attempted access:', user.email);
       return res.status(403).json({ success: false, message: 'Your account has been banned. Contact support.' });
     }
-
     req.user = user;
     next();
   } catch (err) {
-    // Outer catch – `err` is unknown
     const errorMessage = err instanceof Error ? err.message : 'Unknown authentication error';
     console.error('[AUTH] Unexpected error:', errorMessage);
     return res.status(401).json({ success: false, message: 'Authentication failed' });
