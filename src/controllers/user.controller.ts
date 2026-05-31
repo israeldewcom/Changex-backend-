@@ -7,7 +7,6 @@ import { uploadToCloudinary } from '../services/cloudinary.js';
 
 export const getProfile = async (req: Request, res: Response) => {
   const user = req.user as IUser;
-  // Ensure preferredCurrency is always returned
   res.json({ success: true, data: user });
 };
 
