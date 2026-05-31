@@ -45,23 +45,39 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    // Strong guard
+    // Strong guard: must be authenticated
     if (!user || !user._id) {
-      console.error('[ENROLL] No user object - headers:', req.headers.authorization);
-      return res.status(401).json({ success: false, message: 'Authentication required' });
+      console.error('[ENROLL] No user object. Headers:', req.headers.authorization);
+      return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
     }
+
     const course = await Course.findById(req.params.id);
-    if (!course || !course.isPublished) return res.status(404).json({ success: false, message: 'Course not available' });
+    if (!course || !course.isPublished) {
+      return res.status(404).json({ success: false, message: 'Course not available' });
+    }
+
     const existing = await Enrollment.findOne({ userId: user._id, courseId: course._id });
-    if (existing) return res.status(400).json({ success: false, message: 'Already enrolled' });
+    if (existing) {
+      return res.status(400).json({ success: false, message: 'Already enrolled' });
+    }
+
     if (course.price > 0) {
       return res.json({ success: true, requirePayment: true, price: course.salePrice || course.price });
     }
+
+    // Free course enrollment
     await Enrollment.create({ userId: user._id, courseId: course._id });
     course.totalStudents += 1;
     await course.save();
+
     res.json({ success: true, message: 'Enrolled successfully' });
-  } catch (err) { next(err); }
+  } catch (err) any {
+    // Handle duplicate key error (should not happen due to check, but safety)
+    if (err.code === 11000 && err.keyPattern?.userId && err.keyPattern?.courseId) {
+      return res.status(400).json({ success: false, message: 'Already enrolled' });
+    }
+    next(err);
+  }
 };
 
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
@@ -71,6 +87,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
     const { completed, timeSpent } = req.body;
     const enrollment = await Enrollment.findOne({ userId: user._id, courseId: req.params.id });
     if (!enrollment) return res.status(400).json({ success: false, message: 'Not enrolled' });
+
     let progress = await LessonProgress.findOne({ enrollmentId: enrollment._id, lessonId });
     if (!progress) {
       progress = new LessonProgress({ enrollmentId: enrollment._id, lessonId, completed, timeSpent: timeSpent || 0 });
@@ -78,6 +95,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       if (completed) progress.completed = true;
       progress.timeSpent += timeSpent || 0;
     }
+
     if (completed && !progress.completed) {
       const lesson = await Lesson.findById(lessonId);
       if (lesson) {
@@ -86,6 +104,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       }
     }
     await progress.save();
+
     const totalLessons = await Lesson.countDocuments({ courseId: enrollment.courseId });
     const completedLessons = await LessonProgress.countDocuments({ enrollmentId: enrollment._id, completed: true });
     enrollment.progress = Math.round((completedLessons / totalLessons) * 100);
@@ -97,6 +116,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       await Transaction.create({ userId: user._id, type: 'bonus', amount: 100, status: 'completed', description: 'Course completion bonus' });
     }
     await enrollment.save();
+
     res.json({ success: true, data: { progress: enrollment.progress } });
   } catch (err) { next(err); }
 };
@@ -107,10 +127,12 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
     const { rating, review } = req.body;
     const course = await Course.findById(req.params.id);
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
     const enrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id });
     if (!enrollment || enrollment.status !== 'completed') {
       return res.status(400).json({ success: false, message: 'Complete the course to rate' });
     }
+
     const existing = await Rating.findOne({ userId: user._id, courseId: course._id });
     if (existing) {
       existing.rating = rating;
@@ -119,10 +141,12 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
     } else {
       await Rating.create({ userId: user._id, courseId: course._id, rating, review });
     }
+
     const ratings = await Rating.find({ courseId: course._id });
     const avg = ratings.reduce((acc, r) => acc + r.rating, 0) / ratings.length;
     course.avgRating = avg;
     await course.save();
+
     res.json({ success: true });
   } catch (err) { next(err); }
 };
