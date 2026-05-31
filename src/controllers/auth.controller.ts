@@ -19,24 +19,22 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       referralCode: generateReferralCode(),
       referredBy: referralCode || undefined,
     });
-    // Referral handling with logging
+    // Simple referral handling
     if (referralCode && referralCode.trim() !== '') {
-      const upperCode = referralCode.trim().toUpperCase();
-      console.log(`[REFERRAL] Looking for code: "${upperCode}"`);
-      const referrer = await User.findOne({ referralCode: upperCode });
+      const cleanCode = referralCode.trim().toUpperCase();
+      const referrer = await User.findOne({ 
+        referralCode: cleanCode,
+        isBanned: false
+      });
       if (!referrer) {
-        console.log(`[REFERRAL] No user found with code: "${upperCode}"`);
         return res.status(400).json({ success: false, message: 'Invalid referral code' });
       }
-      console.log(`[REFERRAL] Found referrer: ${referrer._id} (${referrer.email})`);
-      if (referrer._id.toString() !== user._id.toString()) {
-        await Referral.create({ referrerId: referrer._id, referredId: user._id });
-        user.referredBy = referrer._id.toString();
-        await user.save();
-        console.log(`[REFERRAL] Referral record created for ${user._id} <- ${referrer._id}`);
-      } else {
-        console.log(`[REFERRAL] User tried to refer themselves – ignored`);
+      if (referrer._id.toString() === user._id.toString()) {
+        return res.status(400).json({ success: false, message: 'You cannot refer yourself' });
       }
+      await Referral.create({ referrerId: referrer._id, referredId: user._id });
+      user.referredBy = referrer._id.toString();
+      await user.save();
     }
     user.xp = (user.xp || 0) + 100;
     await user.save();
@@ -149,13 +147,12 @@ export const loginGet = async (req: Request, res: Response, next: NextFunction) 
   return login(req, res, next);
 };
 
-// --- NEW: Change Password Endpoint ---
 export const changePassword = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) {
-      return res.status(400).json({ success: false, message: 'Current and new password are required' });
+      return res.status(400).json({ success: false, message: 'Current and new password required' });
     }
     const userWithPw = await User.findById(user._id).select('+passwordHash');
     if (!userWithPw || !userWithPw.passwordHash) {
