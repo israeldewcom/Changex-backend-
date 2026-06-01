@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
+import mongoose from 'mongoose';
 import User, { IUser } from '../models/User.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
 import { generateReferralCode } from '../utils/referralCode.js';
@@ -10,15 +11,25 @@ import redis from '../config/redis.js';
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password, firstName, lastName, referralCode } = req.body;
+    const { email, password, firstName, lastName, referralCode, referrerId: directReferrerId } = req.body;
+
     const existing = await User.findOne({ email });
     if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
-    
+
     const passwordHash = await bcrypt.hash(password, 12);
-    
-    // --- REFERRAL LOOKUP (case‑insensitive) ---
-    let referrerId = null;
-    if (referralCode && referralCode.trim() !== '') {
+
+    // --- REFERRAL: support both old referralCode (string) and new referrerId (ObjectId) ---
+    let referrerObjectId = null;
+
+    // New method: direct referrerId (most reliable)
+    if (directReferrerId && mongoose.Types.ObjectId.isValid(directReferrerId)) {
+      const referrer = await User.findById(directReferrerId).select('_id isBanned');
+      if (referrer && !referrer.isBanned) {
+        referrerObjectId = referrer._id;
+      }
+    }
+    // Fallback to old referralCode lookup (case‑insensitive)
+    if (!referrerObjectId && referralCode && referralCode.trim() !== '') {
       const raw = referralCode.trim().toUpperCase();
       let referrer = await User.findOne({ referralCode: raw, isBanned: false });
       if (!referrer) {
@@ -30,49 +41,62 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
           referrer = await User.findOne({ referralCode: { $regex: `^${sanitized}$`, $options: 'i' }, isBanned: false });
         }
       }
-      if (referrer) {
-        referrerId = referrer._id;
-      } else {
-        console.log(`[REFERRAL] Code "${referralCode}" not found – continuing without referral`);
-      }
+      if (referrer) referrerObjectId = referrer._id;
+      else console.log(`[REFERRAL] Code "${referralCode}" not found – continuing without referral`);
     }
-    
+
     const user = await User.create({
-      email, passwordHash, firstName, lastName,
+      email,
+      passwordHash,
+      firstName,
+      lastName,
       referralCode: generateReferralCode(),
-      referredBy: referrerId ? referrerId.toString() : undefined,
+      referredBy: referrerObjectId ? referrerObjectId.toString() : undefined,
     });
-    
-    // --- FIXED: only create referral if both referrerId and user._id are valid ---
-    if (referrerId && user && user._id) {
-      await Referral.create({ referrerId, referredId: user._id, status: 'pending', earned: 0 });
-    } else if (referrerId) {
-      console.warn(`[REFERRAL] Skipped creation: referrerId=${referrerId}, user._id=${user?._id}`);
+
+    // --- FIXED: only create referral if both referrerObjectId and user._id are valid ---
+    if (referrerObjectId && user && user._id) {
+      await Referral.create({ referrerId: referrerObjectId, referredId: user._id, status: 'pending', earned: 0 });
+    } else if (referrerObjectId) {
+      console.warn(`[REFERRAL] Skipped creation: referrerId=${referrerObjectId}, user._id=${user?._id}`);
     }
-    
+
     user.xp = (user.xp || 0) + 100;
     await user.save();
-    
+
     try {
       await sendEmail(email, 'Welcome to ChangeX Academy', '<h1>Welcome!</h1><p>Start learning and earning.</p>');
     } catch (emailError) {
       console.error('Failed to send welcome email:', emailError);
     }
-    
+
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-    
-    // --- FIXED: sameSite = 'none' in production for cross‑origin cookies ---
+
     const isProd = process.env.NODE_ENV === 'production';
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: isProd,
       sameSite: isProd ? 'none' : 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
-    
-    res.status(201).json({ success: true, data: { accessToken, user: { id: user._id, email, firstName, lastName, roles: user.roles } } });
-  } catch (err) { next(err); }
+
+    res.status(201).json({
+      success: true,
+      data: {
+        accessToken,
+        user: {
+          id: user._id,
+          email,
+          firstName,
+          lastName,
+          roles: user.roles,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
 };
 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
@@ -94,21 +118,60 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       const accessToken = signAccessToken({ userId: adminUser._id.toString(), email: adminUser.email });
       const refreshToken = signRefreshToken({ userId: adminUser._id.toString(), email: adminUser.email });
       const isProd = process.env.NODE_ENV === 'production';
-      res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
-      return res.json({ success: true, data: { accessToken, user: { id: adminUser._id, email, firstName: adminUser.firstName, lastName: adminUser.lastName, roles: adminUser.roles } } });
+      res.cookie('refreshToken', refreshToken, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+      });
+      return res.json({
+        success: true,
+        data: {
+          accessToken,
+          user: {
+            id: adminUser._id,
+            email,
+            firstName: adminUser.firstName,
+            lastName: adminUser.lastName,
+            roles: adminUser.roles,
+          },
+        },
+      });
     }
+
     const user = await User.findOne({ email }).select('+passwordHash');
     if (!user || !user.passwordHash) return res.status(401).json({ success: false, message: 'Invalid credentials' });
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
     user.lastActivity = new Date();
     await user.save();
+
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
     const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
-    res.json({ success: true, data: { accessToken, user: { id: user._id, email, firstName: user.firstName, lastName: user.lastName, roles: user.roles } } });
-  } catch (err) { next(err); }
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
+    res.json({
+      success: true,
+      data: {
+        accessToken,
+        user: {
+          id: user._id,
+          email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          roles: user.roles,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
 };
 
 export const refreshToken = async (req: Request, res: Response) => {
@@ -121,9 +184,16 @@ export const refreshToken = async (req: Request, res: Response) => {
     const newAccess = signAccessToken({ userId: user._id.toString(), email: user.email });
     const newRefresh = signRefreshToken({ userId: user._id.toString(), email: user.email });
     const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', newRefresh, { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
+    res.cookie('refreshToken', newRefresh, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+    });
     res.json({ success: true, data: { accessToken: newAccess } });
-  } catch (err) { res.status(401).json({ success: false, message: 'Invalid refresh token' }); }
+  } catch (err) {
+    res.status(401).json({ success: false, message: 'Invalid refresh token' });
+  }
 };
 
 export const logout = async (req: Request, res: Response) => {
@@ -141,7 +211,9 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
     const resetUrl = `${process.env.CLIENT_URL}/reset-password/${resetToken}`;
     await sendEmail(email, 'Password Reset', `<a href="${resetUrl}">Reset your password</a>`);
     res.json({ success: true, message: 'Reset link sent' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 export const resetPassword = async (req: Request, res: Response, next: NextFunction) => {
@@ -155,7 +227,9 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
     await user.save();
     await redis.del(`reset:${token}`);
     res.json({ success: true, message: 'Password updated' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 export const googleCallback = async (req: Request, res: Response) => {
@@ -164,7 +238,12 @@ export const googleCallback = async (req: Request, res: Response) => {
   const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
   const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
   const isProd = process.env.NODE_ENV === 'production';
-  res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    maxAge: 30 * 24 * 60 * 60 * 1000,
+  });
   res.redirect(`${process.env.CLIENT_URL}/oauth?token=${accessToken}`);
 };
 
@@ -172,7 +251,8 @@ export const githubCallback = googleCallback;
 
 export const loginGet = async (req: Request, res: Response, next: NextFunction) => {
   req.body = { ...req.query, ...req.body };
-  if (!req.body.email || !req.body.password) return res.status(400).json({ success: false, message: 'Email and password required' });
+  if (!req.body.email || !req.body.password)
+    return res.status(400).json({ success: false, message: 'Email and password required' });
   return login(req, res, next);
 };
 
@@ -194,5 +274,7 @@ export const changePassword = async (req: Request, res: Response, next: NextFunc
     userWithPw.passwordHash = await bcrypt.hash(newPassword, 12);
     await userWithPw.save();
     res.json({ success: true, message: 'Password updated successfully' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
