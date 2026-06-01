@@ -16,6 +16,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
       .update(JSON.stringify(req.body))
       .digest('hex');
     if (hash !== req.headers['x-paystack-signature']) {
+      console.error('[WEBHOOK] Invalid signature');
       return res.status(400).send('Invalid signature');
     }
 
@@ -27,6 +28,8 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
 
       let referralCode = meta.referralCode ? String(meta.referralCode).trim().toUpperCase() : null;
       let affiliateCode = meta.affiliateCode ? String(meta.affiliateCode).trim() : null;
+
+      console.log(`[WEBHOOK] Processing ${meta.type} for user ${meta.userId}, refCode=${referralCode}, affCode=${affiliateCode}`);
 
       if (meta.type === 'course_purchase') {
         await Enrollment.findOneAndUpdate(
@@ -53,6 +56,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
+        // Affiliate commission
         if (affiliateCode) {
           const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
           if (affiliateLink) {
@@ -80,8 +84,9 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           }
         }
 
+        // Referral commission (only if no affiliate)
         if (referralCode && !affiliateCode) {
-          const referrer = await User.findOne({ referralCode });
+          const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
           if (referrer && referrer._id.toString() !== meta.userId) {
             const price = course?.salePrice || course?.price || 0;
             const referrerShare = price * 0.1;
@@ -104,6 +109,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           user.subscriptionExpires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
           await user.save();
 
+          // Referral bonus for premium subscription
           const referral = await Referral.findOne({ referredId: user._id, status: 'pending' });
           if (referral) {
             referral.status = 'converted';
