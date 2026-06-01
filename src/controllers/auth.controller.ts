@@ -16,27 +16,24 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     
     const passwordHash = await bcrypt.hash(password, 12);
     
-    // --- REFERRAL FIX: case‑insensitive + trim + special chars tolerance ---
+    // --- REFERRAL FIX: case‑insensitive + space/hidden char tolerant ---
     let referrerId = null;
     if (referralCode && referralCode.trim() !== '') {
-      const rawCode = referralCode.trim();
-      // Try exact match first, then case‑insensitive, then trimmed
-      let referrer = await User.findOne({ referralCode: rawCode, isBanned: false });
+      const raw = referralCode.trim().toUpperCase();
+      let referrer = await User.findOne({ referralCode: raw, isBanned: false });
       if (!referrer) {
-        referrer = await User.findOne({ referralCode: { $regex: `^${rawCode}$`, $options: 'i' }, isBanned: false });
+        referrer = await User.findOne({ referralCode: { $regex: `^${raw}$`, $options: 'i' }, isBanned: false });
       }
-      if (!referrer && rawCode.length > 0) {
-        // Try removing any non‑alphanumeric characters (just in case)
-        const sanitized = rawCode.replace(/[^A-Za-z0-9]/g, '');
-        if (sanitized !== rawCode) {
+      if (!referrer && raw.length > 0) {
+        const sanitized = raw.replace(/[^A-Z0-9]/g, '');
+        if (sanitized !== raw) {
           referrer = await User.findOne({ referralCode: { $regex: `^${sanitized}$`, $options: 'i' }, isBanned: false });
         }
       }
       if (referrer) {
         referrerId = referrer._id;
       } else {
-        console.log(`[REFERRAL] Invalid code attempted: "${rawCode}"`);
-        // Do NOT return error – just continue without referral
+        console.log(`[REFERRAL] Code "${referralCode}" not found – continuing without referral`);
       }
     }
     
