@@ -45,21 +45,26 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
+    // --- ENROLLMENT FIX: guard against null user ---
     if (!user || !user._id) {
       console.error('[ENROLL] No user object. Headers:', req.headers.authorization);
       return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
     }
+    
     const course = await Course.findById(req.params.id);
     if (!course || !course.isPublished) {
       return res.status(404).json({ success: false, message: 'Course not available' });
     }
+    
     const existing = await Enrollment.findOne({ userId: user._id, courseId: course._id });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Already enrolled' });
     }
+    
     if (course.price > 0) {
       return res.json({ success: true, requirePayment: true, price: course.salePrice || course.price });
     }
+    
     await Enrollment.create({ userId: user._id, courseId: course._id });
     course.totalStudents += 1;
     await course.save();
