@@ -119,3 +119,12 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
     res.json({ success: true, message: 'Withdrawal request submitted' });
   } catch (err) { next(err); }
 };
+
+// --- NEW endpoint for frontend to fetch saved bank accounts ---
+export const getPaymentMethods = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const bankAccounts = user.bankAccount ? [user.bankAccount] : [];
+    res.json({ success: true, data: { bankAccounts } });
+  } catch (err) { next(err); }
+};
