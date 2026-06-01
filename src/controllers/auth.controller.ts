@@ -13,36 +13,52 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     const { email, password, firstName, lastName, referralCode } = req.body;
     const existing = await User.findOne({ email });
     if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
+    
     const passwordHash = await bcrypt.hash(password, 12);
+    
+    // --- REFERRAL FIX: case‑insensitive + trim + special chars tolerance ---
+    let referrerId = null;
+    if (referralCode && referralCode.trim() !== '') {
+      const rawCode = referralCode.trim();
+      // Try exact match first, then case‑insensitive, then trimmed
+      let referrer = await User.findOne({ referralCode: rawCode, isBanned: false });
+      if (!referrer) {
+        referrer = await User.findOne({ referralCode: { $regex: `^${rawCode}$`, $options: 'i' }, isBanned: false });
+      }
+      if (!referrer && rawCode.length > 0) {
+        // Try removing any non‑alphanumeric characters (just in case)
+        const sanitized = rawCode.replace(/[^A-Za-z0-9]/g, '');
+        if (sanitized !== rawCode) {
+          referrer = await User.findOne({ referralCode: { $regex: `^${sanitized}$`, $options: 'i' }, isBanned: false });
+        }
+      }
+      if (referrer) {
+        referrerId = referrer._id;
+      } else {
+        console.log(`[REFERRAL] Invalid code attempted: "${rawCode}"`);
+        // Do NOT return error – just continue without referral
+      }
+    }
+    
     const user = await User.create({
       email, passwordHash, firstName, lastName,
       referralCode: generateReferralCode(),
-      referredBy: referralCode || undefined,
+      referredBy: referrerId ? referrerId.toString() : undefined,
     });
-    // Simple referral handling
-    if (referralCode && referralCode.trim() !== '') {
-      const cleanCode = referralCode.trim().toUpperCase();
-      const referrer = await User.findOne({ 
-        referralCode: cleanCode,
-        isBanned: false
-      });
-      if (!referrer) {
-        return res.status(400).json({ success: false, message: 'Invalid referral code' });
-      }
-      if (referrer._id.toString() === user._id.toString()) {
-        return res.status(400).json({ success: false, message: 'You cannot refer yourself' });
-      }
-      await Referral.create({ referrerId: referrer._id, referredId: user._id });
-      user.referredBy = referrer._id.toString();
-      await user.save();
+    
+    if (referrerId) {
+      await Referral.create({ referrerId, referredId: user._id, status: 'pending', earned: 0 });
     }
+    
     user.xp = (user.xp || 0) + 100;
     await user.save();
+    
     try {
       await sendEmail(email, 'Welcome to ChangeX Academy', '<h1>Welcome!</h1><p>Start learning and earning.</p>');
     } catch (emailError) {
       console.error('Failed to send welcome email:', emailError);
     }
+    
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
     res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
