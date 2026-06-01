@@ -22,6 +22,7 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
     const userEmail = email || user.email;
     if (!userEmail) return res.status(400).json({ success: false, message: 'Email is required' });
     if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Valid amount is required' });
+
     const response = await axios.post(
       `${PAYSTACK_BASE}/transaction/initialize`,
       { email: userEmail, amount: amount * 100, currency, metadata: finalMetadata },
@@ -38,13 +39,16 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
     const { reference, courseId } = req.body;
     const user = req.user as IUser;
     if (!reference) return res.status(400).json({ success: false, message: 'Reference required' });
+
     const verification = await axios.get(`${PAYSTACK_BASE}/transaction/verify/${reference}`, {
       headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
     });
     const data = verification.data.data;
     if (data.status !== 'success') return res.status(400).json({ success: false, message: 'Payment not successful' });
+
     const meta = data.metadata || {};
     const type = meta.type || 'course_purchase';
+
     if (type === 'course_purchase' && courseId) {
       const existing = await Enrollment.findOne({ userId: user._id, courseId });
       if (!existing) {
@@ -52,8 +56,12 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         await Course.findByIdAndUpdate(courseId, { $inc: { totalStudents: 1 } });
       }
     } else if (type === 'subscription') {
-      await User.findByIdAndUpdate(user._id, { isPremium: true, subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) });
+      await User.findByIdAndUpdate(user._id, {
+        isPremium: true,
+        subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      });
     }
+
     await Transaction.create({
       userId: user._id,
       type,
@@ -97,7 +105,9 @@ export const getTransactions = async (req: Request, res: Response, next: NextFun
     const { limit = 50 } = req.query;
     const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(Number(limit));
     res.json({ success: true, data: transactions });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 export const withdraw = async (req: Request, res: Response, next: NextFunction) => {
@@ -117,14 +127,18 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
       description: 'Withdrawal request',
     });
     res.json({ success: true, message: 'Withdrawal request submitted' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// --- NEW endpoint for frontend to fetch saved bank accounts ---
+// NEW endpoint for frontend to fetch saved bank accounts
 export const getPaymentMethods = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const bankAccounts = user.bankAccount ? [user.bankAccount] : [];
     res.json({ success: true, data: { bankAccounts } });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
