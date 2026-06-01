@@ -16,7 +16,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     
     const passwordHash = await bcrypt.hash(password, 12);
     
-    // --- REFERRAL FIX: case‑insensitive + space/hidden char tolerant ---
+    // --- REFERRAL LOOKUP (case‑insensitive) ---
     let referrerId = null;
     if (referralCode && referralCode.trim() !== '') {
       const raw = referralCode.trim().toUpperCase();
@@ -43,8 +43,11 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       referredBy: referrerId ? referrerId.toString() : undefined,
     });
     
-    if (referrerId) {
+    // --- FIXED: only create referral if both referrerId and user._id are valid ---
+    if (referrerId && user && user._id) {
       await Referral.create({ referrerId, referredId: user._id, status: 'pending', earned: 0 });
+    } else if (referrerId) {
+      console.warn(`[REFERRAL] Skipped creation: referrerId=${referrerId}, user._id=${user?._id}`);
     }
     
     user.xp = (user.xp || 0) + 100;
@@ -58,7 +61,16 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-    res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
+    
+    // --- FIXED: sameSite = 'none' in production for cross‑origin cookies ---
+    const isProd = process.env.NODE_ENV === 'production';
+    res.cookie('refreshToken', refreshToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000
+    });
+    
     res.status(201).json({ success: true, data: { accessToken, user: { id: user._id, email, firstName, lastName, roles: user.roles } } });
   } catch (err) { next(err); }
 };
@@ -81,7 +93,8 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       }
       const accessToken = signAccessToken({ userId: adminUser._id.toString(), email: adminUser.email });
       const refreshToken = signRefreshToken({ userId: adminUser._id.toString(), email: adminUser.email });
-      res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
+      const isProd = process.env.NODE_ENV === 'production';
+      res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
       return res.json({ success: true, data: { accessToken, user: { id: adminUser._id, email, firstName: adminUser.firstName, lastName: adminUser.lastName, roles: adminUser.roles } } });
     }
     const user = await User.findOne({ email }).select('+passwordHash');
@@ -92,7 +105,8 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     await user.save();
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
     const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-    res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
+    const isProd = process.env.NODE_ENV === 'production';
+    res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
     res.json({ success: true, data: { accessToken, user: { id: user._id, email, firstName: user.firstName, lastName: user.lastName, roles: user.roles } } });
   } catch (err) { next(err); }
 };
@@ -106,7 +120,8 @@ export const refreshToken = async (req: Request, res: Response) => {
     if (!user) return res.status(401).json({ success: false, message: 'User not found' });
     const newAccess = signAccessToken({ userId: user._id.toString(), email: user.email });
     const newRefresh = signRefreshToken({ userId: user._id.toString(), email: user.email });
-    res.cookie('refreshToken', newRefresh, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
+    const isProd = process.env.NODE_ENV === 'production';
+    res.cookie('refreshToken', newRefresh, { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
     res.json({ success: true, data: { accessToken: newAccess } });
   } catch (err) { res.status(401).json({ success: false, message: 'Invalid refresh token' }); }
 };
@@ -148,7 +163,8 @@ export const googleCallback = async (req: Request, res: Response) => {
   if (!user) return res.redirect(`${process.env.CLIENT_URL}/login`);
   const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
   const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-  res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', maxAge: 30 * 24 * 60 * 60 * 1000 });
+  const isProd = process.env.NODE_ENV === 'production';
+  res.cookie('refreshToken', refreshToken, { httpOnly: true, secure: isProd, sameSite: isProd ? 'none' : 'lax', maxAge: 30 * 24 * 60 * 60 * 1000 });
   res.redirect(`${process.env.CLIENT_URL}/oauth?token=${accessToken}`);
 };
 
