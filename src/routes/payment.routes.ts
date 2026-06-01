@@ -9,6 +9,6 @@ router.post('/verify-paystack', authenticate, paymentController.verifyTransactio
 router.post('/subscribe', authenticate, paymentController.subscribe);
 router.get('/transactions', authenticate, paymentController.getTransactions);
 router.post('/withdraw', authenticate, paymentController.withdraw);
-router.get('/methods', authenticate, paymentController.getPaymentMethods);   // added
+router.get('/methods', authenticate, paymentController.getPaymentMethods); // added
 
 export default router;
