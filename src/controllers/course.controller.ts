@@ -50,12 +50,11 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
   }
 };
 
-// ========== FIXED ENROLLMENT CONTROLLER ==========
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
 
-    // ✅ GUARD – prevents null user insertion
+    // ✅ GUARD – prevents null user insertion (the root cause of your duplicate error)
     if (!user || !user._id) {
       console.error('[ENROLL] Unauthenticated attempt – no user object. Headers:', req.headers.authorization);
       return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
@@ -86,7 +85,6 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     next(err);
   }
 };
-// ================================================
 
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
