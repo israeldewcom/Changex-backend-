@@ -18,7 +18,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // --- REFERRAL: support both direct referrerId and legacy referralCode ---
+    // --- REFERRAL LOOKUP ---
     let referrerObjectId = null;
 
     if (referrerId && mongoose.Types.ObjectId.isValid(referrerId)) {
@@ -47,7 +47,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       referredBy: referrerObjectId ? referrerObjectId.toString() : undefined,
     });
 
-    // ✅ SAFE REFERRAL CREATION
+    // ✅ SAFE REFERRAL CREATION – GUARDS AGAINST NULL referredId
     if (referrerObjectId && user && user._id) {
       const existingReferral = await Referral.findOne({ referredId: user._id });
       if (!existingReferral) {
@@ -74,7 +74,6 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       console.error('Failed to send welcome email:', emailError);
     }
 
-    // ✅ Long‑lived access token (30 days) – no refresh token, no cookie
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email }, '30d');
 
     res.status(201).json({
@@ -157,7 +156,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 };
 
 export const logout = async (req: Request, res: Response) => {
-  // Frontend will remove the token – nothing to do on backend
   res.json({ success: true, message: 'Logged out' });
 };
 
