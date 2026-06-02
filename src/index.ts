@@ -31,7 +31,7 @@ import redis from './config/redis.js';
 import { authenticate, authorize } from './middlewares/auth.js';
 import Enrollment from './models/Enrollment.js';
 import Referral from './models/Referral.js';
-import User from './models/User.js';               // ✅ FIXED: added missing import
+import User from './models/User.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -55,7 +55,7 @@ app.use(express.urlencoded({ extended: true }));
 
 initializePassport(app);
 
-// Global logging
+// Global logging (optional, keep as is)
 app.use((req, res, next) => {
   const start = Date.now();
   const oldJson = res.json.bind(res);
@@ -77,7 +77,7 @@ app.use((req, res, next) => {
 
 app.get('/debug/version', (req, res) => {
   res.json({
-    version: 'SIMPLE_PRODUCTION_2026_06_02',
+    version: 'FIXED_2026_06_02',
     enrollmentGuard: true,
     referralDirectId: true,
     timestamp: new Date().toISOString(),
@@ -98,7 +98,6 @@ app.get('/api/v1/check-referral/:code', async (req, res) => {
   }
 });
 app.get('/api/v1/announcements/latest', async (req, res) => {
-  // Placeholder – replace with actual controller if needed
   res.json({ success: true, data: [] });
 });
 
@@ -125,22 +124,30 @@ app.use('*', (req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-// Cleanup corrupted data on startup
+// ========== CLEANUP CORRUPTED DATA ON STARTUP ==========
 async function cleanupCorruptedData() {
   try {
+    // Delete enrollments with null userId (caused by old bug)
     const enrollResult = await Enrollment.deleteMany({ userId: null });
-    if (enrollResult.deletedCount > 0) logger.info(`🧹 Cleaned up ${enrollResult.deletedCount} enrollment(s) with userId = null`);
+    if (enrollResult.deletedCount > 0) {
+      logger.info(`🧹 Cleaned up ${enrollResult.deletedCount} enrollment(s) with userId = null`);
+    }
+    // Delete referrals with null referredId (caused by referral creation bug)
     const referResult = await Referral.deleteMany({ referredId: null });
-    if (referResult.deletedCount > 0) logger.info(`🧹 Cleaned up ${referResult.deletedCount} referral(s) with referredId = null`);
+    if (referResult.deletedCount > 0) {
+      logger.info(`🧹 Cleaned up ${referResult.deletedCount} referral(s) with referredId = null`);
+    }
   } catch (err) {
     logger.error('Failed to cleanup corrupted data:', err);
   }
 }
 
+// ========== BOOTSTRAP ==========
 async function bootstrap() {
   try {
     await connectDB();
     await connectRedis();
+    // 🧹 Run cleanup every time the server starts
     await cleanupCorruptedData();
     startWorkers();
     const PORT = process.env.PORT || 5000;
