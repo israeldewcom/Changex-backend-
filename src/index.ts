@@ -31,6 +31,7 @@ import redis from './config/redis.js';
 import { authenticate, authorize } from './middlewares/auth.js';
 import Enrollment from './models/Enrollment.js';
 import Referral from './models/Referral.js';
+import User from './models/User.js';               // ✅ FIXED: added missing import
 
 const app = express();
 const server = http.createServer(app);
