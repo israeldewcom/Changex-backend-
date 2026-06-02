@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import User, { IUser } from '../models/User.js';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
+import { signAccessToken } from '../utils/jwt.js';
 import { generateReferralCode } from '../utils/referralCode.js';
 import { sendEmail } from '../services/email.js';
 import crypto from 'crypto';
@@ -18,33 +18,26 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // --- REFERRAL: support both direct referrerId (ObjectId) and legacy referralCode ---
+    // --- REFERRAL: support both direct referrerId and legacy referralCode ---
     let referrerObjectId = null;
 
-    // 1) Try direct referrerId (most reliable)
     if (referrerId && mongoose.Types.ObjectId.isValid(referrerId)) {
       const referrer = await User.findById(referrerId).select('_id isBanned');
       if (referrer && !referrer.isBanned) referrerObjectId = referrer._id;
     }
 
-    // 2) Fallback to old referralCode (case‑insensitive, tolerant)
     if (!referrerObjectId && referralCode && referralCode.trim() !== '') {
       const raw = referralCode.trim().toUpperCase();
       let referrer = await User.findOne({ referralCode: raw, isBanned: false });
-      if (!referrer) {
-        referrer = await User.findOne({ referralCode: { $regex: `^${raw}$`, $options: 'i' }, isBanned: false });
-      }
+      if (!referrer) referrer = await User.findOne({ referralCode: { $regex: `^${raw}$`, $options: 'i' }, isBanned: false });
       if (!referrer && raw.length > 0) {
         const sanitized = raw.replace(/[^A-Z0-9]/g, '');
-        if (sanitized !== raw) {
-          referrer = await User.findOne({ referralCode: { $regex: `^${sanitized}$`, $options: 'i' }, isBanned: false });
-        }
+        if (sanitized !== raw) referrer = await User.findOne({ referralCode: { $regex: `^${sanitized}$`, $options: 'i' }, isBanned: false });
       }
       if (referrer) referrerObjectId = referrer._id;
       else console.log(`[REFERRAL] Code "${referralCode}" not found – continuing without referral`);
     }
 
-    // Create user
     const user = await User.create({
       email,
       passwordHash,
@@ -54,9 +47,8 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       referredBy: referrerObjectId ? referrerObjectId.toString() : undefined,
     });
 
-    // ✅ SAFE REFERRAL CREATION – prevents null referredId
+    // ✅ SAFE REFERRAL CREATION
     if (referrerObjectId && user && user._id) {
-      // Avoid duplicate referral (should not happen, but safe)
       const existingReferral = await Referral.findOne({ referredId: user._id });
       if (!existingReferral) {
         await Referral.create({
@@ -73,7 +65,6 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       console.error(`[REFERRAL] Skipped because user._id is missing: user=`, user);
     }
 
-    // Initial XP and welcome email
     user.xp = (user.xp || 0) + 100;
     await user.save();
 
@@ -83,17 +74,8 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       console.error('Failed to send welcome email:', emailError);
     }
 
-    // Generate tokens (simple long‑lived access token, no refresh token cookie)
+    // ✅ Long‑lived access token (30 days) – no refresh token, no cookie
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email }, '30d');
-    const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-
-    const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
 
     res.status(201).json({
       success: true,
@@ -117,7 +99,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   try {
     const { email, password } = req.body;
 
-    // Auto‑create admin if first login
     if (email === 'admin@changex.com') {
       let adminUser = await User.findOne({ email });
       if (!adminUser) {
@@ -132,14 +113,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
         });
       }
       const accessToken = signAccessToken({ userId: adminUser._id.toString(), email: adminUser.email }, '30d');
-      const refreshToken = signRefreshToken({ userId: adminUser._id.toString(), email: adminUser.email });
-      const isProd = process.env.NODE_ENV === 'production';
-      res.cookie('refreshToken', refreshToken, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: isProd ? 'none' : 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      });
       return res.json({
         success: true,
         data: {
@@ -164,14 +137,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     await user.save();
 
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email }, '30d');
-    const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-    const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
 
     res.json({
       success: true,
@@ -191,30 +156,8 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
-export const refreshToken = async (req: Request, res: Response) => {
-  try {
-    const token = req.cookies.refreshToken;
-    if (!token) return res.status(401).json({ success: false, message: 'Refresh token missing' });
-    const decoded = verifyRefreshToken(token);
-    const user = await User.findById(decoded.userId);
-    if (!user) return res.status(401).json({ success: false, message: 'User not found' });
-    const newAccess = signAccessToken({ userId: user._id.toString(), email: user.email }, '30d');
-    const newRefresh = signRefreshToken({ userId: user._id.toString(), email: user.email });
-    const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', newRefresh, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
-    res.json({ success: true, data: { accessToken: newAccess } });
-  } catch (err) {
-    res.status(401).json({ success: false, message: 'Invalid refresh token' });
-  }
-};
-
 export const logout = async (req: Request, res: Response) => {
-  res.clearCookie('refreshToken');
+  // Frontend will remove the token – nothing to do on backend
   res.json({ success: true, message: 'Logged out' });
 };
 
@@ -253,14 +196,6 @@ export const googleCallback = async (req: Request, res: Response) => {
   const user = req.user as any;
   if (!user) return res.redirect(`${process.env.CLIENT_URL}/login`);
   const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email }, '30d');
-  const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-  const isProd = process.env.NODE_ENV === 'production';
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    maxAge: 30 * 24 * 60 * 60 * 1000,
-  });
   res.redirect(`${process.env.CLIENT_URL}/oauth?token=${accessToken}`);
 };
 
