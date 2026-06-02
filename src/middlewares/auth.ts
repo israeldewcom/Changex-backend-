@@ -22,8 +22,6 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     try {
       decoded = verifyAccessToken(token);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown token error';
-      console.error('[AUTH] Token verification failed:', errorMessage);
       return res.status(401).json({ success: false, message: 'Invalid or expired token' });
     }
     if (!decoded || !decoded.userId) {
@@ -39,8 +37,6 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     req.user = user;
     next();
   } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : 'Unknown authentication error';
-    console.error('[AUTH] Unexpected error:', errorMessage);
     return res.status(401).json({ success: false, message: 'Authentication failed' });
   }
 };
