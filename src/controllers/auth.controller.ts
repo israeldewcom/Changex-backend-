@@ -13,31 +13,39 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   try {
     const { email, password, firstName, lastName, referralCode, referrerId } = req.body;
 
+    // Check existing user
     const existing = await User.findOne({ email });
     if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // --- REFERRAL LOOKUP ---
+    // --- REFERRAL LOOKUP (supports both direct referrerId and legacy referralCode) ---
     let referrerObjectId = null;
 
+    // 1) Direct referrerId (ObjectId) – most reliable
     if (referrerId && mongoose.Types.ObjectId.isValid(referrerId)) {
       const referrer = await User.findById(referrerId).select('_id isBanned');
       if (referrer && !referrer.isBanned) referrerObjectId = referrer._id;
     }
 
+    // 2) Fallback to referralCode (case‑insensitive, tolerant)
     if (!referrerObjectId && referralCode && referralCode.trim() !== '') {
       const raw = referralCode.trim().toUpperCase();
       let referrer = await User.findOne({ referralCode: raw, isBanned: false });
-      if (!referrer) referrer = await User.findOne({ referralCode: { $regex: `^${raw}$`, $options: 'i' }, isBanned: false });
+      if (!referrer) {
+        referrer = await User.findOne({ referralCode: { $regex: `^${raw}$`, $options: 'i' }, isBanned: false });
+      }
       if (!referrer && raw.length > 0) {
         const sanitized = raw.replace(/[^A-Z0-9]/g, '');
-        if (sanitized !== raw) referrer = await User.findOne({ referralCode: { $regex: `^${sanitized}$`, $options: 'i' }, isBanned: false });
+        if (sanitized !== raw) {
+          referrer = await User.findOne({ referralCode: { $regex: `^${sanitized}$`, $options: 'i' }, isBanned: false });
+        }
       }
       if (referrer) referrerObjectId = referrer._id;
       else console.log(`[REFERRAL] Code "${referralCode}" not found – continuing without referral`);
     }
 
+    // Create user
     const user = await User.create({
       email,
       passwordHash,
@@ -47,24 +55,32 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       referredBy: referrerObjectId ? referrerObjectId.toString() : undefined,
     });
 
-    // ✅ SAFE REFERRAL CREATION – GUARDS AGAINST NULL referredId
+    // ✅ CRITICAL: Only create referral if both referrerObjectId and user._id are valid
     if (referrerObjectId && user && user._id) {
-      const existingReferral = await Referral.findOne({ referredId: user._id });
-      if (!existingReferral) {
-        await Referral.create({
-          referrerId: referrerObjectId,
-          referredId: user._id,
-          status: 'pending',
-          earned: 0,
-        });
-        console.log(`[REFERRAL] Created referral for user ${user._id} from referrer ${referrerObjectId}`);
+      const userIdObj = user._id;
+      // Extra safeguard: ensure userIdObj is not null/undefined
+      if (userIdObj && userIdObj.toString() !== 'null') {
+        // Avoid duplicate referral (should not happen, but safe)
+        const existingReferral = await Referral.findOne({ referredId: userIdObj });
+        if (!existingReferral) {
+          await Referral.create({
+            referrerId: referrerObjectId,
+            referredId: userIdObj,
+            status: 'pending',
+            earned: 0,
+          });
+          console.log(`[REFERRAL] Created referral for user ${userIdObj} from referrer ${referrerObjectId}`);
+        } else {
+          console.log(`[REFERRAL] Referral already exists for user ${userIdObj}`);
+        }
       } else {
-        console.log(`[REFERRAL] Referral already exists for user ${user._id}`);
+        console.error(`[REFERRAL] Invalid user._id: ${user._id}`);
       }
     } else if (referrerObjectId) {
       console.error(`[REFERRAL] Skipped because user._id is missing: user=`, user);
     }
 
+    // Initial XP and welcome email
     user.xp = (user.xp || 0) + 100;
     await user.save();
 
@@ -74,6 +90,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       console.error('Failed to send welcome email:', emailError);
     }
 
+    // Generate long‑lived access token (30 days, no refresh token needed)
     const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email }, '30d');
 
     res.status(201).json({
@@ -98,6 +115,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   try {
     const { email, password } = req.body;
 
+    // Auto‑create admin if first login
     if (email === 'admin@changex.com') {
       let adminUser = await User.findOne({ email });
       if (!adminUser) {
@@ -156,6 +174,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 };
 
 export const logout = async (req: Request, res: Response) => {
+  // Frontend will remove the token – no backend action needed
   res.json({ success: true, message: 'Logged out' });
 };
 
