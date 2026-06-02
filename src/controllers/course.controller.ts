@@ -50,12 +50,14 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
   }
 };
 
+// ========== FIXED ENROLLMENT CONTROLLER ==========
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    // *** SIMPLE GUARD – ELIMINATES user: null errors ***
+
+    // ✅ GUARD – prevents null user insertion
     if (!user || !user._id) {
-      console.error('[ENROLL] Unauthenticated attempt');
+      console.error('[ENROLL] Unauthenticated attempt – no user object. Headers:', req.headers.authorization);
       return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
     }
 
@@ -84,6 +86,7 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     next(err);
   }
 };
+// ================================================
 
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -117,10 +120,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
     await progress.save();
 
     const totalLessons = await Lesson.countDocuments({ courseId: enrollment.courseId });
-    const completedLessons = await LessonProgress.countDocuments({
-      enrollmentId: enrollment._id,
-      completed: true,
-    });
+    const completedLessons = await LessonProgress.countDocuments({ enrollmentId: enrollment._id, completed: true });
     enrollment.progress = Math.round((completedLessons / totalLessons) * 100);
     if (enrollment.progress === 100 && enrollment.status !== 'completed') {
       enrollment.status = 'completed';
