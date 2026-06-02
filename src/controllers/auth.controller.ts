@@ -2,33 +2,30 @@ import { Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import User, { IUser } from '../models/User.js';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
+import { signAccessToken } from '../utils/jwt.js';
 import { generateReferralCode } from '../utils/referralCode.js';
 import { sendEmail } from '../services/email.js';
 import crypto from 'crypto';
 import Referral from '../models/Referral.js';
 import redis from '../config/redis.js';
 
+// Register – accepts both referralCode (old) and referrerId (new)
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password, firstName, lastName, referralCode, referrerId: directReferrerId } = req.body;
+    const { email, password, firstName, lastName, referralCode, referrerId } = req.body;
 
     const existing = await User.findOne({ email });
     if (existing) return res.status(409).json({ success: false, message: 'Email already registered' });
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // --- REFERRAL: support both old referralCode (string) and new referrerId (ObjectId) ---
+    // Determine referrer – prefer direct referrerId (ObjectId)
     let referrerObjectId = null;
-
-    // New method: direct referrerId (most reliable)
-    if (directReferrerId && mongoose.Types.ObjectId.isValid(directReferrerId)) {
-      const referrer = await User.findById(directReferrerId).select('_id isBanned');
-      if (referrer && !referrer.isBanned) {
-        referrerObjectId = referrer._id;
-      }
+    if (referrerId && mongoose.Types.ObjectId.isValid(referrerId)) {
+      const referrer = await User.findById(referrerId).select('_id isBanned');
+      if (referrer && !referrer.isBanned) referrerObjectId = referrer._id;
     }
-    // Fallback to old referralCode lookup (case‑insensitive)
+    // Fallback to old referralCode (case‑insensitive, trimmed)
     if (!referrerObjectId && referralCode && referralCode.trim() !== '') {
       const raw = referralCode.trim().toUpperCase();
       let referrer = await User.findOne({ referralCode: raw, isBanned: false });
@@ -54,7 +51,6 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       referredBy: referrerObjectId ? referrerObjectId.toString() : undefined,
     });
 
-    // --- FIXED: only create referral if both referrerObjectId and user._id are valid ---
     if (referrerObjectId && user && user._id) {
       await Referral.create({ referrerId: referrerObjectId, referredId: user._id, status: 'pending', earned: 0 });
     } else if (referrerObjectId) {
@@ -70,16 +66,8 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       console.error('Failed to send welcome email:', emailError);
     }
 
-    const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
-    const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-
-    const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
+    // Simple long‑lived access token (30 days) – no refresh token
+    const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email }, '30d');
 
     res.status(201).json({
       success: true,
@@ -102,12 +90,14 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 export const login = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
+
+    // Auto‑create admin for first login
     if (email === 'admin@changex.com') {
       let adminUser = await User.findOne({ email });
       if (!adminUser) {
         adminUser = await User.create({
           email: 'admin@changex.com',
-          passwordHash: await bcrypt.hash('admin123', 12),
+          passwordHash: await bcrypt.hash('Admin123', 12),
           firstName: 'Admin',
           lastName: 'User',
           roles: ['admin'],
@@ -115,15 +105,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
           isApprovedInstructor: true,
         });
       }
-      const accessToken = signAccessToken({ userId: adminUser._id.toString(), email: adminUser.email });
-      const refreshToken = signRefreshToken({ userId: adminUser._id.toString(), email: adminUser.email });
-      const isProd = process.env.NODE_ENV === 'production';
-      res.cookie('refreshToken', refreshToken, {
-        httpOnly: true,
-        secure: isProd,
-        sameSite: isProd ? 'none' : 'lax',
-        maxAge: 30 * 24 * 60 * 60 * 1000,
-      });
+      const accessToken = signAccessToken({ userId: adminUser._id.toString(), email: adminUser.email }, '30d');
       return res.json({
         success: true,
         data: {
@@ -147,15 +129,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
     user.lastActivity = new Date();
     await user.save();
 
-    const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
-    const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-    const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', refreshToken, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
+    const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email }, '30d');
     res.json({
       success: true,
       data: {
@@ -174,30 +148,8 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
-export const refreshToken = async (req: Request, res: Response) => {
-  try {
-    const token = req.cookies.refreshToken;
-    if (!token) return res.status(401).json({ success: false, message: 'Refresh token missing' });
-    const decoded = verifyRefreshToken(token);
-    const user = await User.findById(decoded.userId);
-    if (!user) return res.status(401).json({ success: false, message: 'User not found' });
-    const newAccess = signAccessToken({ userId: user._id.toString(), email: user.email });
-    const newRefresh = signRefreshToken({ userId: user._id.toString(), email: user.email });
-    const isProd = process.env.NODE_ENV === 'production';
-    res.cookie('refreshToken', newRefresh, {
-      httpOnly: true,
-      secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
-      maxAge: 30 * 24 * 60 * 60 * 1000,
-    });
-    res.json({ success: true, data: { accessToken: newAccess } });
-  } catch (err) {
-    res.status(401).json({ success: false, message: 'Invalid refresh token' });
-  }
-};
-
 export const logout = async (req: Request, res: Response) => {
-  res.clearCookie('refreshToken');
+  // Simply clear token on frontend – nothing to do on backend
   res.json({ success: true, message: 'Logged out' });
 };
 
@@ -235,15 +187,7 @@ export const resetPassword = async (req: Request, res: Response, next: NextFunct
 export const googleCallback = async (req: Request, res: Response) => {
   const user = req.user as any;
   if (!user) return res.redirect(`${process.env.CLIENT_URL}/login`);
-  const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email });
-  const refreshToken = signRefreshToken({ userId: user._id.toString(), email: user.email });
-  const isProd = process.env.NODE_ENV === 'production';
-  res.cookie('refreshToken', refreshToken, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    maxAge: 30 * 24 * 60 * 60 * 1000,
-  });
+  const accessToken = signAccessToken({ userId: user._id.toString(), email: user.email }, '30d');
   res.redirect(`${process.env.CLIENT_URL}/oauth?token=${accessToken}`);
 };
 
@@ -251,8 +195,7 @@ export const githubCallback = googleCallback;
 
 export const loginGet = async (req: Request, res: Response, next: NextFunction) => {
   req.body = { ...req.query, ...req.body };
-  if (!req.body.email || !req.body.password)
-    return res.status(400).json({ success: false, message: 'Email and password required' });
+  if (!req.body.email || !req.body.password) return res.status(400).json({ success: false, message: 'Email and password required' });
   return login(req, res, next);
 };
 
