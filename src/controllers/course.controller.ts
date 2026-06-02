@@ -53,9 +53,9 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    // --- ENROLLMENT GUARD: prevent null user ---
+    // *** SIMPLE GUARD – ELIMINATES user: null errors ***
     if (!user || !user._id) {
-      console.error('[ENROLL] No user object. Headers:', req.headers.authorization);
+      console.error('[ENROLL] Unauthenticated attempt');
       return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
     }
 
