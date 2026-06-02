@@ -55,7 +55,7 @@ app.use(express.urlencoded({ extended: true }));
 
 initializePassport(app);
 
-// Global logging (optional, keep as is)
+// Global logging
 app.use((req, res, next) => {
   const start = Date.now();
   const oldJson = res.json.bind(res);
@@ -77,7 +77,7 @@ app.use((req, res, next) => {
 
 app.get('/debug/version', (req, res) => {
   res.json({
-    version: 'FIXED_2026_06_02',
+    version: 'FIXED_2026_06_02_NO_REFRESH',
     enrollmentGuard: true,
     referralDirectId: true,
     timestamp: new Date().toISOString(),
@@ -127,12 +127,10 @@ app.use('*', (req, res) => {
 // ========== CLEANUP CORRUPTED DATA ON STARTUP ==========
 async function cleanupCorruptedData() {
   try {
-    // Delete enrollments with null userId (caused by old bug)
     const enrollResult = await Enrollment.deleteMany({ userId: null });
     if (enrollResult.deletedCount > 0) {
       logger.info(`🧹 Cleaned up ${enrollResult.deletedCount} enrollment(s) with userId = null`);
     }
-    // Delete referrals with null referredId (caused by referral creation bug)
     const referResult = await Referral.deleteMany({ referredId: null });
     if (referResult.deletedCount > 0) {
       logger.info(`🧹 Cleaned up ${referResult.deletedCount} referral(s) with referredId = null`);
@@ -142,12 +140,10 @@ async function cleanupCorruptedData() {
   }
 }
 
-// ========== BOOTSTRAP ==========
 async function bootstrap() {
   try {
     await connectDB();
     await connectRedis();
-    // 🧹 Run cleanup every time the server starts
     await cleanupCorruptedData();
     startWorkers();
     const PORT = process.env.PORT || 5000;
