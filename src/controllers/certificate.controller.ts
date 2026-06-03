@@ -10,10 +10,12 @@ export const downloadCertificate = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
     const { courseId } = req.params;
+
     const enrollment = await Enrollment.findOne({ userId: user._id, courseId, status: 'completed' });
     if (!enrollment) {
       return res.status(403).json({ success: false, message: 'Course not completed' });
     }
+
     const course = await Course.findById(courseId);
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
@@ -28,7 +30,7 @@ export const downloadCertificate = async (req: Request, res: Response) => {
       res.send(buffer);
     });
 
-    // Use instructor‑uploaded template if available, otherwise default design
+    // Use instructor‑uploaded template if available, else default
     if (course.certificateTemplate) {
       try {
         const response = await axios.get(course.certificateTemplate, { responseType: 'arraybuffer' });
@@ -42,7 +44,7 @@ export const downloadCertificate = async (req: Request, res: Response) => {
       drawDefaultCertificate(doc, user, course);
     }
 
-    // Always overlay text (name, course, date, powered by)
+    // Overlay text
     doc.fontSize(24).font('Helvetica-Bold')
       .text(`${user.firstName} ${user.lastName}`, 0, doc.page.height / 2 - 40, { align: 'center' });
     doc.fontSize(18).font('Helvetica')
@@ -60,18 +62,10 @@ export const downloadCertificate = async (req: Request, res: Response) => {
 };
 
 function drawDefaultCertificate(doc: PDFKit.PDFDocument, user: IUser, course: any) {
-  // Background color
   doc.rect(0, 0, doc.page.width, doc.page.height).fill('#f5f5f5');
   doc.rect(50, 50, doc.page.width - 100, doc.page.height - 100).stroke();
-
   doc.fontSize(30).font('Helvetica-Bold')
     .text('Certificate of Completion', 0, 120, { align: 'center' });
   doc.fontSize(16).font('Helvetica')
     .text('This certifies that', 0, 200, { align: 'center' });
-  doc.fontSize(24).font('Helvetica-Bold')
-    .text(`${user.firstName} ${user.lastName}`, 0, 250, { align: 'center' });
-  doc.fontSize(16).font('Helvetica')
-    .text('has successfully completed the course', 0, 320, { align: 'center' });
-  doc.fontSize(20).font('Helvetica-Bold')
-    .text(course.title, 0, 380, { align: 'center' });
 }
