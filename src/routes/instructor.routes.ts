@@ -18,8 +18,6 @@ router.delete('/courses/:courseId/lessons/:lessonId', instructorController.delet
 router.post('/courses/:courseId/media/resource', upload.single('file'), instructorController.uploadMedia);
 router.get('/courses/:courseId/questions', instructorController.getCourseQuestions);
 router.post('/questions/:id/answer', instructorController.answerQuestion);
-
-// ✅ NEW: upload certificate template
 router.post('/courses/:courseId/certificate-template', upload.single('template'), instructorController.uploadCertificateTemplate);
 
 export default router;
