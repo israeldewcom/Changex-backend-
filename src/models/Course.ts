@@ -21,7 +21,8 @@ export interface ICourse extends Document {
   avgRating: number;
   certificateEnabled: boolean;
   instructorId: mongoose.Types.ObjectId;
-  slug?: string;                    // <-- ADDED to avoid null index errors
+  slug?: string;
+  certificateTemplate?: string;   // ✅ NEW: URL of instructor‑uploaded certificate template
   createdAt: Date;
   updatedAt: Date;
 }
@@ -48,13 +49,13 @@ const CourseSchema = new Schema<ICourse>(
     avgRating: { type: Number, default: 0 },
     certificateEnabled: { type: Boolean, default: true },
     instructorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    slug: { type: String, unique: true, sparse: true },   // <-- ADDED
+    slug: { type: String, unique: true, sparse: true },
+    certificateTemplate: { type: String, default: '' },   // ✅ NEW field
   },
   { timestamps: true }
 );
 
 CourseSchema.index({ isPublished: 1, approvalStatus: 1 });
 CourseSchema.index({ category: 1 });
-CourseSchema.index({ slug: 1 }, { unique: true, sparse: true });
 
 export default mongoose.model<ICourse>('Course', CourseSchema);
