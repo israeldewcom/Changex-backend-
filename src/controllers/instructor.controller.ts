@@ -68,20 +68,29 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
     if (updateData.title) {
       slug = generateSlug(updateData.title);
     }
-    const course = await Course.findOneAndUpdate(
-      { _id: req.params.id, instructorId: user._id },
-      { ...updateData, description: sanitizeHtml(updateData.description || ''), slug },
-      { new: true }
-    );
+
+    const course = await Course.findOne({ _id: req.params.id, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    if (lessons && Array.isArray(lessons)) {
-      await Lesson.deleteMany({ courseId: course._id });
-      for (let i = 0; i < lessons.length; i++) {
-        await Lesson.create({ ...lessons[i], courseId: course._id, order: i + 1 });
-      }
-      await Course.findByIdAndUpdate(course._id, { totalLessons: lessons.length });
+
+    // If the course was approved, reset to pending after edit (requires re‑approval)
+    const wasApproved = course.approvalStatus === 'approved';
+    const updatePayload = { ...updateData, description: sanitizeHtml(updateData.description || ''), slug };
+    if (wasApproved) {
+      updatePayload.approvalStatus = 'pending';
     }
-    res.json({ success: true, data: course });
+
+    const updatedCourse = await Course.findByIdAndUpdate(req.params.id, updatePayload, { new: true });
+    if (!updatedCourse) return res.status(404).json({ success: false, message: 'Course not found' });
+
+    if (lessons && Array.isArray(lessons)) {
+      await Lesson.deleteMany({ courseId: updatedCourse._id });
+      for (let i = 0; i < lessons.length; i++) {
+        await Lesson.create({ ...lessons[i], courseId: updatedCourse._id, order: i + 1 });
+      }
+      await Course.findByIdAndUpdate(updatedCourse._id, { totalLessons: lessons.length });
+    }
+
+    res.json({ success: true, data: updatedCourse });
   } catch (err: any) {
     if (err.code === 11000 && err.keyPattern?.slug) {
       return res.status(400).json({ success: false, message: 'A course with a similar title already exists. Please change the title.' });
