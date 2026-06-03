@@ -43,8 +43,32 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
 export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const enrollments = await Enrollment.find({ userId: user._id }).populate('courseId');
-    res.json({ success: true, data: enrollments });
+    if (!user || !user._id) {
+      return res.status(401).json({ success: false, message: 'User not authenticated' });
+    }
+
+    // Fetch enrollments and populate the course field with full course data
+    const enrollments = await Enrollment.find({ userId: user._id })
+      .populate({
+        path: 'courseId',
+        select: 'title thumbnail totalLessons price rating level instructorId'
+      })
+      .lean();
+
+    // Transform to match frontend expectations: rename courseId to course and ensure it's populated
+    const formatted = enrollments.map(enrollment => ({
+      _id: enrollment._id,
+      userId: enrollment.userId,
+      course: enrollment.courseId,          // rename to 'course' for frontend
+      progress: enrollment.progress || 0,
+      status: enrollment.status,
+      startedAt: enrollment.startedAt,
+      completedAt: enrollment.completedAt,
+      // Also include direct courseId as fallback
+      courseId: enrollment.courseId?._id || enrollment.courseId
+    }));
+
+    res.json({ success: true, data: formatted });
   } catch (err) {
     next(err);
   }
@@ -54,9 +78,9 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
 
-    // ✅ GUARD – prevents null user insertion (the root cause of your duplicate error)
+    // ✅ ENROLLMENT GUARD – prevents null user insertion
     if (!user || !user._id) {
-      console.error('[ENROLL] Unauthenticated attempt – no user object. Headers:', req.headers.authorization);
+      console.error('[ENROLL] Unauthenticated attempt. Headers:', req.headers.authorization);
       return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
     }
 
@@ -77,7 +101,21 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     await Enrollment.create({ userId: user._id, courseId: course._id });
     course.totalStudents += 1;
     await course.save();
-    res.json({ success: true, message: 'Enrolled successfully' });
+
+    // Return the new enrollment with populated course data for immediate UI update
+    const newEnrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id })
+      .populate('courseId', 'title thumbnail totalLessons price rating level');
+
+    res.json({
+      success: true,
+      message: 'Enrolled successfully',
+      data: {
+        _id: newEnrollment?._id,
+        course: newEnrollment?.courseId,
+        progress: 0,
+        status: 'active'
+      }
+    });
   } catch (err: any) {
     if (err.code === 11000 && err.keyPattern?.userId && err.keyPattern?.courseId) {
       return res.status(400).json({ success: false, message: 'Already enrolled' });
