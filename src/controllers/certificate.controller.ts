@@ -4,13 +4,13 @@ import Enrollment from '../models/Enrollment.js';
 import Course from '../models/Course.js';
 import PDFDocument from 'pdfkit';
 import axios from 'axios';
-import { uploadToCloudinary } from '../services/cloudinary.js';
 
 export const downloadCertificate = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
     const { courseId } = req.params;
 
+    // Verify course completion
     const enrollment = await Enrollment.findOne({ userId: user._id, courseId, status: 'completed' });
     if (!enrollment) {
       return res.status(403).json({ success: false, message: 'Course not completed' });
@@ -19,11 +19,11 @@ export const downloadCertificate = async (req: Request, res: Response) => {
     const course = await Course.findById(courseId);
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
+    // Create PDF
     const doc = new PDFDocument({ layout: 'landscape', size: 'A4' });
     const chunks: Buffer[] = [];
-
     doc.on('data', chunk => chunks.push(chunk));
-    doc.on('end', async () => {
+    doc.on('end', () => {
       const buffer = Buffer.concat(chunks);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename=certificate_${courseId}.pdf`);
@@ -44,7 +44,7 @@ export const downloadCertificate = async (req: Request, res: Response) => {
       drawDefaultCertificate(doc, user, course);
     }
 
-    // Overlay text
+    // Overlay text (name, course, date, powered by)
     doc.fontSize(24).font('Helvetica-Bold')
       .text(`${user.firstName} ${user.lastName}`, 0, doc.page.height / 2 - 40, { align: 'center' });
     doc.fontSize(18).font('Helvetica')
