@@ -47,7 +47,6 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
 
-    // Fetch enrollments and populate the course field with full course data
     const enrollments = await Enrollment.find({ userId: user._id })
       .populate({
         path: 'courseId',
@@ -55,16 +54,14 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
       })
       .lean();
 
-    // Transform to match frontend expectations: rename courseId to course and ensure it's populated
     const formatted = enrollments.map(enrollment => ({
       _id: enrollment._id,
       userId: enrollment.userId,
-      course: enrollment.courseId,          // rename to 'course' for frontend
+      course: enrollment.courseId,
       progress: enrollment.progress || 0,
       status: enrollment.status,
       startedAt: enrollment.startedAt,
       completedAt: enrollment.completedAt,
-      // Also include direct courseId as fallback
       courseId: enrollment.courseId?._id || enrollment.courseId
     }));
 
@@ -77,8 +74,6 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-
-    // ✅ ENROLLMENT GUARD – prevents null user insertion
     if (!user || !user._id) {
       console.error('[ENROLL] Unauthenticated attempt. Headers:', req.headers.authorization);
       return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
@@ -102,7 +97,6 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     course.totalStudents += 1;
     await course.save();
 
-    // Return the new enrollment with populated course data for immediate UI update
     const newEnrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id })
       .populate('courseId', 'title thumbnail totalLessons price rating level');
 
@@ -145,11 +139,12 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       progress.timeSpent += timeSpent || 0;
     }
 
+    // ✅ XP award (only once per lesson)
     if (completed && !progress.completed) {
       const lesson = await Lesson.findById(lessonId);
       if (lesson) {
-        user.xp += lesson.xpReward;
-        await user.save();
+        user.xp = (user.xp || 0) + (lesson.xpReward || 50);
+        await user.save();  // ensure XP saved
       }
     }
 
@@ -161,8 +156,9 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
     if (enrollment.progress === 100 && enrollment.status !== 'completed') {
       enrollment.status = 'completed';
       enrollment.completedAt = new Date();
+      // ✅ completion bonus
       user.walletBalance = (user.walletBalance || 0) + 100;
-      await user.save();
+      await user.save();  // ensure balance saved
       await Transaction.create({
         userId: user._id,
         type: 'bonus',
