@@ -1,25 +1,77 @@
-// src/controllers/certificate.controller.ts
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response } from 'express';
 import { IUser } from '../models/User.js';
 import Enrollment from '../models/Enrollment.js';
 import Course from '../models/Course.js';
-import { generateCertificate } from '../services/pdfGenerator.js';
+import PDFDocument from 'pdfkit';
+import axios from 'axios';
+import { uploadToCloudinary } from '../services/cloudinary.js';
 
-export const downloadCertificate = async (req: Request, res: Response, next: NextFunction) => {
+export const downloadCertificate = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
     const { courseId } = req.params;
     const enrollment = await Enrollment.findOne({ userId: user._id, courseId, status: 'completed' });
     if (!enrollment) {
-      res.status(403).json({ success: false, message: 'Complete the course first' });
-      return;
+      return res.status(403).json({ success: false, message: 'Course not completed' });
     }
     const course = await Course.findById(courseId);
-    if (!course) {
-      res.status(404).json({ success: false, message: 'Course not found' });
-      return;
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
+    const doc = new PDFDocument({ layout: 'landscape', size: 'A4' });
+    const chunks: Buffer[] = [];
+
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('end', async () => {
+      const buffer = Buffer.concat(chunks);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename=certificate_${courseId}.pdf`);
+      res.send(buffer);
+    });
+
+    // Use instructor‑uploaded template if available, otherwise default design
+    if (course.certificateTemplate) {
+      try {
+        const response = await axios.get(course.certificateTemplate, { responseType: 'arraybuffer' });
+        const templateBuffer = Buffer.from(response.data, 'binary');
+        doc.image(templateBuffer, 0, 0, { width: doc.page.width, height: doc.page.height });
+      } catch (err) {
+        console.error('Failed to load certificate template, using default', err);
+        drawDefaultCertificate(doc, user, course);
+      }
+    } else {
+      drawDefaultCertificate(doc, user, course);
     }
-    const pdfUrl = await generateCertificate(`${user.firstName} ${user.lastName}`, course.title, enrollment.completedAt || new Date());
-    res.json({ success: true, data: { url: pdfUrl } });
-  } catch (err) { next(err); }
+
+    // Always overlay text (name, course, date, powered by)
+    doc.fontSize(24).font('Helvetica-Bold')
+      .text(`${user.firstName} ${user.lastName}`, 0, doc.page.height / 2 - 40, { align: 'center' });
+    doc.fontSize(18).font('Helvetica')
+      .text(course.title, 0, doc.page.height / 2 + 20, { align: 'center' });
+    doc.fontSize(12).font('Helvetica')
+      .text(`Date: ${new Date().toLocaleDateString()}`, 0, doc.page.height - 100, { align: 'center' });
+    doc.fontSize(10).font('Helvetica')
+      .text('Powered by ChangeX Academy', 0, doc.page.height - 60, { align: 'center' });
+
+    doc.end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Failed to generate certificate' });
+  }
 };
+
+function drawDefaultCertificate(doc: PDFKit.PDFDocument, user: IUser, course: any) {
+  // Background color
+  doc.rect(0, 0, doc.page.width, doc.page.height).fill('#f5f5f5');
+  doc.rect(50, 50, doc.page.width - 100, doc.page.height - 100).stroke();
+
+  doc.fontSize(30).font('Helvetica-Bold')
+    .text('Certificate of Completion', 0, 120, { align: 'center' });
+  doc.fontSize(16).font('Helvetica')
+    .text('This certifies that', 0, 200, { align: 'center' });
+  doc.fontSize(24).font('Helvetica-Bold')
+    .text(`${user.firstName} ${user.lastName}`, 0, 250, { align: 'center' });
+  doc.fontSize(16).font('Helvetica')
+    .text('has successfully completed the course', 0, 320, { align: 'center' });
+  doc.fontSize(20).font('Helvetica-Bold')
+    .text(course.title, 0, 380, { align: 'center' });
+}
