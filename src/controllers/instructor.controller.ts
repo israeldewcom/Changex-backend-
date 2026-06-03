@@ -9,12 +9,8 @@ import { sanitizeHtml } from '../middlewares/sanitize.js';
 import cloudinary from '../config/cloudinary.js';
 import { getIO } from '../socket.js';
 
-// Helper to generate slug from title
 function generateSlug(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
 export const getInstructorDashboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -34,15 +30,13 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
     const { lessons, ...courseData } = req.body;
-    // Generate slug from title
     const slug = generateSlug(courseData.title || 'untitled');
     const course = await Course.create({
       ...courseData,
       instructorId: user._id,
       description: sanitizeHtml(courseData.description || ''),
-      slug,   // <-- set slug
+      slug,
     });
-    // Save lessons if provided
     if (lessons && Array.isArray(lessons) && lessons.length > 0) {
       for (let i = 0; i < lessons.length; i++) {
         const lesson = lessons[i];
@@ -59,7 +53,6 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
     }
     res.status(201).json({ success: true, data: course });
   } catch (err: any) {
-    // Handle duplicate slug error
     if (err.code === 11000 && err.keyPattern?.slug) {
       return res.status(400).json({ success: false, message: 'A course with a similar title already exists. Please change the title.' });
     }
@@ -71,7 +64,6 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     const { lessons, ...updateData } = req.body;
-    // Regenerate slug if title changed
     let slug: string | undefined;
     if (updateData.title) {
       slug = generateSlug(updateData.title);
@@ -82,7 +74,6 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
       { new: true }
     );
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    // Update lessons if provided (simplified: replace all)
     if (lessons && Array.isArray(lessons)) {
       await Lesson.deleteMany({ courseId: course._id });
       for (let i = 0; i < lessons.length; i++) {
@@ -187,5 +178,26 @@ export const answerQuestion = async (req: Request, res: Response, next: NextFunc
     await Notification.create({ userId: question.userId, title: 'Your question was answered', message: answer.substring(0, 100), type: 'course' });
     getIO().to(`user:${question.userId}`).emit('notification', { title: 'Question answered' });
     res.json({ success: true, message: 'Answer posted' });
+  } catch (err) { next(err); }
+};
+
+// ✅ NEW: upload certificate template for a course
+export const uploadCertificateTemplate = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { courseId } = req.params;
+    const course = await Course.findOne({ _id: courseId, instructorId: user._id });
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+    const result = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: `certificates/templates/${courseId}`, resource_type: 'image' },
+        (error, result) => error ? reject(error) : resolve(result)
+      );
+      uploadStream.end(req.file!.buffer);
+    });
+    course.certificateTemplate = (result as any).secure_url;
+    await course.save();
+    res.json({ success: true, data: { url: (result as any).secure_url } });
   } catch (err) { next(err); }
 };
