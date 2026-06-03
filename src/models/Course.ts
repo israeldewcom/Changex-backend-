@@ -22,7 +22,7 @@ export interface ICourse extends Document {
   certificateEnabled: boolean;
   instructorId: mongoose.Types.ObjectId;
   slug?: string;
-  certificateTemplate?: string;   // ✅ NEW: URL of instructor‑uploaded certificate template
+  certificateTemplate?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -50,7 +50,7 @@ const CourseSchema = new Schema<ICourse>(
     certificateEnabled: { type: Boolean, default: true },
     instructorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     slug: { type: String, unique: true, sparse: true },
-    certificateTemplate: { type: String, default: '' },   // ✅ NEW field
+    certificateTemplate: { type: String, default: '' },
   },
   { timestamps: true }
 );
