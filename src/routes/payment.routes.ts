@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as paymentController from '../controllers/payment.controller.js';
 import { authenticate } from '../middlewares/auth.js';
+import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
@@ -9,6 +10,11 @@ router.post('/verify-paystack', authenticate, paymentController.verifyTransactio
 router.post('/subscribe', authenticate, paymentController.subscribe);
 router.get('/transactions', authenticate, paymentController.getTransactions);
 router.post('/withdraw', authenticate, paymentController.withdraw);
-router.get('/methods', authenticate, paymentController.getPaymentMethods); // added
+router.get('/methods', authenticate, paymentController.getPaymentMethods);
+
+// Manual payment routes
+router.post('/manual', authenticate, upload.single('receipt'), paymentController.submitManualPayment);
+router.get('/manual/:paymentId', authenticate, paymentController.getManualPaymentStatus);
+router.get('/manual/user/all', authenticate, paymentController.getUserManualPayments);
 
 export default router;
