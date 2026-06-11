@@ -21,5 +21,13 @@ router.post('/announcements', adminController.createAnnouncement);
 router.get('/coupons', adminController.getCoupons);
 router.post('/coupons', adminController.createCoupon);
 router.delete('/coupons/:id', adminController.deleteCoupon);
+router.get('/announcements/latest', adminController.getPublicAnnouncements);
+
+// Manual payment admin routes
+router.get('/manual-payments/pending', adminController.getPendingManualPayments);
+router.get('/manual-payments/all', adminController.getAllManualPayments);
+router.get('/manual-payments/stats', adminController.getManualPaymentStats);
+router.post('/manual-payments/:id/approve', adminController.approveManualPayment);
+router.post('/manual-payments/:id/reject', adminController.rejectManualPayment);
 
 export default router;
