@@ -1,30 +1,41 @@
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
-import { v2 as cloudinary } from 'cloudinary'; // Import directly
+import { v2 as cloudinary } from 'cloudinary';
+import { Readable } from 'stream';
 import { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import Enrollment from '../models/Enrollment.js';
 import Course from '../models/Course.js';
 import User from '../models/User.js';
 import ManualPayment from '../models/ManualPayment.js';
-import { validateManualPayment, generateManualPaymentReference } from '../services/manualPaymentValidator.js';
+import { validateManualPayment } from '../services/manualPaymentValidator.js';
 import { getIO } from '../socket.js';
 import Notification from '../models/Notification.js';
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// Force Cloudinary configuration using environment variables directly
-console.log('🔧 [payment.controller] Configuring Cloudinary directly...');
+// Force Cloudinary configuration (re‑apply to be safe)
+console.log('🔧 [payment.controller] Configuring Cloudinary...');
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
-console.log('✅ Cloudinary configured, api_secret present?', !!cloudinary.config().api_secret);
+console.log('✅ Cloudinary config applied. api_secret present?', !!cloudinary.config().api_secret);
 
-// Helper function to upload buffer to Cloudinary (in‑line to avoid module issues)
+// Helper: upload buffer to Cloudinary (no `require`)
 async function uploadReceiptToCloudinary(buffer: Buffer, folder: string): Promise<string> {
+  // Ensure Cloudinary is configured again before every upload (defensive)
+  if (!cloudinary.config().api_secret) {
+    console.warn('⚠️ Cloudinary missing api_secret, re‑configuring...');
+    cloudinary.config({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key: process.env.CLOUDINARY_API_KEY,
+      api_secret: process.env.CLOUDINARY_API_SECRET,
+    });
+  }
+
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       { folder, resource_type: 'auto' },
@@ -33,11 +44,11 @@ async function uploadReceiptToCloudinary(buffer: Buffer, folder: string): Promis
           console.error('Cloudinary upload error:', error);
           reject(error);
         } else {
+          console.log('✅ Cloudinary upload success:', result?.secure_url);
           resolve(result!.secure_url);
         }
       }
     );
-    const { Readable } = require('stream');
     const readable = new Readable();
     readable.push(buffer);
     readable.push(null);
@@ -45,7 +56,7 @@ async function uploadReceiptToCloudinary(buffer: Buffer, folder: string): Promis
   });
 }
 
-// ========== EXISTING CONTROLLERS (keep as they are) ==========
+// -------------------- Existing controllers (kept intact) --------------------
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -179,7 +190,7 @@ export const getPaymentMethods = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ========== MANUAL PAYMENT WITH DIRECT CLOUDINARY CONFIG ==========
+// -------------------- Manual Payment with Cloudinary upload --------------------
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -190,7 +201,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
     const { type, courseId, amount, reference, paymentDate } = req.body;
     const file = req.file;
 
-    // Validation
     if (!file) {
       return res.status(400).json({ success: false, message: 'Receipt file is required' });
     }
@@ -204,7 +214,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(400).json({ success: false, message: 'Course ID is required for course purchase' });
     }
 
-    // Determine expected amount
     let expectedAmount = 0;
     let courseTitle = '';
     if (type === 'subscription') {
@@ -222,20 +231,18 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(400).json({ success: false, message: 'Invalid payment amount' });
     }
 
-    // Upload receipt using the local function (which uses cloudinary configured at top)
-    let receiptUrl;
+    // Upload receipt to Cloudinary
+    let receiptUrl: string;
     try {
       receiptUrl = await uploadReceiptToCloudinary(file.buffer, 'manual_payments');
-      console.log('✅ Receipt uploaded:', receiptUrl);
+      console.log('Receipt uploaded:', receiptUrl);
     } catch (uploadError) {
       console.error('Receipt upload failed:', uploadError);
       return res.status(500).json({ success: false, message: 'Failed to upload receipt. Please try again.' });
     }
 
-    // Check for existing references
+    // Check for duplicate reference
     const existingReferences = await ManualPayment.find({ reference }).distinct('reference');
-    
-    // Validate payment
     const validation = await validateManualPayment(
       reference,
       Number(amount),
@@ -244,7 +251,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       existingReferences as string[]
     );
 
-    // Create manual payment record
     const manualPayment = await ManualPayment.create({
       userId: user._id,
       type,
@@ -257,14 +263,13 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       autoDetected: validation.autoApprove,
     });
 
-    // If auto-approved, grant access immediately
     if (validation.autoApprove) {
+      // Auto‑approve logic (same as before)
       if (type === 'subscription') {
         await User.findByIdAndUpdate(user._id, {
           isPremium: true,
           subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         });
-        
         await Transaction.create({
           userId: user._id,
           type: 'subscription',
@@ -273,14 +278,12 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
           description: `Manual payment (auto-approved) - ${reference}`,
           reference: `MANUAL_${reference}`,
         });
-        
       } else if (type === 'course' && courseId) {
         const existingEnrollment = await Enrollment.findOne({ userId: user._id, courseId });
         if (!existingEnrollment) {
           await Enrollment.create({ userId: user._id, courseId });
           await Course.findByIdAndUpdate(courseId, { $inc: { totalStudents: 1 } });
-          
-          // Process instructor payout (80% of course price)
+          // Instructor payout
           const course = await Course.findById(courseId);
           if (course && course.instructorId) {
             const instructorShare = expectedAmount * 0.8;
@@ -298,7 +301,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
             }
           }
         }
-        
         await Transaction.create({
           userId: user._id,
           type: 'course_purchase',
@@ -309,14 +311,12 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
         });
       }
 
-      // Send success notification to user
       await Notification.create({
         userId: user._id,
         title: '✅ Payment Verified Automatically',
         message: `Your payment of ₦${amount.toLocaleString()} for ${type === 'subscription' ? 'Premium subscription' : courseTitle} has been automatically verified and approved.`,
         type: 'payment',
       });
-      
       getIO().to(`user:${user._id}`).emit('notification', {
         title: 'Payment Approved',
         message: 'Your manual payment has been verified!'
@@ -330,7 +330,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       });
     }
 
-    // If not auto-approved, send admin alert
+    // Notify admins for manual review
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('admin_manual_payment_alert', {
@@ -345,7 +345,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
         reason: validation.reason || 'Needs manual review',
         createdAt: manualPayment.createdAt,
       });
-      
       await Notification.create({
         userId: admin._id,
         title: '📋 Manual Payment Pending Review',
@@ -364,7 +363,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
 
     res.json({
       success: true,
-      message: validation.reason 
+      message: validation.reason
         ? `Payment submitted for admin review. Reason: ${validation.reason}`
         : 'Payment submitted for admin review. You will be notified once approved.',
       autoApproved: false,
@@ -380,12 +379,8 @@ export const getManualPaymentStatus = async (req: Request, res: Response, next: 
   try {
     const user = req.user as IUser;
     const { paymentId } = req.params;
-    
     const payment = await ManualPayment.findOne({ _id: paymentId, userId: user._id });
-    if (!payment) {
-      return res.status(404).json({ success: false, message: 'Payment not found' });
-    }
-    
+    if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
     res.json({ success: true, data: payment });
   } catch (err) {
     next(err);
