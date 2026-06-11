@@ -1,12 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
+import { v2 as cloudinary } from 'cloudinary'; // Import directly
 import { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import Enrollment from '../models/Enrollment.js';
 import Course from '../models/Course.js';
 import User from '../models/User.js';
 import ManualPayment from '../models/ManualPayment.js';
-import { uploadToCloudinary } from '../services/cloudinary.js';
 import { validateManualPayment, generateManualPaymentReference } from '../services/manualPaymentValidator.js';
 import { getIO } from '../socket.js';
 import Notification from '../models/Notification.js';
@@ -14,6 +14,38 @@ import Notification from '../models/Notification.js';
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
+// Force Cloudinary configuration using environment variables directly
+console.log('🔧 [payment.controller] Configuring Cloudinary directly...');
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+console.log('✅ Cloudinary configured, api_secret present?', !!cloudinary.config().api_secret);
+
+// Helper function to upload buffer to Cloudinary (in‑line to avoid module issues)
+async function uploadReceiptToCloudinary(buffer: Buffer, folder: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: 'auto' },
+      (error, result) => {
+        if (error) {
+          console.error('Cloudinary upload error:', error);
+          reject(error);
+        } else {
+          resolve(result!.secure_url);
+        }
+      }
+    );
+    const { Readable } = require('stream');
+    const readable = new Readable();
+    readable.push(buffer);
+    readable.push(null);
+    readable.pipe(uploadStream);
+  });
+}
+
+// ========== EXISTING CONTROLLERS (keep as they are) ==========
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -147,8 +179,7 @@ export const getPaymentMethods = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ========== MANUAL PAYMENT METHODS ==========
-
+// ========== MANUAL PAYMENT WITH DIRECT CLOUDINARY CONFIG ==========
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -177,7 +208,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
     let expectedAmount = 0;
     let courseTitle = '';
     if (type === 'subscription') {
-      expectedAmount = 5000; // Premium monthly fee
+      expectedAmount = 5000;
     } else if (type === 'course' && courseId) {
       const course = await Course.findById(courseId);
       if (!course) {
@@ -191,11 +222,11 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(400).json({ success: false, message: 'Invalid payment amount' });
     }
 
-    // Upload receipt to Cloudinary
+    // Upload receipt using the local function (which uses cloudinary configured at top)
     let receiptUrl;
     try {
-      const uploadResult = await uploadToCloudinary(file.buffer, 'manual_payments');
-      receiptUrl = uploadResult.secure_url;
+      receiptUrl = await uploadReceiptToCloudinary(file.buffer, 'manual_payments');
+      console.log('✅ Receipt uploaded:', receiptUrl);
     } catch (uploadError) {
       console.error('Receipt upload failed:', uploadError);
       return res.status(500).json({ success: false, message: 'Failed to upload receipt. Please try again.' });
@@ -243,16 +274,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
           reference: `MANUAL_${reference}`,
         });
         
-        // Process referral bonus if applicable
-        const referral = await Transaction.findOne({ 
-          userId: user._id, 
-          type: 'referral_bonus',
-          status: 'pending' 
-        });
-        if (referral) {
-          referral.status = 'completed';
-          await referral.save();
-        }
       } else if (type === 'course' && courseId) {
         const existingEnrollment = await Enrollment.findOne({ userId: user._id, courseId });
         if (!existingEnrollment) {
@@ -310,7 +331,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
     }
 
     // If not auto-approved, send admin alert
-    // Send real-time notification to all admin users
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('admin_manual_payment_alert', {
@@ -326,7 +346,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
         createdAt: manualPayment.createdAt,
       });
       
-      // Also create notification for admin
       await Notification.create({
         userId: admin._id,
         title: '📋 Manual Payment Pending Review',
@@ -336,7 +355,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       });
     }
 
-    // Send user notification that payment is pending
     await Notification.create({
       userId: user._id,
       title: '⏳ Payment Submitted for Review',
