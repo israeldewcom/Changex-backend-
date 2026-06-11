@@ -1,4 +1,3 @@
-import { uploadToCloudinary } from '../services/cloudinary.js';
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { IUser } from '../models/User.js';
