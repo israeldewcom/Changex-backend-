@@ -91,7 +91,18 @@ app.get('/debug/version', (req, res) => {
   });
 });
 
-// Debug Cloudinary environment variables (safe – only shows presence, not values)
+// Simple Cloudinary environment check (no fancy path, guaranteed to work)
+app.get('/debug/cloudinary-env', (req, res) => {
+  res.json({
+    cloud_name: !!process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: !!process.env.CLOUDINARY_API_KEY,
+    api_secret: !!process.env.CLOUDINARY_API_SECRET,
+    cloud_name_preview: process.env.CLOUDINARY_CLOUD_NAME ? process.env.CLOUDINARY_CLOUD_NAME.substring(0,3) + '...' : null,
+    config_loaded: !!cloudinaryConfig,
+  });
+});
+
+// Detailed Cloudinary debug (with alternative names)
 app.get('/debug/env/cloudinary', (req, res) => {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiKey = process.env.CLOUDINARY_API_KEY;
@@ -102,12 +113,10 @@ app.get('/debug/env/cloudinary', (req, res) => {
     apiKey: apiKey ? '✓ present' : '✗ missing',
     apiSecret: apiSecret ? '✓ present' : '✗ missing',
     cloudNamePreview: cloudName ? cloudName.substring(0, 3) + '...' : null,
-    // Check for common typos
     alternativeNames: {
       CLOUDINARY_API_SECRET_KEY: !!process.env.CLOUDINARY_API_SECRET_KEY,
       CLOUDINARY_SECRET: !!process.env.CLOUDINARY_SECRET,
     },
-    // Show that cloudinary config was imported (should be true)
     cloudinaryConfigLoaded: !!cloudinaryConfig,
   });
 });
@@ -191,7 +200,8 @@ async function bootstrap() {
     server.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);
       logger.info(`✅ Debug version: http://localhost:${PORT}/debug/version`);
-      logger.info(`✅ Cloudinary debug: http://localhost:${PORT}/debug/env/cloudinary`);
+      logger.info(`✅ Cloudinary env: http://localhost:${PORT}/debug/cloudinary-env`);
+      logger.info(`✅ Detailed Cloudinary debug: http://localhost:${PORT}/debug/env/cloudinary`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
   } catch (error) {
