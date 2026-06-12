@@ -1,4 +1,3 @@
-// File: src/models/Transaction.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITransaction extends Document {
@@ -15,7 +14,23 @@ export interface ITransaction extends Document {
 const TransactionSchema = new Schema<ITransaction>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    type: { type: String, enum: ['referral_bonus', 'affiliate_commission', 'course_purchase', 'withdrawal', 'bonus', 'subscription'], required: true },
+    type: {
+      type: String,
+      enum: [
+        'referral_bonus',
+        'affiliate_commission',
+        'instructor_earning',
+        'course_purchase',
+        'subscription',
+        'withdrawal',
+        'bonus',
+        'referral_commission',
+        'commission',
+        'manual_payment',
+        'refund',
+      ],
+      required: true,
+    },
     amount: { type: Number, required: true },
     status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
     description: String,
@@ -24,7 +39,5 @@ const TransactionSchema = new Schema<ITransaction>(
   },
   { timestamps: true }
 );
-
-TransactionSchema.index({ userId: 1, createdAt: -1 });
 
 export default mongoose.model<ITransaction>('Transaction', TransactionSchema);
