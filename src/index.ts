@@ -32,7 +32,7 @@ import { authenticate, authorize } from './middlewares/auth.js';
 import Enrollment from './models/Enrollment.js';
 import Referral from './models/Referral.js';
 import User from './models/User.js';
-import cloudinaryConfig from './config/cloudinary.js'; // imported to trigger config
+import cloudinaryConfig from './config/cloudinary.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -91,7 +91,7 @@ app.get('/debug/version', (req, res) => {
   });
 });
 
-// Simple Cloudinary environment check (no fancy path, guaranteed to work)
+// Simple Cloudinary environment check
 app.get('/debug/cloudinary-env', (req, res) => {
   res.json({
     cloud_name: !!process.env.CLOUDINARY_CLOUD_NAME,
@@ -102,7 +102,7 @@ app.get('/debug/cloudinary-env', (req, res) => {
   });
 });
 
-// Detailed Cloudinary debug (with alternative names)
+// Detailed Cloudinary debug
 app.get('/debug/env/cloudinary', (req, res) => {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
   const apiKey = process.env.CLOUDINARY_API_KEY;
@@ -118,6 +118,15 @@ app.get('/debug/env/cloudinary', (req, res) => {
       CLOUDINARY_SECRET: !!process.env.CLOUDINARY_SECRET,
     },
     cloudinaryConfigLoaded: !!cloudinaryConfig,
+  });
+});
+
+// NEW: Google OAuth debug endpoint
+app.get('/debug/google-config', (req, res) => {
+  res.json({
+    clientId: process.env.GOOGLE_CLIENT_ID ? process.env.GOOGLE_CLIENT_ID.substring(0, 20) + '...' : 'MISSING',
+    hasSecret: !!process.env.GOOGLE_CLIENT_SECRET,
+    callbackUrl: process.env.GOOGLE_CALLBACK_URL,
   });
 });
 
@@ -138,7 +147,6 @@ app.get('/api/v1/check-referral/:code', async (req, res) => {
 // Public announcements
 app.get('/api/v1/announcements/latest', async (req, res) => {
   try {
-    // Implement if needed; for now return empty array
     res.json({ success: true, data: [] });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
@@ -202,6 +210,7 @@ async function bootstrap() {
       logger.info(`✅ Debug version: http://localhost:${PORT}/debug/version`);
       logger.info(`✅ Cloudinary env: http://localhost:${PORT}/debug/cloudinary-env`);
       logger.info(`✅ Detailed Cloudinary debug: http://localhost:${PORT}/debug/env/cloudinary`);
+      logger.info(`✅ Google OAuth debug: http://localhost:${PORT}/debug/google-config`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
     });
   } catch (error) {
