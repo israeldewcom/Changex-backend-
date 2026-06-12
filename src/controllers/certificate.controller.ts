@@ -1,71 +1,79 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { IUser } from '../models/User.js';
 import Enrollment from '../models/Enrollment.js';
 import Course from '../models/Course.js';
-import PDFDocument from 'pdfkit';
-import axios from 'axios';
+import LessonProgress from '../models/LessonProgress.js';
+import Lesson from '../models/Lesson.js';
+import { generateCertificatePDF } from '../services/pdfGenerator.js';
 
-export const downloadCertificate = async (req: Request, res: Response) => {
+export const downloadCertificate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const { courseId } = req.params;
 
-    // Verify course completion
-    const enrollment = await Enrollment.findOne({ userId: user._id, courseId, status: 'completed' });
-    if (!enrollment) {
-      return res.status(403).json({ success: false, message: 'Course not completed' });
+    if (!courseId) {
+      return res.status(400).json({ success: false, message: 'Course ID is required' });
     }
 
-    const course = await Course.findById(courseId);
-    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    // 1. Find enrollment and verify course completion
+    const enrollment = await Enrollment.findOne({
+      userId: user._id,
+      courseId: courseId,
+    }).populate('courseId');
 
-    // Create PDF
-    const doc = new PDFDocument({ layout: 'landscape', size: 'A4' });
-    const chunks: Buffer[] = [];
-    doc.on('data', chunk => chunks.push(chunk));
-    doc.on('end', () => {
-      const buffer = Buffer.concat(chunks);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename=certificate_${courseId}.pdf`);
-      res.send(buffer);
+    if (!enrollment) {
+      return res.status(404).json({
+        success: false,
+        message: 'You are not enrolled in this course.',
+      });
+    }
+
+    // 2. Double‑check completion using lesson progress
+    const totalLessons = await Lesson.countDocuments({ courseId: courseId });
+    const completedLessons = await LessonProgress.countDocuments({
+      enrollmentId: enrollment._id,
+      completed: true,
     });
 
-    // Use instructor‑uploaded template if available, else default
-    if (course.certificateTemplate) {
-      try {
-        const response = await axios.get(course.certificateTemplate, { responseType: 'arraybuffer' });
-        const templateBuffer = Buffer.from(response.data, 'binary');
-        doc.image(templateBuffer, 0, 0, { width: doc.page.width, height: doc.page.height });
-      } catch (err) {
-        console.error('Failed to load certificate template, using default', err);
-        drawDefaultCertificate(doc, user, course);
-      }
-    } else {
-      drawDefaultCertificate(doc, user, course);
+    const isCompleted = enrollment.status === 'completed' || (totalLessons > 0 && completedLessons === totalLessons);
+
+    if (!isCompleted) {
+      return res.status(403).json({
+        success: false,
+        message: 'Certificate is only available after completing all lessons.',
+      });
     }
 
-    // Overlay text (name, course, date, powered by)
-    doc.fontSize(24).font('Helvetica-Bold')
-      .text(`${user.firstName} ${user.lastName}`, 0, doc.page.height / 2 - 40, { align: 'center' });
-    doc.fontSize(18).font('Helvetica')
-      .text(course.title, 0, doc.page.height / 2 + 20, { align: 'center' });
-    doc.fontSize(12).font('Helvetica')
-      .text(`Date: ${new Date().toLocaleDateString()}`, 0, doc.page.height - 100, { align: 'center' });
-    doc.fontSize(10).font('Helvetica')
-      .text('Powered by ChangeX Academy', 0, doc.page.height - 60, { align: 'center' });
+    // 3. Update enrollment status to 'completed' if not already
+    if (enrollment.status !== 'completed') {
+      enrollment.status = 'completed';
+      enrollment.completedAt = new Date();
+      await enrollment.save();
+    }
 
-    doc.end();
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Failed to generate certificate' });
+    const course = enrollment.courseId as any;
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found' });
+    }
+
+    // 4. Generate PDF certificate
+    const pdfBuffer = await generateCertificatePDF(
+      `${user.firstName} ${user.lastName}`,
+      course.title,
+      enrollment.completedAt || new Date(),
+      course.certificateTemplate // optional custom background image URL
+    );
+
+    // 5. Send PDF file
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="certificate_${courseId}_${user._id}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('Certificate generation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate certificate. Please try again later.',
+    });
   }
 };
-
-function drawDefaultCertificate(doc: PDFKit.PDFDocument, user: IUser, course: any) {
-  doc.rect(0, 0, doc.page.width, doc.page.height).fill('#f5f5f5');
-  doc.rect(50, 50, doc.page.width - 100, doc.page.height - 100).stroke();
-  doc.fontSize(30).font('Helvetica-Bold')
-    .text('Certificate of Completion', 0, 120, { align: 'center' });
-  doc.fontSize(16).font('Helvetica')
-    .text('This certifies that', 0, 200, { align: 'center' });
-}
