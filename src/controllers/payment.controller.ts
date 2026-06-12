@@ -15,7 +15,7 @@ import Notification from '../models/Notification.js';
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// Force Cloudinary configuration (re‑apply to be safe)
+// Configure Cloudinary directly
 console.log('🔧 [payment.controller] Configuring Cloudinary...');
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -24,18 +24,7 @@ cloudinary.config({
 });
 console.log('✅ Cloudinary config applied. api_secret present?', !!cloudinary.config().api_secret);
 
-// Helper: upload buffer to Cloudinary (no `require`)
 async function uploadReceiptToCloudinary(buffer: Buffer, folder: string): Promise<string> {
-  // Ensure Cloudinary is configured again before every upload (defensive)
-  if (!cloudinary.config().api_secret) {
-    console.warn('⚠️ Cloudinary missing api_secret, re‑configuring...');
-    cloudinary.config({
-      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-      api_key: process.env.CLOUDINARY_API_KEY,
-      api_secret: process.env.CLOUDINARY_API_SECRET,
-    });
-  }
-
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       { folder, resource_type: 'auto' },
@@ -56,7 +45,7 @@ async function uploadReceiptToCloudinary(buffer: Buffer, folder: string): Promis
   });
 }
 
-// -------------------- Existing controllers (kept intact) --------------------
+// -------------------- Existing Paystack controllers (unchanged) --------------------
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -190,7 +179,7 @@ export const getPaymentMethods = async (req: Request, res: Response, next: NextF
   }
 };
 
-// -------------------- Manual Payment with Cloudinary upload --------------------
+// -------------------- MANUAL PAYMENT (Admin approval only, no auto-approve) --------------------
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -201,6 +190,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
     const { type, courseId, amount, reference, paymentDate } = req.body;
     const file = req.file;
 
+    // Validation
     if (!file) {
       return res.status(400).json({ success: false, message: 'Receipt file is required' });
     }
@@ -214,8 +204,8 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(400).json({ success: false, message: 'Course ID is required for course purchase' });
     }
 
+    // Determine expected amount (only for reference, not for auto-approve)
     let expectedAmount = 0;
-    let courseTitle = '';
     if (type === 'subscription') {
       expectedAmount = 5000;
     } else if (type === 'course' && courseId) {
@@ -224,7 +214,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
         return res.status(404).json({ success: false, message: 'Course not found' });
       }
       expectedAmount = course.salePrice || course.price || 0;
-      courseTitle = course.title;
     }
 
     if (expectedAmount <= 0) {
@@ -241,16 +230,13 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(500).json({ success: false, message: 'Failed to upload receipt. Please try again.' });
     }
 
-    // Check for duplicate reference
-    const existingReferences = await ManualPayment.find({ reference }).distinct('reference');
-    const validation = await validateManualPayment(
-      reference,
-      Number(amount),
-      new Date(paymentDate),
-      expectedAmount,
-      existingReferences as string[]
-    );
+    // Check for duplicate reference (optional, but prevents double submission)
+    const existingReference = await ManualPayment.findOne({ reference: reference.toUpperCase() });
+    if (existingReference) {
+      return res.status(400).json({ success: false, message: 'Duplicate reference number. This payment has already been submitted.' });
+    }
 
+    // Create manual payment record – ALWAYS pending_review
     const manualPayment = await ManualPayment.create({
       userId: user._id,
       type,
@@ -259,78 +245,11 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       reference: reference.toUpperCase(),
       paymentDate: new Date(paymentDate),
       receiptUrl,
-      status: validation.autoApprove ? 'approved' : 'pending_review',
-      autoDetected: validation.autoApprove,
+      status: 'pending_review',   // Force pending review – no auto-approve
+      autoDetected: false,
     });
 
-    if (validation.autoApprove) {
-      // Auto‑approve logic (same as before)
-      if (type === 'subscription') {
-        await User.findByIdAndUpdate(user._id, {
-          isPremium: true,
-          subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        });
-        await Transaction.create({
-          userId: user._id,
-          type: 'subscription',
-          amount: Number(amount),
-          status: 'completed',
-          description: `Manual payment (auto-approved) - ${reference}`,
-          reference: `MANUAL_${reference}`,
-        });
-      } else if (type === 'course' && courseId) {
-        const existingEnrollment = await Enrollment.findOne({ userId: user._id, courseId });
-        if (!existingEnrollment) {
-          await Enrollment.create({ userId: user._id, courseId });
-          await Course.findByIdAndUpdate(courseId, { $inc: { totalStudents: 1 } });
-          // Instructor payout
-          const course = await Course.findById(courseId);
-          if (course && course.instructorId) {
-            const instructorShare = expectedAmount * 0.8;
-            const instructor = await User.findById(course.instructorId);
-            if (instructor) {
-              instructor.walletBalance = (instructor.walletBalance || 0) + instructorShare;
-              await instructor.save();
-              await Transaction.create({
-                userId: instructor._id,
-                type: 'instructor_earning',
-                amount: instructorShare,
-                status: 'completed',
-                description: `Course sale (manual): ${course.title}`,
-              });
-            }
-          }
-        }
-        await Transaction.create({
-          userId: user._id,
-          type: 'course_purchase',
-          amount: Number(amount),
-          status: 'completed',
-          description: `Manual payment for course - ${reference}`,
-          reference: `MANUAL_${reference}`,
-        });
-      }
-
-      await Notification.create({
-        userId: user._id,
-        title: '✅ Payment Verified Automatically',
-        message: `Your payment of ₦${amount.toLocaleString()} for ${type === 'subscription' ? 'Premium subscription' : courseTitle} has been automatically verified and approved.`,
-        type: 'payment',
-      });
-      getIO().to(`user:${user._id}`).emit('notification', {
-        title: 'Payment Approved',
-        message: 'Your manual payment has been verified!'
-      });
-
-      return res.json({
-        success: true,
-        message: 'Payment verified automatically! Access granted.',
-        autoApproved: true,
-        data: manualPayment,
-      });
-    }
-
-    // Notify admins for manual review
+    // Notify all admins (real-time socket + database notification)
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('admin_manual_payment_alert', {
@@ -339,33 +258,32 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
         userName: `${user.firstName} ${user.lastName}`,
         userEmail: user.email,
         amount: Number(amount),
-        reference,
+        reference: reference.toUpperCase(),
         type,
         receiptUrl,
-        reason: validation.reason || 'Needs manual review',
         createdAt: manualPayment.createdAt,
       });
+      
       await Notification.create({
         userId: admin._id,
         title: '📋 Manual Payment Pending Review',
-        message: `${user.firstName} ${user.lastName} submitted a manual payment of ₦${amount.toLocaleString()} for ${type}. Reference: ${reference}`,
+        message: `${user.firstName} ${user.lastName} submitted a manual payment of ₦${amount.toLocaleString()} for ${type}. Reference: ${reference.toUpperCase()}`,
         type: 'system',
         data: { paymentId: manualPayment._id, type: 'manual_payment_review' },
       });
     }
 
+    // Notify user that payment is pending
     await Notification.create({
       userId: user._id,
       title: '⏳ Payment Submitted for Review',
-      message: `Your manual payment of ₦${amount.toLocaleString()} has been submitted. An admin will review it shortly.`,
+      message: `Your manual payment of ₦${amount.toLocaleString()} has been submitted. An admin will review it shortly. You will be notified once approved.`,
       type: 'payment',
     });
 
     res.json({
       success: true,
-      message: validation.reason
-        ? `Payment submitted for admin review. Reason: ${validation.reason}`
-        : 'Payment submitted for admin review. You will be notified once approved.',
+      message: 'Payment submitted for admin review. You will be notified once approved.',
       autoApproved: false,
       data: manualPayment,
     });
