@@ -14,7 +14,7 @@ export interface ICourse extends Document {
   hasAffiliate: boolean;
   affiliatePercent: number;
   isPublished: boolean;
-  approvalStatus: 'pending' | 'approved' | 'rejected';
+  approvalStatus: 'pending' | 'approved' | 'rejected' | 'draft';
   rejectionReason?: string;
   totalLessons: number;
   totalStudents: number;
@@ -23,6 +23,16 @@ export interface ICourse extends Document {
   instructorId: mongoose.Types.ObjectId;
   slug?: string;
   certificateTemplate?: string;
+  quizzes?: Array<{
+    title: string;
+    questions: Array<{
+      question: string;
+      options: string[];
+      correctAnswer: number;
+      points: number;
+    }>;
+    passingScore: number;
+  }>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,7 +52,7 @@ const CourseSchema = new Schema<ICourse>(
     hasAffiliate: { type: Boolean, default: false },
     affiliatePercent: { type: Number, default: 15 },
     isPublished: { type: Boolean, default: false },
-    approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
+    approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected', 'draft'], default: 'draft' },
     rejectionReason: String,
     totalLessons: { type: Number, default: 0 },
     totalStudents: { type: Number, default: 0 },
@@ -51,6 +61,19 @@ const CourseSchema = new Schema<ICourse>(
     instructorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     slug: { type: String, unique: true, sparse: true },
     certificateTemplate: { type: String, default: '' },
+    quizzes: {
+      type: [{
+        title: String,
+        questions: [{
+          question: String,
+          options: [String],
+          correctAnswer: Number,
+          points: { type: Number, default: 10 }
+        }],
+        passingScore: { type: Number, default: 60 }
+      }],
+      default: []
+    }
   },
   { timestamps: true }
 );
