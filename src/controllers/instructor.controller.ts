@@ -29,13 +29,15 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
-    const { lessons, ...courseData } = req.body;
+    const { lessons, quizzes, ...courseData } = req.body;
     const slug = generateSlug(courseData.title || 'untitled');
     const course = await Course.create({
       ...courseData,
       instructorId: user._id,
       description: sanitizeHtml(courseData.description || ''),
       slug,
+      quizzes: quizzes || [],
+      approvalStatus: 'draft'
     });
     if (lessons && Array.isArray(lessons) && lessons.length > 0) {
       for (let i = 0; i < lessons.length; i++) {
@@ -63,7 +65,7 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
 export const updateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const { lessons, ...updateData } = req.body;
+    const { lessons, quizzes, ...updateData } = req.body;
     let slug: string | undefined;
     if (updateData.title) {
       slug = generateSlug(updateData.title);
@@ -72,16 +74,21 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
     const course = await Course.findOne({ _id: req.params.id, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
-    // If the course was approved, reset to pending after edit (requires re‑approval)
     const wasApproved = course.approvalStatus === 'approved';
-    const updatePayload = { ...updateData, description: sanitizeHtml(updateData.description || ''), slug };
+    const updatePayload: any = { ...updateData, description: sanitizeHtml(updateData.description || ''), slug };
     if (wasApproved) {
       updatePayload.approvalStatus = 'pending';
+    }
+
+    // Handle quizzes
+    if (quizzes && Array.isArray(quizzes)) {
+      updatePayload.quizzes = quizzes;
     }
 
     const updatedCourse = await Course.findByIdAndUpdate(req.params.id, updatePayload, { new: true });
     if (!updatedCourse) return res.status(404).json({ success: false, message: 'Course not found' });
 
+    // Handle lessons: replace all
     if (lessons && Array.isArray(lessons)) {
       await Lesson.deleteMany({ courseId: updatedCourse._id });
       for (let i = 0; i < lessons.length; i++) {
@@ -91,6 +98,63 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
     }
 
     res.json({ success: true, data: updatedCourse });
+  } catch (err: any) {
+    if (err.code === 11000 && err.keyPattern?.slug) {
+      return res.status(400).json({ success: false, message: 'A course with a similar title already exists. Please change the title.' });
+    }
+    res.status(400).json({ success: false, message: err.message });
+  }
+};
+
+// ✅ NEW: Save draft (without resetting approval status if already approved? but we treat as pending)
+export const saveDraft = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id } = req.params;
+    const { lessons, quizzes, ...courseData } = req.body;
+
+    let course = await Course.findOne({ _id: id, instructorId: user._id });
+    if (!course) {
+      // Create new draft if doesn't exist
+      const slug = generateSlug(courseData.title || 'untitled');
+      course = new Course({
+        ...courseData,
+        instructorId: user._id,
+        description: sanitizeHtml(courseData.description || ''),
+        slug,
+        quizzes: quizzes || [],
+        approvalStatus: 'draft',
+        isPublished: false
+      });
+      await course.save();
+    } else {
+      // Update existing draft – if it was approved, set to pending after edit
+      if (course.approvalStatus === 'approved') {
+        course.approvalStatus = 'pending';
+      }
+      // Update fields
+      Object.assign(course, courseData);
+      course.description = sanitizeHtml(courseData.description || course.description);
+      if (courseData.title) {
+        course.slug = generateSlug(courseData.title);
+      }
+      if (quizzes && Array.isArray(quizzes)) {
+        course.quizzes = quizzes;
+      }
+      await course.save();
+    }
+
+    // Handle lessons if provided
+    if (lessons && Array.isArray(lessons)) {
+      await Lesson.deleteMany({ courseId: course._id });
+      for (let i = 0; i < lessons.length; i++) {
+        await Lesson.create({ ...lessons[i], courseId: course._id, order: i + 1 });
+      }
+      course.totalLessons = lessons.length;
+      await course.save();
+    }
+
+    res.json({ success: true, data: course, message: 'Draft saved successfully' });
   } catch (err: any) {
     if (err.code === 11000 && err.keyPattern?.slug) {
       return res.status(400).json({ success: false, message: 'A course with a similar title already exists. Please change the title.' });
@@ -190,7 +254,6 @@ export const answerQuestion = async (req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 };
 
-// ✅ NEW: upload certificate template for a course
 export const uploadCertificateTemplate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
