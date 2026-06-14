@@ -11,6 +11,7 @@ router.use(authorize('instructor', 'admin'));
 router.get('/dashboard', instructorController.getInstructorDashboard);
 router.post('/courses', instructorController.createCourse);
 router.put('/courses/:id', instructorController.updateCourse);
+router.post('/courses/:id/draft', instructorController.saveDraft);        // ✅ NEW
 router.post('/courses/:id/submit', instructorController.submitForReview);
 router.post('/courses/:courseId/lessons', instructorController.createLesson);
 router.put('/courses/:courseId/lessons/:lessonId', instructorController.updateLesson);
