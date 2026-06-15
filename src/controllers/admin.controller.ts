@@ -7,6 +7,9 @@ import AdminCoupon from '../models/AdminCoupon.js';
 import Announcement from '../models/Announcement.js';
 import ManualPayment from '../models/ManualPayment.js';
 import Enrollment from '../models/Enrollment.js';
+import Post from '../models/Post.js';
+import Follow from '../models/Follow.js';
+import AdminAd from '../models/AdminAd.js';
 import { getIO } from '../socket.js';
 
 // ==================== DASHBOARD ====================
@@ -15,7 +18,6 @@ export const getDashboard = async (req: Request, res: Response) => {
     const totalUsers = await User.countDocuments();
     const totalCourses = await Course.countDocuments({ approvalStatus: 'approved' });
     const pendingCourses = await Course.countDocuments({ approvalStatus: 'pending' });
-    
     let totalRevenue = 0;
     try {
       const revenueAgg = await Transaction.aggregate([
@@ -26,10 +28,8 @@ export const getDashboard = async (req: Request, res: Response) => {
     } catch (aggErr) {
       console.error('Aggregation error:', aggErr);
     }
-    
     const pendingWithdrawals = await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' });
     const pendingManualPayments = await ManualPayment.countDocuments({ status: 'pending_review' });
-    
     res.json({ 
       success: true, 
       data: { 
@@ -51,7 +51,6 @@ export const getUsers = async (req: Request, res: Response) => {
   try {
     const { limit = 100, search = '' } = req.query;
     const filter: any = {};
-    
     if (search) {
       filter.$or = [
         { email: { $regex: search, $options: 'i' } },
@@ -59,12 +58,10 @@ export const getUsers = async (req: Request, res: Response) => {
         { lastName: { $regex: search, $options: 'i' } }
       ];
     }
-    
     const users = await User.find(filter)
       .select('-passwordHash')
       .limit(Number(limit))
       .sort('-createdAt');
-    
     const stats = {
       total: await User.countDocuments(),
       active: await User.countDocuments({ isBanned: false }),
@@ -72,7 +69,6 @@ export const getUsers = async (req: Request, res: Response) => {
       premium: await User.countDocuments({ isPremium: true }),
       instructors: await User.countDocuments({ roles: 'instructor' }),
     };
-    
     res.json({ success: true, data: { users, stats } });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -85,11 +81,9 @@ export const getUserById = async (req: Request, res: Response) => {
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
-    
     const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(50);
     const enrollments = await Enrollment.find({ userId: user._id }).populate('courseId', 'title');
     const manualPayments = await ManualPayment.find({ userId: user._id }).sort('-createdAt');
-    
     res.json({ 
       success: true, 
       data: { 
@@ -113,14 +107,12 @@ export const updateUserRole = async (req: Request, res: Response) => {
       { new: true }
     );
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    
     await Notification.create({
       userId: user._id,
       title: 'Account Role Updated',
       message: `Your account role has been updated to: ${roles.join(', ')}`,
       type: 'system',
     });
-    
     res.json({ success: true, data: user });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -136,7 +128,6 @@ export const toggleUserBan = async (req: Request, res: Response) => {
       { new: true }
     );
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    
     await Notification.create({
       userId: user._id,
       title: isBanned ? 'Account Suspended' : 'Account Reactivated',
@@ -145,7 +136,6 @@ export const toggleUserBan = async (req: Request, res: Response) => {
         : 'Your account has been reactivated. You can now log in again.',
       type: 'system',
     });
-    
     res.json({ success: true, data: user });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -160,19 +150,16 @@ export const approveInstructor = async (req: Request, res: Response) => {
       { new: true }
     );
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    
     await Notification.create({ 
       userId: user._id, 
       title: 'Instructor Approved', 
       message: 'Congratulations! You can now create and sell courses on ChangeX Academy.', 
       type: 'system' 
     });
-    
     getIO().to(`user:${user._id}`).emit('notification', { 
       title: 'Instructor Access Granted',
       message: 'You can now create courses!'
     });
-    
     res.json({ success: true, data: user });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -184,16 +171,13 @@ export const getAdminCourses = async (req: Request, res: Response) => {
   try {
     const { status, limit = 100 } = req.query;
     const filter: any = {};
-    
     if (status === 'pending') filter.approvalStatus = 'pending';
     if (status === 'approved') filter.approvalStatus = 'approved';
     if (status === 'rejected') filter.approvalStatus = 'rejected';
-    
     const courses = await Course.find(filter)
       .populate('instructorId', 'firstName lastName email')
       .sort('-createdAt')
       .limit(Number(limit));
-    
     const stats = {
       total: await Course.countDocuments(),
       pending: await Course.countDocuments({ approvalStatus: 'pending' }),
@@ -201,7 +185,6 @@ export const getAdminCourses = async (req: Request, res: Response) => {
       rejected: await Course.countDocuments({ approvalStatus: 'rejected' }),
       published: await Course.countDocuments({ isPublished: true }),
     };
-    
     res.json({ success: true, data: { courses, stats } });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -212,19 +195,15 @@ export const getCourseDetails = async (req: Request, res: Response) => {
   try {
     const course = await Course.findById(req.params.id)
       .populate('instructorId', 'firstName lastName email phone bankAccount');
-    
     if (!course) {
       return res.status(404).json({ success: false, message: 'Course not found' });
     }
-    
     const enrollments = await Enrollment.find({ courseId: course._id })
       .populate('userId', 'firstName lastName email');
-    
     const transactions = await Transaction.find({ 
       type: 'course_purchase',
       metadata: { courseId: course._id }
     }).sort('-createdAt');
-    
     res.json({ success: true, data: { course, enrollments, transactions } });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
@@ -239,7 +218,6 @@ export const approveCourse = async (req: Request, res: Response) => {
       { new: true }
     );
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    
     if (course.instructorId) {
       await Notification.create({ 
         userId: course.instructorId, 
@@ -252,16 +230,6 @@ export const approveCourse = async (req: Request, res: Response) => {
         message: `Your course "${course.title}" is now live!`
       });
     }
-    
-    // Notify all users about new course (optional)
-    // const users = await User.find({}, '_id');
-    // await Notification.insertMany(users.map(u => ({ 
-    //   userId: u._id, 
-    //   title: 'New Course Available', 
-    //   message: `New course "${course.title}" is now available!`, 
-    //   type: 'system' 
-    // })));
-    
     res.json({ success: true, message: 'Course approved and published', data: course });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -277,7 +245,6 @@ export const rejectCourse = async (req: Request, res: Response) => {
       { new: true }
     );
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    
     if (course.instructorId) {
       await Notification.create({ 
         userId: course.instructorId, 
@@ -290,7 +257,6 @@ export const rejectCourse = async (req: Request, res: Response) => {
         message: `Your course "${course.title}" needs revisions.`
       });
     }
-    
     res.json({ success: true, message: 'Course rejected', data: course });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -303,12 +269,10 @@ export const getWithdrawals = async (req: Request, res: Response) => {
     const { status, limit = 100 } = req.query;
     const filter: any = { type: 'withdrawal' };
     if (status && status !== 'all') filter.status = status;
-    
     const withdrawals = await Transaction.find(filter)
       .populate('userId', 'firstName lastName email phone bankAccount')
       .sort('-createdAt')
       .limit(Number(limit));
-    
     const stats = {
       pending: await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' }),
       completed: await Transaction.countDocuments({ type: 'withdrawal', status: 'completed' }),
@@ -318,7 +282,6 @@ export const getWithdrawals = async (req: Request, res: Response) => {
         { $group: { _id: null, total: { $sum: { $abs: '$amount' } } } }
       ])
     };
-    
     res.json({ success: true, data: { withdrawals, stats } });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -330,59 +293,48 @@ export const processWithdrawal = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { action, adminNote } = req.body;
     const admin = req.user as any;
-    
     const tx = await Transaction.findById(id);
     if (!tx || tx.type !== 'withdrawal') {
       return res.status(404).json({ success: false, message: 'Withdrawal not found' });
     }
-    
     if (tx.status !== 'pending') {
       return res.status(400).json({ success: false, message: 'Withdrawal already processed' });
     }
-    
     if (action === 'approve') {
       tx.status = 'completed';
       tx.metadata = { ...tx.metadata, adminNote, processedBy: admin._id, processedAt: new Date() };
       await tx.save();
-      
       await Notification.create({
         userId: tx.userId,
         title: 'Withdrawal Approved',
         message: `Your withdrawal of ₦${Math.abs(tx.amount).toLocaleString()} has been approved and will be sent to your bank account within 1-3 business days.`,
         type: 'payment',
       });
-      
       getIO().to(`user:${tx.userId}`).emit('notification', { 
         title: 'Withdrawal Processed',
         message: 'Your withdrawal has been approved.'
       });
-      
     } else if (action === 'reject') {
       tx.status = 'failed';
       tx.metadata = { ...tx.metadata, adminNote, rejectedBy: admin._id, rejectedAt: new Date() };
       await tx.save();
-      
-      // Return funds to user wallet
       const user = await User.findById(tx.userId);
       if (user) {
         user.walletBalance = (user.walletBalance || 0) + Math.abs(tx.amount);
         user.pendingWithdrawal = Math.max(0, (user.pendingWithdrawal || 0) - Math.abs(tx.amount));
         await user.save();
       }
-      
       await Notification.create({
         userId: tx.userId,
         title: 'Withdrawal Rejected',
         message: `Your withdrawal request was rejected. Reason: ${adminNote || 'Not specified'}. Funds have been returned to your wallet.`,
         type: 'payment',
       });
-      
       getIO().to(`user:${tx.userId}`).emit('notification', { 
         title: 'Withdrawal Update',
         message: 'Your withdrawal request was not approved.'
       });
     }
-    
     res.json({ success: true, message: `Withdrawal ${action}d successfully` });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -393,13 +345,8 @@ export const processWithdrawal = async (req: Request, res: Response) => {
 export const createAnnouncement = async (req: Request, res: Response) => {
   try {
     const { title, message, sendEmail = false } = req.body;
-    
     const announcement = await Announcement.create({ title, message });
-    
-    // Send real-time notification via socket
     getIO().emit('announcement', { title, content: message, createdAt: new Date() });
-    
-    // Create notifications for all users
     const users = await User.find({}, '_id');
     await Notification.insertMany(
       users.map(u => ({ 
@@ -409,13 +356,9 @@ export const createAnnouncement = async (req: Request, res: Response) => {
         type: 'system' 
       }))
     );
-    
-    // Optional: Send email to all users
     if (sendEmail) {
-      // Email sending logic here (would need to be batched)
       console.log(`Would send email announcement to ${users.length} users`);
     }
-    
     res.status(201).json({ success: true, message: 'Announcement sent to all users', data: announcement });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -462,12 +405,10 @@ export const getCoupons = async (req: Request, res: Response) => {
 export const createCoupon = async (req: Request, res: Response) => {
   try {
     const { code, discountType, discountValue, usageLimit, validUntil } = req.body;
-    
     const existing = await AdminCoupon.findOne({ code: code.toUpperCase() });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Coupon code already exists' });
     }
-    
     const coupon = await AdminCoupon.create({
       code: code.toUpperCase(),
       discountType: discountType || 'percentage',
@@ -475,7 +416,6 @@ export const createCoupon = async (req: Request, res: Response) => {
       usageLimit: usageLimit || 0,
       validUntil: validUntil ? new Date(validUntil) : undefined,
     });
-    
     res.status(201).json({ success: true, data: coupon });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
@@ -507,19 +447,17 @@ export const deleteCoupon = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== MANUAL PAYMENTS (NEW) ====================
+// ==================== MANUAL PAYMENTS ====================
 export const getPendingManualPayments = async (req: Request, res: Response) => {
   try {
     const payments = await ManualPayment.find({ status: 'pending_review' })
       .populate('userId', 'firstName lastName email phone')
       .populate('courseId', 'title price')
       .sort('-createdAt');
-    
     const stats = {
       pending: payments.length,
       totalAmount: payments.reduce((sum, p) => sum + p.amount, 0),
     };
-    
     res.json({ success: true, data: { payments, stats } });
   } catch (err) {
     console.error('Get pending manual payments error:', err);
@@ -531,11 +469,8 @@ export const getAllManualPayments = async (req: Request, res: Response) => {
   try {
     const { status, limit = 50, page = 1 } = req.query;
     const filter: any = {};
-    
     if (status && status !== 'all') filter.status = status;
-    
     const skip = (Number(page) - 1) * Number(limit);
-    
     const payments = await ManualPayment.find(filter)
       .populate('userId', 'firstName lastName email phone')
       .populate('courseId', 'title price')
@@ -543,9 +478,7 @@ export const getAllManualPayments = async (req: Request, res: Response) => {
       .sort('-createdAt')
       .skip(skip)
       .limit(Number(limit));
-    
     const total = await ManualPayment.countDocuments(filter);
-    
     const stats = {
       pending: await ManualPayment.countDocuments({ status: 'pending_review' }),
       approved: await ManualPayment.countDocuments({ status: 'approved' }),
@@ -564,7 +497,6 @@ export const getAllManualPayments = async (req: Request, res: Response) => {
         { $sort: { _id: 1 } }
       ]),
     };
-    
     res.json({ 
       success: true, 
       data: { payments, stats, pagination: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) } } 
@@ -600,7 +532,6 @@ export const getManualPaymentStats = async (req: Request, res: Response) => {
         { $sort: { _id: 1 } }
       ]),
     };
-    
     res.json({ success: true, data: stats });
   } catch (err) {
     console.error('Get manual payment stats error:', err);
@@ -614,11 +545,9 @@ export const getManualPaymentById = async (req: Request, res: Response) => {
       .populate('userId', 'firstName lastName email phone bankAccount')
       .populate('courseId', 'title price description')
       .populate('approvedBy', 'firstName lastName email');
-    
     if (!payment) {
       return res.status(404).json({ success: false, message: 'Payment not found' });
     }
-    
     res.json({ success: true, data: payment });
   } catch (err) {
     console.error('Get manual payment by ID error:', err);
@@ -631,23 +560,18 @@ export const approveManualPayment = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { adminNote } = req.body;
     const admin = req.user as any;
-    
     const payment = await ManualPayment.findById(id);
     if (!payment) {
       return res.status(404).json({ success: false, message: 'Payment not found' });
     }
-    
     if (payment.status !== 'pending_review') {
       return res.status(400).json({ success: false, message: `Payment already ${payment.status}` });
     }
-    
-    // Grant access based on payment type
     if (payment.type === 'subscription') {
       await User.findByIdAndUpdate(payment.userId, {
         isPremium: true,
         subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
-      
       await Transaction.create({
         userId: payment.userId,
         type: 'subscription',
@@ -657,21 +581,17 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         reference: `MANUAL_ADMIN_${payment.reference}`,
         metadata: { paymentId: payment._id, approvedBy: admin._id },
       });
-      
     } else if (payment.type === 'course' && payment.courseId) {
       const existingEnrollment = await Enrollment.findOne({ 
         userId: payment.userId, 
         courseId: payment.courseId 
       });
-      
       if (!existingEnrollment) {
         await Enrollment.create({ 
           userId: payment.userId, 
           courseId: payment.courseId 
         });
         await Course.findByIdAndUpdate(payment.courseId, { $inc: { totalStudents: 1 } });
-        
-        // Process instructor payout (80% of course price)
         const course = await Course.findById(payment.courseId);
         if (course && course.instructorId) {
           const instructorShare = payment.amount * 0.8;
@@ -691,7 +611,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
           }
         }
       }
-      
       await Transaction.create({
         userId: payment.userId,
         type: 'course_purchase',
@@ -702,35 +621,27 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         metadata: { paymentId: payment._id, approvedBy: admin._id, courseId: payment.courseId },
       });
     }
-    
-    // Update payment status
     payment.status = 'approved';
     payment.adminNote = adminNote;
     payment.approvedBy = admin._id;
     payment.approvedAt = new Date();
     await payment.save();
-    
-    // Notify user
     await Notification.create({
       userId: payment.userId,
       title: '✅ Manual Payment Approved',
       message: `Your manual payment of ₦${payment.amount.toLocaleString()} has been approved. You now have access to ${payment.type === 'subscription' ? 'Premium features' : 'your course'}.`,
       type: 'payment',
     });
-    
     getIO().to(`user:${payment.userId}`).emit('notification', {
       title: 'Payment Approved',
       message: `Your manual payment of ₦${payment.amount.toLocaleString()} has been approved!`
     });
-    
-    // Notify admin who approved (for audit)
     await Notification.create({
       userId: admin._id,
       title: 'Manual Payment Approved',
       message: `You approved payment ${payment.reference} for user ${payment.userId}`,
       type: 'system',
     });
-    
     res.json({ success: true, message: 'Payment approved and access granted', data: payment });
   } catch (err) {
     console.error('Approve manual payment error:', err);
@@ -743,40 +654,32 @@ export const rejectManualPayment = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { rejectionReason } = req.body;
     const admin = req.user as any;
-    
     if (!rejectionReason) {
       return res.status(400).json({ success: false, message: 'Rejection reason is required' });
     }
-    
     const payment = await ManualPayment.findById(id);
     if (!payment) {
       return res.status(404).json({ success: false, message: 'Payment not found' });
     }
-    
     if (payment.status !== 'pending_review') {
       return res.status(400).json({ success: false, message: `Payment already ${payment.status}` });
     }
-    
     payment.status = 'rejected';
     payment.rejectionReason = rejectionReason;
     payment.adminNote = rejectionReason;
     payment.approvedBy = admin._id;
     payment.approvedAt = new Date();
     await payment.save();
-    
-    // Notify user
     await Notification.create({
       userId: payment.userId,
       title: '❌ Manual Payment Rejected',
       message: `Your manual payment of ₦${payment.amount.toLocaleString()} was rejected. Reason: ${rejectionReason}. Please contact support or try again with correct details.`,
       type: 'payment',
     });
-    
     getIO().to(`user:${payment.userId}`).emit('notification', {
       title: 'Payment Rejected',
       message: `Your manual payment was rejected. Reason: ${rejectionReason}`
     });
-    
     res.json({ success: true, message: 'Payment rejected', data: payment });
   } catch (err) {
     console.error('Reject manual payment error:', err);
@@ -790,7 +693,6 @@ export const getPlatformStats = async (req: Request, res: Response) => {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfWeek = new Date(now.setDate(now.getDate() - 7));
-    
     const stats = {
       users: {
         total: await User.countDocuments(),
@@ -839,7 +741,6 @@ export const getPlatformStats = async (req: Request, res: Response) => {
         ]),
       },
     };
-    
     res.json({ success: true, data: stats });
   } catch (err) {
     console.error('Get platform stats error:', err);
@@ -851,15 +752,12 @@ export const getTransactionReport = async (req: Request, res: Response) => {
   try {
     const { startDate, endDate, type } = req.query;
     const filter: any = { status: 'completed' };
-    
     if (startDate) filter.createdAt = { $gte: new Date(startDate as string) };
     if (endDate) filter.createdAt = { ...filter.createdAt, $lte: new Date(endDate as string) };
     if (type && type !== 'all') filter.type = type;
-    
     const transactions = await Transaction.find(filter)
       .populate('userId', 'firstName lastName email')
       .sort('-createdAt');
-    
     const summary = {
       totalAmount: transactions.reduce((sum, t) => sum + t.amount, 0),
       byType: transactions.reduce((acc, t) => {
@@ -868,7 +766,6 @@ export const getTransactionReport = async (req: Request, res: Response) => {
       }, {} as Record<string, number>),
       count: transactions.length,
     };
-    
     res.json({ success: true, data: { transactions, summary } });
   } catch (err) {
     console.error('Get transaction report error:', err);
@@ -876,12 +773,9 @@ export const getTransactionReport = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== AUDIT LOGS (SIMPLE) ====================
-// Note: For full audit logging, you'd need an AuditLog model
+// ==================== AUDIT LOGS ====================
 export const getAuditLogs = async (req: Request, res: Response) => {
   try {
-    // This would ideally come from an AuditLog collection
-    // For now, return recent admin actions from notifications and transactions
     const recentActions = await Transaction.find({ 
       description: { $regex: /admin/i },
       createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }
@@ -889,10 +783,105 @@ export const getAuditLogs = async (req: Request, res: Response) => {
       .populate('userId', 'firstName lastName email')
       .sort('-createdAt')
       .limit(100);
-    
     res.json({ success: true, data: recentActions });
   } catch (err) {
     console.error('Get audit logs error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ==================== NEW: ADMIN ADS MANAGEMENT ====================
+export const createAd = async (req: Request, res: Response) => {
+  try {
+    const ad = await AdminAd.create(req.body);
+    res.status(201).json({ success: true, data: ad });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const getAds = async (req: Request, res: Response) => {
+  try {
+    const { placement } = req.query;
+    const filter: any = { isActive: true, startDate: { $lte: new Date() }, $or: [{ endDate: null }, { endDate: { $gte: new Date() } }] };
+    if (placement) filter.placement = placement;
+    const ads = await AdminAd.find(filter).sort('-priority');
+    res.json({ success: true, data: ads });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const getAllAds = async (req: Request, res: Response) => {
+  try {
+    const ads = await AdminAd.find().sort('-createdAt');
+    res.json({ success: true, data: ads });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const updateAd = async (req: Request, res: Response) => {
+  try {
+    const ad = await AdminAd.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!ad) return res.status(404).json({ success: false, message: 'Ad not found' });
+    res.json({ success: true, data: ad });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const deleteAd = async (req: Request, res: Response) => {
+  try {
+    await AdminAd.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Ad deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const trackAdImpression = async (req: Request, res: Response) => {
+  try {
+    await AdminAd.findByIdAndUpdate(req.params.id, { $inc: { impressions: 1 } });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const trackAdClick = async (req: Request, res: Response) => {
+  try {
+    await AdminAd.findByIdAndUpdate(req.params.id, { $inc: { clicks: 1 } });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ==================== NEW: ENHANCED USER FULL DETAILS (ADMIN) ====================
+export const getUserFullDetails = async (req: Request, res: Response) => {
+  try {
+    const user = await User.findById(req.params.id)
+      .select('+passwordHash')
+      .populate('bankAccount');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    const posts = await Post.find({ authorId: user._id }).sort('-createdAt').limit(50);
+    const followersCount = await Follow.countDocuments({ followingId: user._id });
+    const followingCount = await Follow.countDocuments({ followerId: user._id });
+    const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(100);
+    const enrollments = await Enrollment.find({ userId: user._id }).populate('courseId', 'title');
+    res.json({
+      success: true,
+      data: {
+        user,
+        posts,
+        followers: followersCount,
+        following: followingCount,
+        transactions,
+        enrollments
+      }
+    });
+  } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
 };
