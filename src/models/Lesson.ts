@@ -1,4 +1,3 @@
-// File: src/models/Lesson.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ILesson extends Document {
@@ -7,11 +6,19 @@ export interface ILesson extends Document {
   type: 'video' | 'text' | 'quiz' | 'assignment';
   content?: string;
   videoUrl?: string;
-  duration: number; // minutes
+  duration: number;
   order: number;
   xpReward: number;
   resources: { title: string; url: string }[];
   notes?: string;
+  // NEW FIELDS:
+  hasCodeEditor?: boolean;
+  initialCode?: string;
+  hasCalculator?: boolean;
+  calculatorConfig?: {
+    theme: 'light' | 'dark';
+    operations: string[];
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,6 +35,11 @@ const LessonSchema = new Schema<ILesson>(
     xpReward: { type: Number, default: 50 },
     resources: [{ title: String, url: String }],
     notes: String,
+    // NEW FIELDS:
+    hasCodeEditor: { type: Boolean, default: false },
+    initialCode: { type: String, default: '' },
+    hasCalculator: { type: Boolean, default: false },
+    calculatorConfig: { type: Object, default: { theme: 'dark', operations: ['+', '-', '*', '/'] } },
   },
   { timestamps: true }
 );
