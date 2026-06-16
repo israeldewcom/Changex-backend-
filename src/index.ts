@@ -22,6 +22,11 @@ import aiRoutes from './routes/ai.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
 import feedbackRoutes from './routes/feedback.routes.js';
 import contactRoutes from './routes/contact.routes.js';
+import postRoutes from './routes/post.routes.js';
+import followRoutes from './routes/follow.routes.js';
+import challengeRoutes from './routes/challenge.routes.js';
+import adRoutes from './routes/ad.routes.js';
+import interactiveRoutes from './routes/interactive.routes.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 import { setupSocket } from './socket.js';
 import { startWorkers } from './workers/index.js';
@@ -32,7 +37,6 @@ import { authenticate, authorize } from './middlewares/auth.js';
 import Enrollment from './models/Enrollment.js';
 import Referral from './models/Referral.js';
 import User from './models/User.js';
-import cloudinaryConfig from './config/cloudinary.js';
 
 const app = express();
 const server = http.createServer(app);
@@ -76,14 +80,20 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// ========== DEBUG ENDPOINTS ==========
+// ==================== DEBUG & HEALTH ENDPOINTS ====================
 app.get('/debug/version', (req, res) => {
   res.json({
-    version: 'PRODUCTION_2.1.0',
-    enrollmentGuard: true,
-    referralCaseInsensitive: true,
-    affiliateTracking: true,
-    manualPayments: true,
+    version: 'PRODUCTION_2.0.0_FULL',
+    features: {
+      enrollmentGuard: true,
+      referralCaseInsensitive: true,
+      affiliateTracking: true,
+      manualPayments: true,
+      socialPosts: true,
+      challenges: true,
+      ads: true,
+      interactiveMaterials: true
+    },
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
@@ -91,49 +101,9 @@ app.get('/debug/version', (req, res) => {
   });
 });
 
-// Simple Cloudinary environment check
-app.get('/debug/cloudinary-env', (req, res) => {
-  res.json({
-    cloud_name: !!process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: !!process.env.CLOUDINARY_API_KEY,
-    api_secret: !!process.env.CLOUDINARY_API_SECRET,
-    cloud_name_preview: process.env.CLOUDINARY_CLOUD_NAME ? process.env.CLOUDINARY_CLOUD_NAME.substring(0,3) + '...' : null,
-    config_loaded: !!cloudinaryConfig,
-  });
-});
-
-// Detailed Cloudinary debug
-app.get('/debug/env/cloudinary', (req, res) => {
-  const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-  const apiKey = process.env.CLOUDINARY_API_KEY;
-  const apiSecret = process.env.CLOUDINARY_API_SECRET;
-
-  res.json({
-    cloudName: cloudName ? '✓ present' : '✗ missing',
-    apiKey: apiKey ? '✓ present' : '✗ missing',
-    apiSecret: apiSecret ? '✓ present' : '✗ missing',
-    cloudNamePreview: cloudName ? cloudName.substring(0, 3) + '...' : null,
-    alternativeNames: {
-      CLOUDINARY_API_SECRET_KEY: !!process.env.CLOUDINARY_API_SECRET_KEY,
-      CLOUDINARY_SECRET: !!process.env.CLOUDINARY_SECRET,
-    },
-    cloudinaryConfigLoaded: !!cloudinaryConfig,
-  });
-});
-
-// NEW: Google OAuth debug endpoint
-app.get('/debug/google-config', (req, res) => {
-  res.json({
-    clientId: process.env.GOOGLE_CLIENT_ID ? process.env.GOOGLE_CLIENT_ID.substring(0, 20) + '...' : 'MISSING',
-    hasSecret: !!process.env.GOOGLE_CLIENT_SECRET,
-    callbackUrl: process.env.GOOGLE_CALLBACK_URL,
-  });
-});
-
-// Health check
 app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
-// Public referral check (case‑insensitive)
+// ==================== PUBLIC REFERRAL CHECK ====================
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
     const code = req.params.code.trim().toUpperCase();
@@ -144,16 +114,18 @@ app.get('/api/v1/check-referral/:code', async (req, res) => {
   }
 });
 
-// Public announcements
+// ==================== PUBLIC ANNOUNCEMENTS ====================
 app.get('/api/v1/announcements/latest', async (req, res) => {
   try {
-    res.json({ success: true, data: [] });
+    const Announcement = (await import('./models/Announcement.js')).default;
+    const announcements = await Announcement.find().sort('-createdAt').limit(5);
+    res.json({ success: true, data: announcements });
   } catch (err) {
-    res.status(500).json({ success: false, message: String(err) });
+    res.json({ success: true, data: [] });
   }
 });
 
-// ========== ROUTES ==========
+// ==================== ROUTE REGISTRATIONS ====================
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/contact', contactRoutes);
@@ -167,20 +139,27 @@ app.use('/api/v1/affiliate', authenticate, affiliateRoutes);
 app.use('/api/v1/ai', authenticate, aiRoutes);
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
-// 404 handler for unmatched routes
+// ==================== NEW ROUTES ====================
+app.use('/api/v1/posts', postRoutes);
+app.use('/api/v1/follows', followRoutes);
+app.use('/api/v1/challenges', challengeRoutes);
+app.use('/api/v1/ads', adRoutes);
+app.use('/api/v1/interactive', authenticate, interactiveRoutes);
+
+// ==================== ERROR HANDLER ====================
+app.use(errorHandler);
+
+// ==================== SOCKET.IO SETUP ====================
+const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
+setupSocket(io);
+
+// ==================== 404 HANDLER ====================
 app.use('*', (req, res) => {
   logger.warn(`[404] Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-// Global error handler (must be last)
-app.use(errorHandler);
-
-// Socket.io setup
-const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
-setupSocket(io);
-
-// Cleanup corrupted data on startup
+// ==================== CLEANUP CORRUPTED DATA ON STARTUP ====================
 async function cleanupCorruptedData() {
   try {
     const enrollResult = await Enrollment.deleteMany({ userId: null });
@@ -196,22 +175,19 @@ async function cleanupCorruptedData() {
   }
 }
 
-// Bootstrap server
+// ==================== BOOTSTRAP ====================
 async function bootstrap() {
   try {
     await connectDB();
     await connectRedis();
     await cleanupCorruptedData();
     startWorkers();
-
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);
-      logger.info(`✅ Debug version: http://localhost:${PORT}/debug/version`);
-      logger.info(`✅ Cloudinary env: http://localhost:${PORT}/debug/cloudinary-env`);
-      logger.info(`✅ Detailed Cloudinary debug: http://localhost:${PORT}/debug/env/cloudinary`);
-      logger.info(`✅ Google OAuth debug: http://localhost:${PORT}/debug/google-config`);
+      logger.info(`✅ Debug endpoint: http://localhost:${PORT}/debug/version`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
+      logger.info(`📝 New features: Posts, Follows, Challenges, Ads, Interactive Materials`);
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
@@ -219,7 +195,6 @@ async function bootstrap() {
   }
 }
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
   server.close(async () => {
