@@ -1,0 +1,238 @@
+import { Request, Response, NextFunction } from 'express';
+import Post from '../models/Post.js';
+import Comment from '../models/Comment.js';
+import Like from '../models/Like.js';
+import Notification from '../models/Notification.js';
+import { IUser } from '../models/User.js';
+import { getIO } from '../socket.js';
+
+function generateSlug(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now();
+}
+
+export const createPost = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { title, content, excerpt, type, tags, featuredImage, seoTitle, seoDescription, seoKeywords, courseId } = req.body;
+    
+    const slug = generateSlug(title);
+    const post = await Post.create({
+      title,
+      slug,
+      content,
+      excerpt: excerpt || content.substring(0, 160).replace(/<[^>]*>/g, ''),
+      type: type || 'article',
+      authorId: user._id,
+      courseId,
+      featuredImage,
+      tags: tags ? (Array.isArray(tags) ? tags : tags.split(',').map((t: string) => t.trim())) : [],
+      seoTitle: seoTitle || title,
+      seoDescription: seoDescription || excerpt || content.substring(0, 160).replace(/<[^>]*>/g, ''),
+      seoKeywords: seoKeywords || tags,
+      isPublished: false,
+    });
+    res.status(201).json({ success: true, data: post });
+  } catch (err) { next(err); }
+};
+
+export const updatePost = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id } = req.params;
+    const post = await Post.findOne({ _id: id, authorId: user._id });
+    if (!post && !(req.user as IUser).roles.includes('admin')) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    const updated = await Post.findByIdAndUpdate(id, req.body, { new: true });
+    res.json({ success: true, data: updated });
+  } catch (err) { next(err); }
+};
+
+export const publishPost = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id } = req.params;
+    const post = await Post.findOne({ _id: id, authorId: user._id });
+    if (!post && !(req.user as IUser).roles.includes('admin')) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    post.isPublished = true;
+    post.publishedAt = new Date();
+    await post.save();
+    
+    // Notify followers
+    const followers = await (await import('../models/Follow.js')).default.find({ followingId: user._id });
+    await Notification.insertMany(followers.map(f => ({
+      userId: f.followerId,
+      title: 'New Post from ' + user.firstName,
+      message: post.title,
+      type: 'system',
+      data: { postId: post._id, slug: post.slug }
+    })));
+    
+    res.json({ success: true, data: post });
+  } catch (err) { next(err); }
+};
+
+export const deletePost = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id } = req.params;
+    const post = await Post.findOne({ _id: id, authorId: user._id });
+    if (!post && !(req.user as IUser).roles.includes('admin')) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    await Comment.deleteMany({ postId: id });
+    await Like.deleteMany({ targetId: id, targetType: 'post' });
+    await Post.findByIdAndDelete(id);
+    res.json({ success: true, message: 'Post deleted' });
+  } catch (err) { next(err); }
+};
+
+export const getPublishedPosts = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { page = 1, limit = 10, tag, type, author } = req.query;
+    const filter: any = { isPublished: true };
+    if (tag) filter.tags = tag;
+    if (type) filter.type = type;
+    if (author) filter.authorId = author;
+    
+    const posts = await Post.find(filter)
+      .populate('authorId', 'firstName lastName avatarUrl bio')
+      .sort('-publishedAt')
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit));
+    
+    const total = await Post.countDocuments(filter);
+    res.json({
+      success: true,
+      data: {
+        posts,
+        pagination: {
+          total,
+          page: Number(page),
+          limit: Number(limit),
+          pages: Math.ceil(total / Number(limit))
+        }
+      }
+    });
+  } catch (err) { next(err); }
+};
+
+export const getPostBySlug = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { slug } = req.params;
+    const post = await Post.findOneAndUpdate(
+      { slug, isPublished: true },
+      { $inc: { views: 1 } },
+      { new: true }
+    ).populate('authorId', 'firstName lastName avatarUrl bio socialLinks');
+    
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
+    
+    // Check if current user liked this post
+    let userLiked = false;
+    if (req.user) {
+      const like = await Like.findOne({ userId: (req.user as IUser)._id, targetId: post._id, targetType: 'post' });
+      userLiked = !!like;
+    }
+    
+    res.json({ success: true, data: { ...post.toObject(), userLiked } });
+  } catch (err) { next(err); }
+};
+
+export const likePost = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id } = req.params;
+    const existing = await Like.findOne({ userId: user._id, targetId: id, targetType: 'post' });
+    if (existing) {
+      await existing.deleteOne();
+      await Post.findByIdAndUpdate(id, { $inc: { likes: -1 } });
+      res.json({ success: true, liked: false, likes: (await Post.findById(id))?.likes });
+    } else {
+      await Like.create({ userId: user._id, targetId: id, targetType: 'post' });
+      const post = await Post.findByIdAndUpdate(id, { $inc: { likes: 1 } }, { new: true });
+      res.json({ success: true, liked: true, likes: post?.likes });
+    }
+  } catch (err) { next(err); }
+};
+
+export const addComment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id } = req.params;
+    const { content, parentId } = req.body;
+    const comment = await Comment.create({ postId: id, userId: user._id, content, parentId });
+    await Post.findByIdAndUpdate(id, { $inc: { commentsCount: 1 } });
+    
+    // Notify post author
+    const post = await Post.findById(id);
+    if (post && post.authorId.toString() !== user._id.toString()) {
+      await Notification.create({
+        userId: post.authorId,
+        title: 'New Comment',
+        message: `${user.firstName} commented on your post: ${content.substring(0, 100)}`,
+        type: 'system',
+        data: { postId: id, commentId: comment._id }
+      });
+      getIO().to(`user:${post.authorId}`).emit('notification', { title: 'New Comment' });
+    }
+    
+    res.status(201).json({ success: true, data: comment });
+  } catch (err) { next(err); }
+};
+
+export const getComments = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const comments = await Comment.find({ postId: id, parentId: null })
+      .populate('userId', 'firstName lastName avatarUrl')
+      .sort('createdAt');
+    
+    // Get replies for each comment
+    const commentsWithReplies = await Promise.all(comments.map(async (comment) => {
+      const replies = await Comment.find({ parentId: comment._id })
+        .populate('userId', 'firstName lastName avatarUrl')
+        .sort('createdAt');
+      return { ...comment.toObject(), replies };
+    }));
+    
+    res.json({ success: true, data: commentsWithReplies });
+  } catch (err) { next(err); }
+};
+
+export const likeComment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id } = req.params;
+    const existing = await Like.findOne({ userId: user._id, targetId: id, targetType: 'comment' });
+    if (existing) {
+      await existing.deleteOne();
+      await Comment.findByIdAndUpdate(id, { $inc: { likes: -1 } });
+      res.json({ success: true, liked: false });
+    } else {
+      await Like.create({ userId: user._id, targetId: id, targetType: 'comment' });
+      await Comment.findByIdAndUpdate(id, { $inc: { likes: 1 } });
+      res.json({ success: true, liked: true });
+    }
+  } catch (err) { next(err); }
+};
+
+export const sharePost = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    await Post.findByIdAndUpdate(id, { $inc: { shares: 1 } });
+    res.json({ success: true, message: 'Share counted' });
+  } catch (err) { next(err); }
+};
+
+export const getUserPosts = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params;
+    const posts = await Post.find({ authorId: userId, isPublished: true })
+      .populate('authorId', 'firstName lastName avatarUrl')
+      .sort('-publishedAt');
+    res.json({ success: true, data: posts });
+  } catch (err) { next(err); }
+};
