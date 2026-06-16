@@ -8,10 +8,11 @@ const router = Router();
 router.get('/', postController.getPublishedPosts);
 router.get('/slug/:slug', postController.getPostBySlug);
 router.get('/user/:userId', postController.getUserPosts);
+router.get('/:id/analytics', postController.getPostAnalytics); // public analytics
 
 // Authenticated routes
 router.use(authenticate);
-router.get('/following', postController.getFollowingFeed); // NEW
+router.get('/following', postController.getFollowingFeed);
 router.post('/', postController.createPost);
 router.put('/:id', postController.updatePost);
 router.put('/:id/publish', postController.publishPost);
@@ -21,5 +22,7 @@ router.post('/:id/comment', postController.addComment);
 router.get('/:id/comments', postController.getComments);
 router.post('/comment/:id/like', postController.likeComment);
 router.post('/:id/share', postController.sharePost);
+router.post('/:id/view', postController.trackPostView);
+router.get('/my/social-earnings', postController.getMySocialEarnings);
 
 export default router;
