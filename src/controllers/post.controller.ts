@@ -56,6 +56,9 @@ export const publishPost = async (req: Request, res: Response, next: NextFunctio
     if (!post && !(req.user as IUser).roles.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
     post.isPublished = true;
     post.publishedAt = new Date();
     await post.save();
@@ -81,6 +84,9 @@ export const deletePost = async (req: Request, res: Response, next: NextFunction
     const post = await Post.findOne({ _id: id, authorId: user._id });
     if (!post && !(req.user as IUser).roles.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
     }
     await Comment.deleteMany({ postId: id });
     await Like.deleteMany({ targetId: id, targetType: 'post' });
@@ -130,7 +136,6 @@ export const getPostBySlug = async (req: Request, res: Response, next: NextFunct
     
     if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
     
-    // Check if current user liked this post
     let userLiked = false;
     if (req.user) {
       const like = await Like.findOne({ userId: (req.user as IUser)._id, targetId: post._id, targetType: 'post' });
@@ -166,7 +171,6 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
     const comment = await Comment.create({ postId: id, userId: user._id, content, parentId });
     await Post.findByIdAndUpdate(id, { $inc: { commentsCount: 1 } });
     
-    // Notify post author
     const post = await Post.findById(id);
     if (post && post.authorId.toString() !== user._id.toString()) {
       await Notification.create({
@@ -190,7 +194,6 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
       .populate('userId', 'firstName lastName avatarUrl')
       .sort('createdAt');
     
-    // Get replies for each comment
     const commentsWithReplies = await Promise.all(comments.map(async (comment) => {
       const replies = await Comment.find({ parentId: comment._id })
         .populate('userId', 'firstName lastName avatarUrl')
