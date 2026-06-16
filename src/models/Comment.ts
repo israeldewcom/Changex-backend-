@@ -6,7 +6,7 @@ export interface IComment extends Document {
   parentId?: mongoose.Types.ObjectId;
   content: string;
   likes: number;
-  isHidden: boolean;
+  isEdited: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -18,11 +18,12 @@ const CommentSchema = new Schema<IComment>(
     parentId: { type: Schema.Types.ObjectId, ref: 'Comment' },
     content: { type: String, required: true },
     likes: { type: Number, default: 0 },
-    isHidden: { type: Boolean, default: false },
+    isEdited: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
 CommentSchema.index({ postId: 1, createdAt: -1 });
+CommentSchema.index({ parentId: 1 });
 
 export default mongoose.model<IComment>('Comment', CommentSchema);
