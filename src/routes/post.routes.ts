@@ -5,19 +5,20 @@ import { authenticate } from '../middlewares/auth.js';
 const router = Router();
 
 // Public routes
-router.get('/', postController.getAllPosts);
+router.get('/', postController.getPublishedPosts);
 router.get('/slug/:slug', postController.getPostBySlug);
 router.get('/user/:userId', postController.getUserPosts);
-router.get('/:id', postController.getPostById);
-router.get('/:postId/comments', postController.getComments);
 
 // Authenticated routes
 router.use(authenticate);
 router.post('/', postController.createPost);
 router.put('/:id', postController.updatePost);
+router.put('/:id/publish', postController.publishPost);
 router.delete('/:id', postController.deletePost);
 router.post('/:id/like', postController.likePost);
-router.post('/:id/unlike', postController.unlikePost);
-router.post('/comments', postController.addComment);
+router.post('/:id/comment', postController.addComment);
+router.get('/:id/comments', postController.getComments);
+router.post('/comment/:id/like', postController.likeComment);
+router.post('/:id/share', postController.sharePost);
 
 export default router;
