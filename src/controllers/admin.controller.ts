@@ -12,6 +12,8 @@ import Follow from '../models/Follow.js';
 import Challenge from '../models/Challenge.js';
 import Ad from '../models/Ad.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
+import PostAnalytics from '../models/PostAnalytics.js';
+import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
 import { getIO } from '../socket.js';
 
 // ==================== DASHBOARD ====================
@@ -35,6 +37,7 @@ export const getDashboard = async (req: Request, res: Response) => {
     const pendingWithdrawals = await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' });
     const pendingManualPayments = await ManualPayment.countDocuments({ status: 'pending_review' });
     const pendingChallengeCompletions = await ChallengeProgress.countDocuments({ status: 'in_progress' });
+    const totalSocialEarningsPool = await PostAnalytics.aggregate([{ $group: { _id: null, total: { $sum: '$earnings' } } }]);
     
     res.json({ 
       success: true, 
@@ -45,7 +48,8 @@ export const getDashboard = async (req: Request, res: Response) => {
         totalRevenue, 
         pendingWithdrawals,
         pendingManualPayments,
-        pendingChallengeCompletions
+        pendingChallengeCompletions,
+        totalSocialEarnings: totalSocialEarningsPool[0]?.total || 0,
       } 
     });
   } catch (err) {
@@ -360,7 +364,6 @@ export const processWithdrawal = async (req: Request, res: Response) => {
       tx.metadata = { ...tx.metadata, adminNote, rejectedBy: admin._id, rejectedAt: new Date() };
       await tx.save();
       
-      // Return funds to user wallet
       const user = await User.findById(tx.userId);
       if (user) {
         user.walletBalance = (user.walletBalance || 0) + Math.abs(tx.amount);
@@ -631,7 +634,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: `Payment already ${payment.status}` });
     }
     
-    // Grant access based on payment type
     if (payment.type === 'subscription') {
       await User.findByIdAndUpdate(payment.userId, {
         isPremium: true,
@@ -780,6 +782,10 @@ export const getUserFullDetails = async (req: Request, res: Response) => {
     const courses = await Course.find({ instructorId: user._id }).select('title approvalStatus totalStudents');
     const challengeProgress = await ChallengeProgress.find({ userId: user._id })
       .populate('challengeId', 'title status');
+    const socialEarnings = await PostAnalytics.aggregate([
+      { $match: { postId: { $in: (await Post.find({ authorId: user._id }).select('_id')).map(p => p._id) } } },
+      { $group: { _id: null, total: { $sum: '$earnings' } } }
+    ]);
     
     res.json({
       success: true,
@@ -791,7 +797,8 @@ export const getUserFullDetails = async (req: Request, res: Response) => {
           following, 
           enrollmentsCount: enrollments.length,
           coursesCreated: courses.length,
-          challengesJoined: challengeProgress.length
+          challengesJoined: challengeProgress.length,
+          socialEarnings: socialEarnings[0]?.total || 0,
         },
         recentTransactions: transactions,
         enrollments,
@@ -924,7 +931,6 @@ export const completeChallengeForUser = async (req: Request, res: Response) => {
     progress.adminNote = adminNote;
     await progress.save();
 
-    // === AWARD REWARDS ===
     const challenge = await Challenge.findById(challengeId);
     if (!challenge) {
       return res.status(404).json({ success: false, message: 'Challenge not found' });
@@ -934,7 +940,6 @@ export const completeChallengeForUser = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    // 1. Award XP
     user.xp = (user.xp || 0) + (challenge.rewardXP || 0);
     let xpNeeded = user.level * 1000;
     while (user.xp >= xpNeeded) {
@@ -943,7 +948,6 @@ export const completeChallengeForUser = async (req: Request, res: Response) => {
       xpNeeded = user.level * 1000;
     }
 
-    // 2. Wallet bonus
     if (challenge.rewardAmount && challenge.rewardAmount > 0) {
       user.walletBalance = (user.walletBalance || 0) + challenge.rewardAmount;
       await Transaction.create({
@@ -955,7 +959,6 @@ export const completeChallengeForUser = async (req: Request, res: Response) => {
       });
     }
 
-    // 3. Premium days
     if (challenge.rewardPremiumDays && challenge.rewardPremiumDays > 0) {
       const currentExpiry = user.subscriptionExpires || new Date();
       const newExpiry = new Date(currentExpiry.getTime() + challenge.rewardPremiumDays * 24 * 60 * 60 * 1000);
@@ -964,7 +967,6 @@ export const completeChallengeForUser = async (req: Request, res: Response) => {
     }
 
     await user.save();
-
     progress.rewardClaimed = true;
     await progress.save();
 
@@ -1087,5 +1089,62 @@ export const getActiveAds = async (req: Request, res: Response) => {
     res.json({ success: true, data: ads });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
+  }
+};
+
+// ==================== SOCIAL EARNINGS ADMIN ====================
+export const getSocialEarningsConfig = async (req: Request, res: Response) => {
+  try {
+    let config = await SocialEarningsConfig.findOne().populate('updatedBy', 'firstName lastName');
+    if (!config) {
+      const admin = req.user as IUser;
+      config = await SocialEarningsConfig.create({
+        dailyPoolAmount: 10000,
+        engagementWeights: { like: 1, comment: 2, share: 3, view: 0.5 },
+        updatedBy: admin._id,
+      });
+    }
+    res.json({ success: true, data: config });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const updateSocialEarningsConfig = async (req: Request, res: Response) => {
+  try {
+    const admin = req.user as IUser;
+    const { dailyPoolAmount, engagementWeights } = req.body;
+    const config = await SocialEarningsConfig.findOneAndUpdate(
+      {},
+      { dailyPoolAmount, engagementWeights, updatedBy: admin._id },
+      { new: true, upsert: true }
+    );
+    res.json({ success: true, data: config });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const getTopEarningPosts = async (req: Request, res: Response) => {
+  try {
+    const { limit = 10 } = req.query;
+    const analytics = await PostAnalytics.find({ earnings: { $gt: 0 } })
+      .sort('-earnings')
+      .limit(Number(limit))
+      .populate('postId', 'title authorId');
+    res.json({ success: true, data: analytics });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const getTotalSocialEarningsPool = async (req: Request, res: Response) => {
+  try {
+    const total = await PostAnalytics.aggregate([
+      { $group: { _id: null, total: { $sum: '$earnings' } } }
+    ]);
+    res.json({ success: true, data: { total: total[0]?.total || 0 } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
   }
 };
