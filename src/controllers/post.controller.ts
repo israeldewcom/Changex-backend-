@@ -5,6 +5,7 @@ import Like from '../models/Like.js';
 import Notification from '../models/Notification.js';
 import Follow from '../models/Follow.js';
 import Course from '../models/Course.js';
+import PostAnalytics from '../models/PostAnalytics.js';
 import { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
 
@@ -92,6 +93,7 @@ export const deletePost = async (req: Request, res: Response, next: NextFunction
     }
     await Comment.deleteMany({ postId: id });
     await Like.deleteMany({ targetId: id, targetType: 'post' });
+    await PostAnalytics.deleteOne({ postId: id });
     await Post.findByIdAndDelete(id);
     res.json({ success: true, message: 'Post deleted' });
   } catch (err) { next(err); }
@@ -156,10 +158,20 @@ export const likePost = async (req: Request, res: Response, next: NextFunction) 
     if (existing) {
       await existing.deleteOne();
       await Post.findByIdAndUpdate(id, { $inc: { likes: -1 } });
+      await PostAnalytics.findOneAndUpdate(
+        { postId: id },
+        { $inc: { likes: -1, totalEngagement: -1 } },
+        { upsert: true }
+      );
       res.json({ success: true, liked: false, likes: (await Post.findById(id))?.likes });
     } else {
       await Like.create({ userId: user._id, targetId: id, targetType: 'post' });
       const post = await Post.findByIdAndUpdate(id, { $inc: { likes: 1 } }, { new: true });
+      await PostAnalytics.findOneAndUpdate(
+        { postId: id },
+        { $inc: { likes: 1, totalEngagement: 1 } },
+        { upsert: true }
+      );
       res.json({ success: true, liked: true, likes: post?.likes });
     }
   } catch (err) { next(err); }
@@ -172,7 +184,12 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
     const { content, parentId } = req.body;
     const comment = await Comment.create({ postId: id, userId: user._id, content, parentId });
     await Post.findByIdAndUpdate(id, { $inc: { commentsCount: 1 } });
-    
+    await PostAnalytics.findOneAndUpdate(
+      { postId: id },
+      { $inc: { comments: 1, totalEngagement: 2 } },
+      { upsert: true }
+    );
+
     const post = await Post.findById(id);
     if (post && post.authorId.toString() !== user._id.toString()) {
       await Notification.create({
@@ -184,7 +201,7 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
       });
       getIO().to(`user:${post.authorId}`).emit('notification', { title: 'New Comment' });
     }
-    
+
     res.status(201).json({ success: true, data: comment });
   } catch (err) { next(err); }
 };
@@ -228,6 +245,11 @@ export const sharePost = async (req: Request, res: Response, next: NextFunction)
   try {
     const { id } = req.params;
     await Post.findByIdAndUpdate(id, { $inc: { shares: 1 } });
+    await PostAnalytics.findOneAndUpdate(
+      { postId: id },
+      { $inc: { shares: 1, totalEngagement: 3 } },
+      { upsert: true }
+    );
     res.json({ success: true, message: 'Share counted' });
   } catch (err) { next(err); }
 };
@@ -242,13 +264,12 @@ export const getUserPosts = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
-// ========== NEW: Following Feed ==========
+// ========== FOLLOWING FEED ==========
 export const getFollowingFeed = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
 
-    // Get users followed by current user
     const follows = await Follow.find({ followerId: user._id }).select('followingId');
     const followedIds = follows.map(f => f.followingId);
 
@@ -256,7 +277,6 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
       return res.json({ success: true, data: [] });
     }
 
-    // Get posts from followed users
     const posts = await Post.find({
       authorId: { $in: followedIds },
       isPublished: true
@@ -265,7 +285,6 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
       .sort('-publishedAt')
       .limit(20);
 
-    // Get courses from followed instructors
     const courses = await Course.find({
       instructorId: { $in: followedIds },
       isPublished: true,
@@ -275,7 +294,6 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
       .sort('-createdAt')
       .limit(20);
 
-    // Combine and format
     const feed = [
       ...posts.map(p => ({
         ...p.toObject(),
@@ -291,11 +309,47 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
       }))
     ];
 
-    // Sort by date descending
     feed.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     res.json({ success: true, data: feed });
   } catch (err) {
     next(err);
   }
+};
+
+// ========== SOCIAL EARNINGS / ANALYTICS ==========
+export const trackPostView = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const userId = (req.user as IUser)?._id;
+    await Post.findByIdAndUpdate(id, { $inc: { views: 1 } });
+    await PostAnalytics.findOneAndUpdate(
+      { postId: id },
+      { $inc: { views: 1, totalEngagement: 0.5 } },
+      { upsert: true }
+    );
+    res.json({ success: true });
+  } catch (err) { next(err); }
+};
+
+export const getPostAnalytics = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const analytics = await PostAnalytics.findOne({ postId: id }).populate('postId', 'title authorId');
+    if (!analytics) {
+      return res.json({ success: true, data: { views: 0, likes: 0, comments: 0, shares: 0, totalEngagement: 0, earnings: 0 } });
+    }
+    res.json({ success: true, data: analytics });
+  } catch (err) { next(err); }
+};
+
+export const getMySocialEarnings = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const posts = await Post.find({ authorId: user._id, isPublished: true }).select('_id');
+    const postIds = posts.map(p => p._id);
+    const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
+    const totalEarnings = analytics.reduce((sum, a) => sum + (a.earnings || 0), 0);
+    res.json({ success: true, data: { totalEarnings, posts: analytics } });
+  } catch (err) { next(err); }
 };
