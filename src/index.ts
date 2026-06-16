@@ -22,11 +22,11 @@ import aiRoutes from './routes/ai.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
 import feedbackRoutes from './routes/feedback.routes.js';
 import contactRoutes from './routes/contact.routes.js';
-import postRoutes from './routes/post.routes.js';
-import followRoutes from './routes/follow.routes.js';
-import challengeRoutes from './routes/challenge.routes.js';
-import adRoutes from './routes/ad.routes.js';
-import interactiveRoutes from './routes/interactive.routes.js';
+import postRoutes from './routes/post.routes.js';               // NEW
+import followRoutes from './routes/follow.routes.js';           // NEW
+import challengeRoutes from './routes/challenge.routes.js';     // NEW
+import adRoutes from './routes/ad.routes.js';                   // NEW
+import interactiveRoutes from './routes/interactive.routes.js'; // NEW
 import { errorHandler } from './middlewares/errorHandler.js';
 import { setupSocket } from './socket.js';
 import { startWorkers } from './workers/index.js';
@@ -80,7 +80,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// ==================== DEBUG & HEALTH ENDPOINTS ====================
 app.get('/debug/version', (req, res) => {
   res.json({
     version: 'PRODUCTION_2.0.0_FULL',
@@ -103,7 +102,6 @@ app.get('/debug/version', (req, res) => {
 
 app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
-// ==================== PUBLIC REFERRAL CHECK ====================
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
     const code = req.params.code.trim().toUpperCase();
@@ -114,7 +112,6 @@ app.get('/api/v1/check-referral/:code', async (req, res) => {
   }
 });
 
-// ==================== PUBLIC ANNOUNCEMENTS ====================
 app.get('/api/v1/announcements/latest', async (req, res) => {
   try {
     const Announcement = (await import('./models/Announcement.js')).default;
@@ -125,7 +122,7 @@ app.get('/api/v1/announcements/latest', async (req, res) => {
   }
 });
 
-// ==================== ROUTE REGISTRATIONS ====================
+// ========== ROUTE REGISTRATIONS (EXISTING) ==========
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/contact', contactRoutes);
@@ -139,27 +136,23 @@ app.use('/api/v1/affiliate', authenticate, affiliateRoutes);
 app.use('/api/v1/ai', authenticate, aiRoutes);
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
-// ==================== NEW ROUTES ====================
+// ========== NEW ROUTE REGISTRATIONS ==========
 app.use('/api/v1/posts', postRoutes);
 app.use('/api/v1/follows', followRoutes);
 app.use('/api/v1/challenges', challengeRoutes);
 app.use('/api/v1/ads', adRoutes);
 app.use('/api/v1/interactive', authenticate, interactiveRoutes);
 
-// ==================== ERROR HANDLER ====================
 app.use(errorHandler);
 
-// ==================== SOCKET.IO SETUP ====================
 const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
 setupSocket(io);
 
-// ==================== 404 HANDLER ====================
 app.use('*', (req, res) => {
   logger.warn(`[404] Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-// ==================== CLEANUP CORRUPTED DATA ON STARTUP ====================
 async function cleanupCorruptedData() {
   try {
     const enrollResult = await Enrollment.deleteMany({ userId: null });
@@ -175,7 +168,6 @@ async function cleanupCorruptedData() {
   }
 }
 
-// ==================== BOOTSTRAP ====================
 async function bootstrap() {
   try {
     await connectDB();
