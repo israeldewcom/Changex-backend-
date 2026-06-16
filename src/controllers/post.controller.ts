@@ -3,6 +3,8 @@ import Post from '../models/Post.js';
 import Comment from '../models/Comment.js';
 import Like from '../models/Like.js';
 import Notification from '../models/Notification.js';
+import Follow from '../models/Follow.js';
+import Course from '../models/Course.js';
 import { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
 
@@ -13,7 +15,7 @@ function generateSlug(title: string): string {
 export const createPost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const { title, content, excerpt, type, tags, featuredImage, seoTitle, seoDescription, seoKeywords, courseId } = req.body;
+    const { title, content, excerpt, type, tags, featuredImage, seoTitle, seoDescription, seoKeywords, courseId, isPublished } = req.body;
     
     const slug = generateSlug(title);
     const post = await Post.create({
@@ -29,7 +31,7 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
       seoTitle: seoTitle || title,
       seoDescription: seoDescription || excerpt || content.substring(0, 160).replace(/<[^>]*>/g, ''),
       seoKeywords: seoKeywords || tags,
-      isPublished: false,
+      isPublished: isPublished || false,
     });
     res.status(201).json({ success: true, data: post });
   } catch (err) { next(err); }
@@ -64,7 +66,7 @@ export const publishPost = async (req: Request, res: Response, next: NextFunctio
     await post.save();
     
     // Notify followers
-    const followers = await (await import('../models/Follow.js')).default.find({ followingId: user._id });
+    const followers = await Follow.find({ followingId: user._id });
     await Notification.insertMany(followers.map(f => ({
       userId: f.followerId,
       title: 'New Post from ' + user.firstName,
@@ -238,4 +240,62 @@ export const getUserPosts = async (req: Request, res: Response, next: NextFuncti
       .sort('-publishedAt');
     res.json({ success: true, data: posts });
   } catch (err) { next(err); }
+};
+
+// ========== NEW: Following Feed ==========
+export const getFollowingFeed = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
+
+    // Get users followed by current user
+    const follows = await Follow.find({ followerId: user._id }).select('followingId');
+    const followedIds = follows.map(f => f.followingId);
+
+    if (followedIds.length === 0) {
+      return res.json({ success: true, data: [] });
+    }
+
+    // Get posts from followed users
+    const posts = await Post.find({
+      authorId: { $in: followedIds },
+      isPublished: true
+    })
+      .populate('authorId', 'firstName lastName avatarUrl')
+      .sort('-publishedAt')
+      .limit(20);
+
+    // Get courses from followed instructors
+    const courses = await Course.find({
+      instructorId: { $in: followedIds },
+      isPublished: true,
+      approvalStatus: 'approved'
+    })
+      .populate('instructorId', 'firstName lastName avatarUrl')
+      .sort('-createdAt')
+      .limit(20);
+
+    // Combine and format
+    const feed = [
+      ...posts.map(p => ({
+        ...p.toObject(),
+        type: 'post',
+        date: p.publishedAt || p.createdAt,
+        author: p.authorId,
+      })),
+      ...courses.map(c => ({
+        ...c.toObject(),
+        type: 'course',
+        date: c.createdAt,
+        author: c.instructorId,
+      }))
+    ];
+
+    // Sort by date descending
+    feed.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    res.json({ success: true, data: feed });
+  } catch (err) {
+    next(err);
+  }
 };
