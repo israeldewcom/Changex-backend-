@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import User from '../models/User.js';
+import User, { IUser } from '../models/User.js';
 import Course from '../models/Course.js';
 import Transaction from '../models/Transaction.js';
 import Notification from '../models/Notification.js';
@@ -7,14 +7,14 @@ import AdminCoupon from '../models/AdminCoupon.js';
 import Announcement from '../models/Announcement.js';
 import ManualPayment from '../models/ManualPayment.js';
 import Enrollment from '../models/Enrollment.js';
-import Post from '../models/Post.js';           // NEW import
-import Follow from '../models/Follow.js';       // NEW import
-import Challenge from '../models/Challenge.js'; // NEW import
-import Ad from '../models/Ad.js';               // NEW import
-import { IUser } from '../models/User.js';      // NEW import
+import Post from '../models/Post.js';
+import Follow from '../models/Follow.js';
+import Challenge from '../models/Challenge.js';
+import Ad from '../models/Ad.js';
+import ChallengeProgress from '../models/ChallengeProgress.js';
 import { getIO } from '../socket.js';
 
-// ==================== EXISTING DASHBOARD ====================
+// ==================== DASHBOARD ====================
 export const getDashboard = async (req: Request, res: Response) => {
   try {
     const totalUsers = await User.countDocuments();
@@ -34,6 +34,7 @@ export const getDashboard = async (req: Request, res: Response) => {
     
     const pendingWithdrawals = await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' });
     const pendingManualPayments = await ManualPayment.countDocuments({ status: 'pending_review' });
+    const pendingChallengeCompletions = await ChallengeProgress.countDocuments({ status: 'in_progress' });
     
     res.json({ 
       success: true, 
@@ -43,7 +44,8 @@ export const getDashboard = async (req: Request, res: Response) => {
         pendingCourses, 
         totalRevenue, 
         pendingWithdrawals,
-        pendingManualPayments
+        pendingManualPayments,
+        pendingChallengeCompletions
       } 
     });
   } catch (err) {
@@ -51,7 +53,7 @@ export const getDashboard = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== EXISTING USER MANAGEMENT ====================
+// ==================== USER MANAGEMENT ====================
 export const getUsers = async (req: Request, res: Response) => {
   try {
     const { limit = 100, search = '' } = req.query;
@@ -184,7 +186,7 @@ export const approveInstructor = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== EXISTING COURSE MANAGEMENT ====================
+// ==================== COURSE MANAGEMENT ====================
 export const getAdminCourses = async (req: Request, res: Response) => {
   try {
     const { status, limit = 100 } = req.query;
@@ -293,7 +295,7 @@ export const rejectCourse = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== EXISTING WITHDRAWAL MANAGEMENT ====================
+// ==================== WITHDRAWAL MANAGEMENT ====================
 export const getWithdrawals = async (req: Request, res: Response) => {
   try {
     const { status, limit = 100 } = req.query;
@@ -385,7 +387,7 @@ export const processWithdrawal = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== EXISTING ANNOUNCEMENTS ====================
+// ==================== ANNOUNCEMENTS ====================
 export const createAnnouncement = async (req: Request, res: Response) => {
   try {
     const { title, message, sendEmail = false } = req.body;
@@ -437,7 +439,7 @@ export const getPublicAnnouncements = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== EXISTING COUPONS ====================
+// ==================== COUPONS ====================
 export const getCoupons = async (req: Request, res: Response) => {
   try { 
     const coupons = await AdminCoupon.find({}).sort('-createdAt');
@@ -495,7 +497,7 @@ export const deleteCoupon = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== EXISTING MANUAL PAYMENTS ====================
+// ==================== MANUAL PAYMENTS ====================
 export const getPendingManualPayments = async (req: Request, res: Response) => {
   try {
     const payments = await ManualPayment.find({ status: 'pending_review' })
@@ -760,8 +762,7 @@ export const rejectManualPayment = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== NEW ADMIN FUNCTIONS (ADDED) ====================
-
+// ==================== NEW ADMIN FUNCTIONS ====================
 export const getUserFullDetails = async (req: Request, res: Response) => {
   try {
     const user = await User.findById(req.params.id)
@@ -777,6 +778,8 @@ export const getUserFullDetails = async (req: Request, res: Response) => {
     const manualPayments = await ManualPayment.find({ userId: user._id }).sort('-createdAt');
     const postsList = await Post.find({ authorId: user._id, isPublished: true }).sort('-createdAt').limit(10);
     const courses = await Course.find({ instructorId: user._id }).select('title approvalStatus totalStudents');
+    const challengeProgress = await ChallengeProgress.find({ userId: user._id })
+      .populate('challengeId', 'title status');
     
     res.json({
       success: true,
@@ -787,13 +790,15 @@ export const getUserFullDetails = async (req: Request, res: Response) => {
           followers, 
           following, 
           enrollmentsCount: enrollments.length,
-          coursesCreated: courses.length
+          coursesCreated: courses.length,
+          challengesJoined: challengeProgress.length
         },
         recentTransactions: transactions,
         enrollments,
         manualPayments,
         recentPosts: postsList,
-        instructorCourses: courses
+        instructorCourses: courses,
+        challengeProgress
       }
     });
   } catch (err) {
@@ -802,6 +807,7 @@ export const getUserFullDetails = async (req: Request, res: Response) => {
   }
 };
 
+// ==================== CHALLENGE MANAGEMENT ====================
 export const createChallenge = async (req: Request, res: Response) => {
   try {
     const admin = req.user as IUser;
@@ -861,17 +867,154 @@ export const joinChallenge = async (req: Request, res: Response) => {
     if (challenge.status !== 'active') {
       return res.status(400).json({ success: false, message: 'Challenge is not active' });
     }
-    if (challenge.participants.includes(user._id)) {
+    
+    const existing = await ChallengeProgress.findOne({ challengeId: id, userId: user._id });
+    if (existing) {
       return res.status(400).json({ success: false, message: 'Already joined' });
     }
-    challenge.participants.push(user._id);
-    await challenge.save();
+    
+    if (!challenge.participants.includes(user._id)) {
+      challenge.participants.push(user._id);
+      await challenge.save();
+    }
+    
+    await ChallengeProgress.create({
+      challengeId: id,
+      userId: user._id,
+      status: 'enrolled',
+      startedAt: new Date(),
+    });
+    
     res.json({ success: true, message: 'Joined challenge!' });
   } catch (err) { 
     res.status(500).json({ success: false, message: String(err) }); 
   }
 };
 
+// ==================== CHALLENGE PROGRESS (NEW) ====================
+export const getChallengeParticipants = async (req: Request, res: Response) => {
+  try {
+    const { challengeId } = req.params;
+    const progress = await ChallengeProgress.find({ challengeId })
+      .populate('userId', 'firstName lastName email');
+    res.json({ success: true, data: progress });
+  } catch (err) {
+    console.error('Get challenge participants error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const completeChallengeForUser = async (req: Request, res: Response) => {
+  try {
+    const { challengeId, userId } = req.params;
+    const { adminNote } = req.body;
+    const admin = req.user as IUser;
+    
+    const progress = await ChallengeProgress.findOne({ challengeId, userId });
+    if (!progress) {
+      return res.status(404).json({ success: false, message: 'User not enrolled in this challenge' });
+    }
+    if (progress.status === 'completed') {
+      return res.status(400).json({ success: false, message: 'Already completed' });
+    }
+    
+    progress.status = 'completed';
+    progress.completedAt = new Date();
+    progress.progress = 100;
+    progress.adminNote = adminNote;
+    await progress.save();
+
+    // === AWARD REWARDS ===
+    const challenge = await Challenge.findById(challengeId);
+    if (!challenge) {
+      return res.status(404).json({ success: false, message: 'Challenge not found' });
+    }
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // 1. Award XP
+    user.xp = (user.xp || 0) + (challenge.rewardXP || 0);
+    let xpNeeded = user.level * 1000;
+    while (user.xp >= xpNeeded) {
+      user.level += 1;
+      user.xp -= xpNeeded;
+      xpNeeded = user.level * 1000;
+    }
+
+    // 2. Wallet bonus
+    if (challenge.rewardAmount && challenge.rewardAmount > 0) {
+      user.walletBalance = (user.walletBalance || 0) + challenge.rewardAmount;
+      await Transaction.create({
+        userId: user._id,
+        type: 'bonus',
+        amount: challenge.rewardAmount,
+        status: 'completed',
+        description: `Challenge reward: ${challenge.title}`,
+      });
+    }
+
+    // 3. Premium days
+    if (challenge.rewardPremiumDays && challenge.rewardPremiumDays > 0) {
+      const currentExpiry = user.subscriptionExpires || new Date();
+      const newExpiry = new Date(currentExpiry.getTime() + challenge.rewardPremiumDays * 24 * 60 * 60 * 1000);
+      user.subscriptionExpires = newExpiry;
+      user.isPremium = true;
+    }
+
+    await user.save();
+
+    progress.rewardClaimed = true;
+    await progress.save();
+
+    await Notification.create({
+      userId: user._id,
+      title: '🎉 Challenge Completed!',
+      message: `You completed "${challenge.title}" and earned ${challenge.rewardXP} XP${challenge.rewardAmount ? `, ₦${challenge.rewardAmount} bonus` : ''}${challenge.rewardPremiumDays ? `, and ${challenge.rewardPremiumDays} days of Premium` : ''}.`,
+      type: 'system',
+    });
+
+    getIO().to(`user:${user._id}`).emit('notification', {
+      title: 'Challenge Completed!',
+      message: `You earned rewards for completing "${challenge.title}"`
+    });
+
+    res.json({ success: true, message: 'User marked as completed and rewards awarded' });
+  } catch (err) {
+    console.error('Complete challenge error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const getAllChallengeProgressStats = async (req: Request, res: Response) => {
+  try {
+    const stats = await ChallengeProgress.aggregate([
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+        }
+      }
+    ]);
+    
+    const totalEnrolled = await ChallengeProgress.countDocuments();
+    const totalCompleted = await ChallengeProgress.countDocuments({ status: 'completed' });
+    
+    res.json({
+      success: true,
+      data: {
+        stats,
+        totalEnrolled,
+        totalCompleted,
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ==================== AD MANAGEMENT ====================
 export const createAd = async (req: Request, res: Response) => {
   try {
     const admin = req.user as IUser;
