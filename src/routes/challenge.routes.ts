@@ -1,34 +1,19 @@
 import { Router } from 'express';
+import * as challengeController from '../controllers/challenge.controller.js';
 import * as adminController from '../controllers/admin.controller.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
 
 const router = Router();
 
-// Public routes - get active challenges
-router.get('/active', async (req, res) => {
-  const Challenge = (await import('../models/Challenge.js')).default;
-  const now = new Date();
-  const challenges = await Challenge.find({
-    status: 'active',
-    startDate: { $lte: now },
-    endDate: { $gte: now }
-  }).sort('-startDate');
-  res.json({ success: true, data: challenges });
-});
-
-router.get('/upcoming', async (req, res) => {
-  const Challenge = (await import('../models/Challenge.js')).default;
-  const now = new Date();
-  const challenges = await Challenge.find({
-    status: 'upcoming',
-    startDate: { $gt: now }
-  }).sort('startDate');
-  res.json({ success: true, data: challenges });
-});
+// Public routes
+router.get('/active', challengeController.getActiveChallenges);
+router.get('/upcoming', challengeController.getUpcomingChallenges);
+router.get('/:id', challengeController.getChallengeById);
 
 // Authenticated routes
 router.use(authenticate);
-router.post('/:id/join', adminController.joinChallenge);
+router.post('/:id/join', challengeController.joinChallenge);
+router.get('/user/my', challengeController.getUserChallenges);
 
 // Admin only
 router.use(authorize('admin'));
