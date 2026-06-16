@@ -3,20 +3,15 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface IChallenge extends Document {
   title: string;
   description: string;
-  instructions: string;
+  instructions?: string;
   startDate: Date;
   endDate: Date;
   rewardXP: number;
-  rewardMoney: number;
-  maxParticipants?: number;
+  rewardAmount?: number;
   participants: mongoose.Types.ObjectId[];
-  submissions: Array<{
-    userId: mongoose.Types.ObjectId;
-    content: string;
-    submittedAt: Date;
-    isWinner: boolean;
-  }>;
-  isActive: boolean;
+  winners: mongoose.Types.ObjectId[];
+  status: 'upcoming' | 'active' | 'completed';
+  createdBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -25,24 +20,20 @@ const ChallengeSchema = new Schema<IChallenge>(
   {
     title: { type: String, required: true },
     description: { type: String, required: true },
-    instructions: { type: String, required: true },
+    instructions: String,
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     rewardXP: { type: Number, default: 500 },
-    rewardMoney: { type: Number, default: 0 },
-    maxParticipants: Number,
+    rewardAmount: Number,
     participants: [{ type: Schema.Types.ObjectId, ref: 'User' }],
-    submissions: [
-      {
-        userId: { type: Schema.Types.ObjectId, ref: 'User' },
-        content: String,
-        submittedAt: Date,
-        isWinner: { type: Boolean, default: false },
-      },
-    ],
-    isActive: { type: Boolean, default: true },
+    winners: [{ type: Schema.Types.ObjectId, ref: 'User' }],
+    status: { type: String, enum: ['upcoming', 'active', 'completed'], default: 'upcoming' },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   },
   { timestamps: true }
 );
+
+ChallengeSchema.index({ status: 1, startDate: 1 });
+ChallengeSchema.index({ endDate: 1 });
 
 export default mongoose.model<IChallenge>('Challenge', ChallengeSchema);
