@@ -11,6 +11,7 @@ router.get('/user/:userId', postController.getUserPosts);
 
 // Authenticated routes
 router.use(authenticate);
+router.get('/following', postController.getFollowingFeed); // NEW
 router.post('/', postController.createPost);
 router.put('/:id', postController.updatePost);
 router.put('/:id/publish', postController.publishPost);
