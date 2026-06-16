@@ -7,10 +7,11 @@ import AdminCoupon from '../models/AdminCoupon.js';
 import Announcement from '../models/Announcement.js';
 import ManualPayment from '../models/ManualPayment.js';
 import Enrollment from '../models/Enrollment.js';
-import Post from '../models/Post.js';
-import Follow from '../models/Follow.js';
-import Challenge from '../models/Challenge.js';
-import Ad from '../models/Ad.js';
+import Post from '../models/Post.js';           // NEW import
+import Follow from '../models/Follow.js';       // NEW import
+import Challenge from '../models/Challenge.js'; // NEW import
+import Ad from '../models/Ad.js';               // NEW import
+import { IUser } from '../models/User.js';      // NEW import
 import { getIO } from '../socket.js';
 
 // ==================== EXISTING DASHBOARD ====================
@@ -759,9 +760,8 @@ export const rejectManualPayment = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== NEW ADMIN FUNCTIONS ====================
+// ==================== NEW ADMIN FUNCTIONS (ADDED) ====================
 
-// Get user full details with all related data
 export const getUserFullDetails = async (req: Request, res: Response) => {
   try {
     const user = await User.findById(req.params.id)
@@ -802,7 +802,6 @@ export const getUserFullDetails = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== CHALLENGE MANAGEMENT ====================
 export const createChallenge = async (req: Request, res: Response) => {
   try {
     const admin = req.user as IUser;
@@ -873,7 +872,6 @@ export const joinChallenge = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== AD MANAGEMENT ====================
 export const createAd = async (req: Request, res: Response) => {
   try {
     const admin = req.user as IUser;
