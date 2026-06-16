@@ -102,7 +102,6 @@ app.get('/debug/version', (req, res) => {
   });
 });
 
-// This endpoint lists all registered routes (useful for debugging)
 app.get('/debug/routes', (req, res) => {
   const routes = app._router.stack
     .filter((layer: any) => layer.route)
@@ -147,17 +146,22 @@ app.use('/api/v1/affiliate', authenticate, affiliateRoutes);
 app.use('/api/v1/ai', authenticate, aiRoutes);
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
-// ========== NEW ROUTES ==========
-// Posts: public list, details; authenticated create, like, comment, etc.
+// ========== MOUNT NEW ROUTES WITH LOGGING ==========
+console.log('📦 Mounting new routes...');
 app.use('/api/v1/posts', postRoutes);
-// Follows: require authentication for all
+console.log('✅ /api/v1/posts mounted');
+
 app.use('/api/v1/follows', followRoutes);
-// Challenges: public active/upcoming; authenticated join; admin manage
+console.log('✅ /api/v1/follows mounted');
+
 app.use('/api/v1/challenges', challengeRoutes);
-// Ads: public placement; admin management
+console.log('✅ /api/v1/challenges mounted');
+
 app.use('/api/v1/ads', adRoutes);
-// Interactive: public view; authenticated create/update (instructors)
+console.log('✅ /api/v1/ads mounted');
+
 app.use('/api/v1/interactive', authenticate, interactiveRoutes);
+console.log('✅ /api/v1/interactive mounted');
 
 // ========== ERROR HANDLER & 404 ==========
 app.use(errorHandler);
