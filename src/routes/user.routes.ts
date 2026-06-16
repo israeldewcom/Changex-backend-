@@ -1,4 +1,3 @@
-// src/routes/user.routes.ts
 import { Router } from 'express';
 import * as userController from '../controllers/user.controller.js';
 import { authenticate } from '../middlewares/auth.js';
@@ -21,5 +20,6 @@ router.get('/leaderboard', userController.getLeaderboard);
 router.get('/badges', userController.getUserBadges);
 router.post('/claim-welcome-bonus', userController.claimWelcomeBonus);
 router.post('/update-premium-status', userController.updatePremiumStatus);
+router.get('/:userId/profile', userController.getUserProfile); // NEW
 
 export default router;
