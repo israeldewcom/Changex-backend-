@@ -3,6 +3,10 @@ import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import Notification from '../models/Notification.js';
 import Referral from '../models/Referral.js';
+import Post from '../models/Post.js';
+import Course from '../models/Course.js';
+import Follow from '../models/Follow.js';
+import ChallengeProgress from '../models/ChallengeProgress.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 
 export const getProfile = async (req: Request, res: Response) => {
@@ -93,7 +97,10 @@ export const getLeaderboard = async (req: Request, res: Response, next: NextFunc
     const { type = 'xp', limit = 20 } = req.query;
     let sortField = 'xp';
     if (type === 'earnings') sortField = 'walletBalance';
-    const users = await User.find({}).sort({ [sortField]: -1 }).limit(Number(limit)).select('firstName lastName xp walletBalance level avatarUrl streakDays');
+    const users = await User.find({})
+      .sort({ [sortField]: -1 })
+      .limit(Number(limit))
+      .select('firstName lastName xp walletBalance level avatarUrl streakDays');
     res.json({ success: true, data: users });
   } catch (err) { next(err); }
 };
@@ -143,4 +150,57 @@ export const claimWelcomeBonus = async (req: Request, res: Response, next: NextF
     await Transaction.create({ userId: user._id, type: 'bonus', amount: 500, status: 'completed', description: 'Welcome bonus' });
     res.json({ success: true, message: '₦500 added to your wallet', balance: user.walletBalance });
   } catch (err) { next(err); }
+};
+
+// ========== NEW: Get User Profile (Public) ==========
+export const getUserProfile = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.params;
+    const user = await User.findById(userId).select('-passwordHash');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const posts = await Post.find({ authorId: userId, isPublished: true })
+      .populate('authorId', 'firstName lastName avatarUrl')
+      .sort('-publishedAt');
+
+    const courses = await Course.find({
+      instructorId: userId,
+      isPublished: true,
+      approvalStatus: 'approved'
+    })
+      .populate('instructorId', 'firstName lastName avatarUrl')
+      .sort('-createdAt');
+
+    const challengeProgress = await ChallengeProgress.find({ userId: userId })
+      .populate('challengeId', 'title status startDate endDate rewardXP');
+
+    let isFollowing = false;
+    if (req.user) {
+      const follow = await Follow.findOne({
+        followerId: (req.user as IUser)._id,
+        followingId: userId
+      });
+      isFollowing = !!follow;
+    }
+
+    const followersCount = await Follow.countDocuments({ followingId: userId });
+    const followingCount = await Follow.countDocuments({ followerId: userId });
+
+    res.json({
+      success: true,
+      data: {
+        user,
+        posts,
+        courses,
+        challengeProgress,
+        isFollowing,
+        followersCount,
+        followingCount,
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
 };
