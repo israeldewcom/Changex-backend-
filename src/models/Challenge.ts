@@ -8,6 +8,7 @@ export interface IChallenge extends Document {
   endDate: Date;
   rewardXP: number;
   rewardAmount?: number;
+  rewardPremiumDays?: number;
   participants: mongoose.Types.ObjectId[];
   winners: mongoose.Types.ObjectId[];
   status: 'upcoming' | 'active' | 'completed';
@@ -24,7 +25,8 @@ const ChallengeSchema = new Schema<IChallenge>(
     startDate: { type: Date, required: true },
     endDate: { type: Date, required: true },
     rewardXP: { type: Number, default: 500 },
-    rewardAmount: Number,
+    rewardAmount: { type: Number, default: 0 },
+    rewardPremiumDays: { type: Number, default: 0 },
     participants: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     winners: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     status: { type: String, enum: ['upcoming', 'active', 'completed'], default: 'upcoming' },
