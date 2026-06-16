@@ -7,9 +7,9 @@ const router = Router();
 router.use(authenticate);
 
 router.post('/:userId/follow', followController.followUser);
-router.delete('/:userId/unfollow', followController.unfollowUser);
 router.get('/:userId/followers', followController.getFollowers);
 router.get('/:userId/following', followController.getFollowing);
 router.get('/:userId/stats', followController.getFollowStats);
+router.get('/:userId/status', followController.checkFollowStatus);
 
 export default router;
