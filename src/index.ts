@@ -22,11 +22,13 @@ import aiRoutes from './routes/ai.routes.js';
 import webhookRoutes from './routes/webhook.routes.js';
 import feedbackRoutes from './routes/feedback.routes.js';
 import contactRoutes from './routes/contact.routes.js';
-import postRoutes from './routes/post.routes.js';               // NEW
-import followRoutes from './routes/follow.routes.js';           // NEW
-import challengeRoutes from './routes/challenge.routes.js';     // NEW
-import adRoutes from './routes/ad.routes.js';                   // NEW
-import interactiveRoutes from './routes/interactive.routes.js'; // NEW
+// NEW ROUTES
+import postRoutes from './routes/post.routes.js';
+import followRoutes from './routes/follow.routes.js';
+import challengeRoutes from './routes/challenge.routes.js';
+import adRoutes from './routes/ad.routes.js';
+import interactiveRoutes from './routes/interactive.routes.js';
+// middlewares
 import { errorHandler } from './middlewares/errorHandler.js';
 import { setupSocket } from './socket.js';
 import { startWorkers } from './workers/index.js';
@@ -41,6 +43,7 @@ import User from './models/User.js';
 const app = express();
 const server = http.createServer(app);
 
+// Trust proxy & security
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
@@ -52,15 +55,18 @@ app.use(cors({
 app.options('*', cors());
 app.use(cookieParser());
 
+// Rate limiting
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 100 });
 app.use('/api/', limiter);
 
+// Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Passport
 initializePassport(app);
 
-// Global logging middleware
+// Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   const oldJson = res.json.bind(res);
@@ -80,6 +86,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// Debug & health endpoints
 app.get('/debug/version', (req, res) => {
   res.json({
     version: 'PRODUCTION_2.0.0_FULL',
@@ -91,7 +98,7 @@ app.get('/debug/version', (req, res) => {
       socialPosts: true,
       challenges: true,
       ads: true,
-      interactiveMaterials: true
+      interactiveMaterials: true,
     },
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
@@ -102,6 +109,7 @@ app.get('/debug/version', (req, res) => {
 
 app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
+// Public referral check
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
     const code = req.params.code.trim().toUpperCase();
@@ -112,6 +120,7 @@ app.get('/api/v1/check-referral/:code', async (req, res) => {
   }
 });
 
+// Public announcements (latest)
 app.get('/api/v1/announcements/latest', async (req, res) => {
   try {
     const Announcement = (await import('./models/Announcement.js')).default;
@@ -122,11 +131,13 @@ app.get('/api/v1/announcements/latest', async (req, res) => {
   }
 });
 
-// ========== ROUTE REGISTRATIONS (EXISTING) ==========
+// ==================== ROUTE REGISTRATIONS ====================
+// Public & webhook routes
 app.use('/api/v1/auth', authRoutes);
 app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/contact', contactRoutes);
 
+// Authenticated routes (require login)
 app.use('/api/v1/users', authenticate, userRoutes);
 app.use('/api/v1/courses', authenticate, courseRoutes);
 app.use('/api/v1/instructor', authenticate, authorize('instructor', 'admin'), instructorRoutes);
@@ -136,23 +147,32 @@ app.use('/api/v1/affiliate', authenticate, affiliateRoutes);
 app.use('/api/v1/ai', authenticate, aiRoutes);
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
-// ========== NEW ROUTE REGISTRATIONS ==========
+// ==================== NEW ROUTES ====================
+// Posts: public list, details; authenticated create, like, comment, etc.
 app.use('/api/v1/posts', postRoutes);
+// Follows: require authentication for all
 app.use('/api/v1/follows', followRoutes);
+// Challenges: public active/upcoming; authenticated join; admin manage
 app.use('/api/v1/challenges', challengeRoutes);
+// Ads: public placement; admin management
 app.use('/api/v1/ads', adRoutes);
+// Interactive: public view; authenticated create/update (instructors)
 app.use('/api/v1/interactive', authenticate, interactiveRoutes);
 
+// ==================== ERROR HANDLER ====================
 app.use(errorHandler);
 
+// ==================== SOCKET.IO ====================
 const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
 setupSocket(io);
 
+// ==================== 404 ====================
 app.use('*', (req, res) => {
   logger.warn(`[404] Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
+// ==================== CLEANUP CORRUPTED DATA ====================
 async function cleanupCorruptedData() {
   try {
     const enrollResult = await Enrollment.deleteMany({ userId: null });
@@ -168,6 +188,7 @@ async function cleanupCorruptedData() {
   }
 }
 
+// ==================== BOOTSTRAP ====================
 async function bootstrap() {
   try {
     await connectDB();
