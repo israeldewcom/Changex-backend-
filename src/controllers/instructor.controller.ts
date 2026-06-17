@@ -8,12 +8,13 @@ import { IUser } from '../models/User.js';
 import { sanitizeHtml } from '../middlewares/sanitize.js';
 import cloudinary from '../config/cloudinary.js';
 import { getIO } from '../socket.js';
-import { uploadToCloudinary } from '../services/cloudinary.js'; // ✅ already exists
+import { uploadToCloudinary } from '../services/cloudinary.js';
 
 function generateSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+// ==================== DASHBOARD ====================
 export const getInstructorDashboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -26,6 +27,7 @@ export const getInstructorDashboard = async (req: Request, res: Response, next: 
   } catch (err) { next(err); }
 };
 
+// ==================== CREATE COURSE ====================
 export const createCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -63,6 +65,7 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// ==================== UPDATE COURSE ====================
 export const updateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -105,6 +108,7 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// ==================== SAVE DRAFT (NEW) ====================
 export const saveDraft = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -113,6 +117,7 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
 
     let course = await Course.findOne({ _id: id, instructorId: user._id });
     if (!course) {
+      // Create new draft if doesn't exist
       const slug = generateSlug(courseData.title || 'untitled');
       course = new Course({
         ...courseData,
@@ -125,6 +130,7 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
       });
       await course.save();
     } else {
+      // Update existing draft – if it was approved, set to pending after edit
       if (course.approvalStatus === 'approved') {
         course.approvalStatus = 'pending';
       }
@@ -139,6 +145,7 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
       await course.save();
     }
 
+    // Handle lessons if provided
     if (lessons && Array.isArray(lessons)) {
       await Lesson.deleteMany({ courseId: course._id });
       for (let i = 0; i < lessons.length; i++) {
@@ -157,6 +164,7 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
+// ==================== SUBMIT FOR REVIEW ====================
 export const submitForReview = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -171,6 +179,7 @@ export const submitForReview = async (req: Request, res: Response, next: NextFun
   } catch (err) { next(err); }
 };
 
+// ==================== LESSON CRUD ====================
 export const createLesson = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -205,6 +214,7 @@ export const deleteLesson = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
+// ==================== MEDIA UPLOAD ====================
 export const uploadMedia = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -223,6 +233,7 @@ export const uploadMedia = async (req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err); }
 };
 
+// ==================== Q&A ====================
 export const getCourseQuestions = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const questions = await Question.find({ courseId: req.params.courseId }).populate('userId', 'firstName lastName').sort('-createdAt');
@@ -248,6 +259,7 @@ export const answerQuestion = async (req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 };
 
+// ==================== CERTIFICATE TEMPLATE ====================
 export const uploadCertificateTemplate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -268,52 +280,36 @@ export const uploadCertificateTemplate = async (req: Request, res: Response, nex
   } catch (err) { next(err); }
 };
 
-// ========== NEW: Course Thumbnail Upload ==========
+// ==================== COURSE THUMBNAIL ====================
 export const uploadCourseThumbnail = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const { courseId } = req.params;
     const course = await Course.findOne({ _id: courseId, instructorId: user._id });
-    if (!course) {
-      return res.status(404).json({ success: false, message: 'Course not found' });
-    }
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'No image file uploaded' });
-    }
-
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    if (!req.file) return res.status(400).json({ success: false, message: 'No image file uploaded' });
     const result = await uploadToCloudinary(req.file.buffer, `courses/${courseId}/thumbnail`, {
       transformation: [{ width: 1280, height: 720, crop: 'fill', quality: 'auto' }]
     });
     course.thumbnail = result.secure_url;
     await course.save();
     res.json({ success: true, data: { url: result.secure_url, publicId: result.public_id } });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-// ========== NEW: Lesson Content Image Upload (for Quill editor) ==========
+// ==================== LESSON IMAGE UPLOAD ====================
 export const uploadLessonImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const { courseId, lessonId } = req.params;
     const course = await Course.findOne({ _id: courseId, instructorId: user._id });
-    if (!course) {
-      return res.status(404).json({ success: false, message: 'Course not found' });
-    }
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     const lesson = await Lesson.findOne({ _id: lessonId, courseId: course._id });
-    if (!lesson) {
-      return res.status(404).json({ success: false, message: 'Lesson not found' });
-    }
-    if (!req.file) {
-      return res.status(400).json({ success: false, message: 'No image file uploaded' });
-    }
-
+    if (!lesson) return res.status(404).json({ success: false, message: 'Lesson not found' });
+    if (!req.file) return res.status(400).json({ success: false, message: 'No image file uploaded' });
     const result = await uploadToCloudinary(req.file.buffer, `courses/${courseId}/lessons/${lessonId}/images`, {
       transformation: [{ width: 800, quality: 'auto', fetch_format: 'auto' }]
     });
     res.json({ success: true, data: { url: result.secure_url, publicId: result.public_id } });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
