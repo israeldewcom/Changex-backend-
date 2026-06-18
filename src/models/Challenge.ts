@@ -34,15 +34,20 @@ const ChallengeSchema = new Schema<IChallenge>(
     rewardPremiumDays: { type: Number, default: 0 },
     participants: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     winners: [{ type: Schema.Types.ObjectId, ref: 'User' }],
-    status: { type: String, enum: ['upcoming', 'active', 'completed'], default: 'upcoming' },
+    status: {
+      type: String,
+      enum: ['upcoming', 'active', 'completed'],
+      default: 'upcoming',
+    },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    // ✅ Fixed: removed `default: null`
     completionCriteria: {
       type: {
         type: { type: String, enum: ['lessons', 'xp', 'course_completion'] },
         courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
         targetCount: { type: Number, default: 0 },
       },
-      default: null,
+      required: false, // optional field
     },
   },
   { timestamps: true }
