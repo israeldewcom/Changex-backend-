@@ -9,12 +9,13 @@ export interface IPost extends Document {
   authorId: mongoose.Types.ObjectId;
   courseId?: mongoose.Types.ObjectId;
   featuredImage?: string;
+  videoUrl?: string; // ✅ NEW
   tags: string[];
   views: number;
   likes: number;
   commentsCount: number;
   shares: number;
-  earnings: number;
+  earnings: number; // aggregated from PostAnalytics
   isPublished: boolean;
   publishedAt?: Date;
   seoTitle?: string;
@@ -34,12 +35,13 @@ const PostSchema = new Schema<IPost>(
     authorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
     featuredImage: String,
+    videoUrl: String, // ✅ NEW
     tags: [String],
     views: { type: Number, default: 0 },
     likes: { type: Number, default: 0 },
     commentsCount: { type: Number, default: 0 },
     shares: { type: Number, default: 0 },
-    earnings: { type: Number, default: 0 },
+    earnings: { type: Number, default: 0 }, // ✅ NEW – for quick access
     isPublished: { type: Boolean, default: false },
     publishedAt: Date,
     seoTitle: String,
