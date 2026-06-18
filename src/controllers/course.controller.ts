@@ -11,7 +11,7 @@ import ChallengeProgress from '../models/ChallengeProgress.js';
 import Challenge from '../models/Challenge.js';
 import Notification from '../models/Notification.js';
 import { getIO } from '../socket.js';
-import User from '../models/User.js'; // ✅ ADDED
+import User from '../models/User.js';
 
 // Helper function to auto‑complete a challenge and award rewards
 async function completeChallengeAndReward(challengeId: string, userId: string, adminNote: string = 'Auto‑completed') {
@@ -74,7 +74,7 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
-// ==================== EXISTING FUNCTIONS ====================
+// ==================== GET PUBLISHED COURSES ====================
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { category, level, search, limit = 20, offset = 0 } = req.query;
@@ -93,6 +93,7 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
   }
 };
 
+// ==================== GET SINGLE COURSE ====================
 export const getCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const course = await Course.findById(req.params.id)
@@ -107,6 +108,7 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
+// ==================== GET USER ENROLLMENTS ====================
 export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -135,6 +137,7 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
   }
 };
 
+// ==================== ENROLL IN COURSE ====================
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -176,6 +179,7 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// ==================== UPDATE LESSON PROGRESS (with auto‑challenge) ====================
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -248,15 +252,20 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       for (const cp of activeChallenges) {
         const challenge = cp.challengeId as any;
         if (!challenge || !challenge.completionCriteria) continue;
+
+        // Type‑safe access to progressValue
+        const progressValue = (cp as any).progressValue || 0;
+
         if (challenge.completionCriteria.type === 'lessons') {
           const criteriaCourseId = challenge.completionCriteria.courseId?.toString();
           if (criteriaCourseId && lesson.courseId && lesson.courseId.toString() === criteriaCourseId) {
-            cp.progressValue = (cp.progressValue || 0) + 1;
-            cp.progress = Math.min(100, Math.round((cp.progressValue / challenge.completionCriteria.targetCount) * 100));
+            // Increment progress value
+            (cp as any).progressValue = progressValue + 1;
+            const newValue = (cp as any).progressValue;
+            cp.progress = Math.min(100, Math.round((newValue / challenge.completionCriteria.targetCount) * 100));
             await cp.save();
 
-            if (cp.progressValue >= challenge.completionCriteria.targetCount) {
-              // ✅ FIX: Convert ObjectId to string
+            if (newValue >= challenge.completionCriteria.targetCount) {
               await completeChallengeAndReward(challenge._id.toString(), user._id.toString(), 'Auto‑completed via lesson progress');
             }
           }
@@ -264,7 +273,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
           const targetXP = challenge.completionCriteria.targetCount;
           if (user.xp >= targetXP) {
             cp.progress = 100;
-            cp.progressValue = targetXP;
+            (cp as any).progressValue = targetXP;
             await cp.save();
             await completeChallengeAndReward(challenge._id.toString(), user._id.toString(), 'Auto‑completed via XP threshold');
           }
@@ -278,6 +287,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
   }
 };
 
+// ==================== RATE COURSE ====================
 export const rateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
