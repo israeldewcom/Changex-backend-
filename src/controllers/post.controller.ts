@@ -8,6 +8,7 @@ import Course from '../models/Course.js';
 import PostAnalytics from '../models/PostAnalytics.js';
 import { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
+import { uploadToCloudinary } from '../services/cloudinary.js';
 
 function generateSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now();
@@ -99,6 +100,21 @@ export const deletePost = async (req: Request, res: Response, next: NextFunction
   } catch (err) { next(err); }
 };
 
+// ✅ NEW: Upload video for a post
+export const uploadPostVideo = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id } = req.params;
+    const post = await Post.findOne({ _id: id, authorId: user._id });
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
+    if (!req.file) return res.status(400).json({ success: false, message: 'No video file uploaded' });
+    const result = await uploadToCloudinary(req.file.buffer, `posts/${id}/videos`, { resource_type: 'video' });
+    post.videoUrl = result.secure_url;
+    await post.save();
+    res.json({ success: true, data: { videoUrl: result.secure_url } });
+  } catch (err) { next(err); }
+};
+
 export const getPublishedPosts = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { page = 1, limit = 10, tag, type, author } = req.query;
@@ -111,13 +127,24 @@ export const getPublishedPosts = async (req: Request, res: Response, next: NextF
       .populate('authorId', 'firstName lastName avatarUrl bio')
       .sort('-publishedAt')
       .skip((Number(page) - 1) * Number(limit))
-      .limit(Number(limit));
-    
+      .limit(Number(limit))
+      .lean();
+
+    // Attach earnings from PostAnalytics
+    const postIds = posts.map(p => p._id);
+    const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
+    const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
+
+    const postsWithEarnings = posts.map(p => ({
+      ...p,
+      earnings: earningsMap[p._id.toString()] || 0
+    }));
+
     const total = await Post.countDocuments(filter);
     res.json({
       success: true,
       data: {
-        posts,
+        posts: postsWithEarnings,
         pagination: {
           total,
           page: Number(page),
@@ -136,17 +163,21 @@ export const getPostBySlug = async (req: Request, res: Response, next: NextFunct
       { slug, isPublished: true },
       { $inc: { views: 1 } },
       { new: true }
-    ).populate('authorId', 'firstName lastName avatarUrl bio socialLinks');
-    
+    ).populate('authorId', 'firstName lastName avatarUrl bio socialLinks').lean();
+
     if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
-    
+
+    // Attach earnings
+    const analytics = await PostAnalytics.findOne({ postId: post._id });
+    const earnings = analytics?.earnings || 0;
+
     let userLiked = false;
     if (req.user) {
       const like = await Like.findOne({ userId: (req.user as IUser)._id, targetId: post._id, targetType: 'post' });
       userLiked = !!like;
     }
-    
-    res.json({ success: true, data: { ...post.toObject(), userLiked } });
+
+    res.json({ success: true, data: { ...post, earnings, userLiked } });
   } catch (err) { next(err); }
 };
 
@@ -259,12 +290,17 @@ export const getUserPosts = async (req: Request, res: Response, next: NextFuncti
     const { userId } = req.params;
     const posts = await Post.find({ authorId: userId, isPublished: true })
       .populate('authorId', 'firstName lastName avatarUrl')
-      .sort('-publishedAt');
-    res.json({ success: true, data: posts });
+      .sort('-publishedAt')
+      .lean();
+    // Attach earnings
+    const postIds = posts.map(p => p._id);
+    const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
+    const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
+    const postsWithEarnings = posts.map(p => ({ ...p, earnings: earningsMap[p._id.toString()] || 0 }));
+    res.json({ success: true, data: postsWithEarnings });
   } catch (err) { next(err); }
 };
 
-// ========== FOLLOWING FEED ==========
 export const getFollowingFeed = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -283,7 +319,8 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
     })
       .populate('authorId', 'firstName lastName avatarUrl')
       .sort('-publishedAt')
-      .limit(20);
+      .limit(20)
+      .lean();
 
     const courses = await Course.find({
       instructorId: { $in: followedIds },
@@ -292,17 +329,24 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
     })
       .populate('instructorId', 'firstName lastName avatarUrl')
       .sort('-createdAt')
-      .limit(20);
+      .limit(20)
+      .lean();
+
+    // Attach earnings to posts
+    const postIds = posts.map(p => p._id);
+    const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
+    const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
+    const postsWithEarnings = posts.map(p => ({ ...p, earnings: earningsMap[p._id.toString()] || 0 }));
 
     const feed = [
-      ...posts.map(p => ({
-        ...p.toObject(),
+      ...postsWithEarnings.map(p => ({
+        ...p,
         type: 'post',
         date: p.publishedAt || p.createdAt,
         author: p.authorId,
       })),
       ...courses.map(c => ({
-        ...c.toObject(),
+        ...c,
         type: 'course',
         date: c.createdAt,
         author: c.instructorId,
@@ -317,11 +361,10 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
   }
 };
 
-// ========== SOCIAL EARNINGS / ANALYTICS ==========
+// Social earnings endpoints (already exist)
 export const trackPostView = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    const userId = (req.user as IUser)?._id;
     await Post.findByIdAndUpdate(id, { $inc: { views: 1 } });
     await PostAnalytics.findOneAndUpdate(
       { postId: id },
