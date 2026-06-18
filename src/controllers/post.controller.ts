@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/controllers/post.controller.ts (already correct)
+// ============================================================
+
 import { Request, Response, NextFunction } from 'express';
 import Post from '../models/Post.js';
 import Comment from '../models/Comment.js';
@@ -67,7 +71,6 @@ export const publishPost = async (req: Request, res: Response, next: NextFunctio
     post.publishedAt = new Date();
     await post.save();
     
-    // Notify followers
     const followers = await Follow.find({ followingId: user._id });
     await Notification.insertMany(followers.map(f => ({
       userId: f.followerId,
@@ -100,7 +103,6 @@ export const deletePost = async (req: Request, res: Response, next: NextFunction
   } catch (err) { next(err); }
 };
 
-// ✅ NEW: Upload video for a post
 export const uploadPostVideo = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -130,7 +132,6 @@ export const getPublishedPosts = async (req: Request, res: Response, next: NextF
       .limit(Number(limit))
       .lean();
 
-    // Attach earnings from PostAnalytics
     const postIds = posts.map(p => p._id);
     const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
     const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
@@ -167,7 +168,6 @@ export const getPostBySlug = async (req: Request, res: Response, next: NextFunct
 
     if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
 
-    // Attach earnings
     const analytics = await PostAnalytics.findOne({ postId: post._id });
     const earnings = analytics?.earnings || 0;
 
@@ -292,7 +292,6 @@ export const getUserPosts = async (req: Request, res: Response, next: NextFuncti
       .populate('authorId', 'firstName lastName avatarUrl')
       .sort('-publishedAt')
       .lean();
-    // Attach earnings
     const postIds = posts.map(p => p._id);
     const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
     const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
@@ -332,7 +331,6 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
       .limit(20)
       .lean();
 
-    // Attach earnings to posts
     const postIds = posts.map(p => p._id);
     const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
     const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
@@ -361,7 +359,6 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
   }
 };
 
-// Social earnings endpoints (already exist)
 export const trackPostView = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
