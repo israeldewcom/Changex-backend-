@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/workers/index.ts (updated with manual trigger comment)
+// ============================================================
+
 import cron from 'node-cron';
 import logger from '../utils/logger.js';
 import User from '../models/User.js';
@@ -45,7 +49,7 @@ cron.schedule('*/5 * * * *', async () => {
 });
 
 // ===== SOCIAL EARNINGS DISTRIBUTION =====
-cron.schedule('0 1 * * *', async () => { // 1:00 AM daily
+cron.schedule('0 1 * * *', async () => {
   logger.info('Starting social earnings distribution...');
   const session = await mongoose.startSession();
   session.startTransaction();
