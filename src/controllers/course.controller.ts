@@ -11,8 +11,9 @@ import ChallengeProgress from '../models/ChallengeProgress.js';
 import Challenge from '../models/Challenge.js';
 import Notification from '../models/Notification.js';
 import { getIO } from '../socket.js';
+import User from '../models/User.js'; // ✅ ADDED
 
-// Helper function to auto‑complete a challenge and award rewards (reused from admin controller)
+// Helper function to auto‑complete a challenge and award rewards
 async function completeChallengeAndReward(challengeId: string, userId: string, adminNote: string = 'Auto‑completed') {
   const progress = await ChallengeProgress.findOne({ challengeId, userId });
   if (!progress) return;
@@ -25,7 +26,7 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
 
   const challenge = await Challenge.findById(challengeId);
   if (!challenge) return;
-  const user = await (await import('../models/User.js')).default.findById(userId);
+  const user = await User.findById(userId);
   if (!user) return;
 
   // Award XP
@@ -73,6 +74,7 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
+// ==================== EXISTING FUNCTIONS ====================
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { category, level, search, limit = 20, offset = 0 } = req.query;
@@ -247,30 +249,26 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
         const challenge = cp.challengeId as any;
         if (!challenge || !challenge.completionCriteria) continue;
         if (challenge.completionCriteria.type === 'lessons') {
-          // Check if this lesson belongs to the course specified in criteria
           const criteriaCourseId = challenge.completionCriteria.courseId?.toString();
           if (criteriaCourseId && lesson.courseId && lesson.courseId.toString() === criteriaCourseId) {
-            // Increment progress value
             cp.progressValue = (cp.progressValue || 0) + 1;
             cp.progress = Math.min(100, Math.round((cp.progressValue / challenge.completionCriteria.targetCount) * 100));
             await cp.save();
 
-            // Check if target reached
             if (cp.progressValue >= challenge.completionCriteria.targetCount) {
-              await completeChallengeAndReward(challenge._id, user._id, 'Auto‑completed via lesson progress');
+              // ✅ FIX: Convert ObjectId to string
+              await completeChallengeAndReward(challenge._id.toString(), user._id.toString(), 'Auto‑completed via lesson progress');
             }
           }
         } else if (challenge.completionCriteria.type === 'xp') {
-          // Check if user's total XP has reached the target
           const targetXP = challenge.completionCriteria.targetCount;
           if (user.xp >= targetXP) {
             cp.progress = 100;
             cp.progressValue = targetXP;
             await cp.save();
-            await completeChallengeAndReward(challenge._id, user._id, 'Auto‑completed via XP threshold');
+            await completeChallengeAndReward(challenge._id.toString(), user._id.toString(), 'Auto‑completed via XP threshold');
           }
         }
-        // Other criteria types can be added (e.g., 'course_completion')
       }
     }
 
