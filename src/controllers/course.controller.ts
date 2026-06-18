@@ -7,6 +7,71 @@ import Rating from '../models/Rating.js';
 import Transaction from '../models/Transaction.js';
 import { IUser } from '../models/User.js';
 import { sanitizeHtml } from '../middlewares/sanitize.js';
+import ChallengeProgress from '../models/ChallengeProgress.js';
+import Challenge from '../models/Challenge.js';
+import Notification from '../models/Notification.js';
+import { getIO } from '../socket.js';
+
+// Helper function to auto‑complete a challenge and award rewards (reused from admin controller)
+async function completeChallengeAndReward(challengeId: string, userId: string, adminNote: string = 'Auto‑completed') {
+  const progress = await ChallengeProgress.findOne({ challengeId, userId });
+  if (!progress) return;
+  if (progress.status === 'completed') return;
+  progress.status = 'completed';
+  progress.completedAt = new Date();
+  progress.progress = 100;
+  progress.adminNote = adminNote;
+  await progress.save();
+
+  const challenge = await Challenge.findById(challengeId);
+  if (!challenge) return;
+  const user = await (await import('../models/User.js')).default.findById(userId);
+  if (!user) return;
+
+  // Award XP
+  user.xp = (user.xp || 0) + (challenge.rewardXP || 0);
+  let xpNeeded = user.level * 1000;
+  while (user.xp >= xpNeeded) {
+    user.level += 1;
+    user.xp -= xpNeeded;
+    xpNeeded = user.level * 1000;
+  }
+
+  // Wallet bonus
+  if (challenge.rewardAmount && challenge.rewardAmount > 0) {
+    user.walletBalance = (user.walletBalance || 0) + challenge.rewardAmount;
+    await Transaction.create({
+      userId: user._id,
+      type: 'bonus',
+      amount: challenge.rewardAmount,
+      status: 'completed',
+      description: `Challenge reward: ${challenge.title}`,
+    });
+  }
+
+  // Premium days
+  if (challenge.rewardPremiumDays && challenge.rewardPremiumDays > 0) {
+    const currentExpiry = user.subscriptionExpires || new Date();
+    const newExpiry = new Date(currentExpiry.getTime() + challenge.rewardPremiumDays * 24 * 60 * 60 * 1000);
+    user.subscriptionExpires = newExpiry;
+    user.isPremium = true;
+  }
+
+  await user.save();
+  progress.rewardClaimed = true;
+  await progress.save();
+
+  await Notification.create({
+    userId: user._id,
+    title: '🎉 Challenge Completed!',
+    message: `You completed "${challenge.title}" and earned ${challenge.rewardXP} XP${challenge.rewardAmount ? `, ₦${challenge.rewardAmount} bonus` : ''}${challenge.rewardPremiumDays ? `, and ${challenge.rewardPremiumDays} days of Premium` : ''}.`,
+    type: 'system',
+  });
+  getIO().to(`user:${user._id}`).emit('notification', {
+    title: 'Challenge Completed!',
+    message: `You earned rewards for completing "${challenge.title}"`,
+  });
+}
 
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -130,7 +195,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       progress.timeSpent += timeSpent || 0;
     }
 
-    // Time‑sensitive XP – require at least 80% of lesson duration
+    // TIME‑SENSITIVE XP: require at least 80% of lesson duration
     if (completed && !progress.completed) {
       const lesson = await Lesson.findById(lessonId);
       if (lesson) {
@@ -143,7 +208,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
         } else {
           return res.status(400).json({
             success: false,
-            message: `You need to spend at least ${Math.ceil(requiredMinutes)} minutes on this lesson to earn XP.`
+            message: `You need to spend at least ${Math.ceil(requiredMinutes)} minutes on this lesson to earn XP and mark it complete.`
           });
         }
       }
@@ -168,6 +233,47 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       });
     }
     await enrollment.save();
+
+    // ========== AUTO‑COMPLETE CHALLENGES ==========
+    // Find all active challenges the user is enrolled in
+    const activeChallenges = await ChallengeProgress.find({
+      userId: user._id,
+      status: 'enrolled'
+    }).populate('challengeId');
+
+    const lesson = await Lesson.findById(lessonId);
+    if (lesson && completed) {
+      for (const cp of activeChallenges) {
+        const challenge = cp.challengeId as any;
+        if (!challenge || !challenge.completionCriteria) continue;
+        if (challenge.completionCriteria.type === 'lessons') {
+          // Check if this lesson belongs to the course specified in criteria
+          const criteriaCourseId = challenge.completionCriteria.courseId?.toString();
+          if (criteriaCourseId && lesson.courseId && lesson.courseId.toString() === criteriaCourseId) {
+            // Increment progress value
+            cp.progressValue = (cp.progressValue || 0) + 1;
+            cp.progress = Math.min(100, Math.round((cp.progressValue / challenge.completionCriteria.targetCount) * 100));
+            await cp.save();
+
+            // Check if target reached
+            if (cp.progressValue >= challenge.completionCriteria.targetCount) {
+              await completeChallengeAndReward(challenge._id, user._id, 'Auto‑completed via lesson progress');
+            }
+          }
+        } else if (challenge.completionCriteria.type === 'xp') {
+          // Check if user's total XP has reached the target
+          const targetXP = challenge.completionCriteria.targetCount;
+          if (user.xp >= targetXP) {
+            cp.progress = 100;
+            cp.progressValue = targetXP;
+            await cp.save();
+            await completeChallengeAndReward(challenge._id, user._id, 'Auto‑completed via XP threshold');
+          }
+        }
+        // Other criteria types can be added (e.g., 'course_completion')
+      }
+    }
+
     res.json({ success: true, data: { progress: enrollment.progress } });
   } catch (err) {
     next(err);
