@@ -48,27 +48,25 @@ export const joinChallenge = async (req: Request, res: Response, next: NextFunct
     if (challenge.status !== 'active') {
       return res.status(400).json({ success: false, message: 'Challenge is not active' });
     }
-    
     // Check if already enrolled via progress
     const existing = await ChallengeProgress.findOne({ challengeId: id, userId: user._id });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Already enrolled' });
     }
-    
     // Add to participants array (for backward compatibility)
     if (!challenge.participants.includes(user._id)) {
       challenge.participants.push(user._id);
       await challenge.save();
     }
-
     // Create progress entry
     await ChallengeProgress.create({
       challengeId: id,
       userId: user._id,
       status: 'enrolled',
       startedAt: new Date(),
+      progress: 0,
+      progressValue: 0,
     });
-
     res.json({ success: true, message: 'Joined challenge!' });
   } catch (err) { next(err); }
 };
@@ -81,12 +79,11 @@ export const getUserChallenges = async (req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 };
 
-// ========== NEW: Get user's challenge progress ==========
 export const getUserChallengeProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const progress = await ChallengeProgress.find({ userId: user._id })
-      .populate('challengeId', 'title description startDate endDate rewardXP rewardAmount rewardPremiumDays')
+      .populate('challengeId', 'title description startDate endDate rewardXP rewardAmount rewardPremiumDays completionCriteria')
       .sort('-createdAt');
     res.json({ success: true, data: progress });
   } catch (err) { next(err); }
