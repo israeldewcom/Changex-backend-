@@ -1,5 +1,22 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
+// Define a sub-schema for completion criteria
+const CompletionCriteriaSchema = new Schema({
+  type: {
+    type: String,
+    enum: ['lessons', 'xp', 'course_completion'],
+    required: true,
+  },
+  courseId: {
+    type: Schema.Types.ObjectId,
+    ref: 'Course',
+  },
+  targetCount: {
+    type: Number,
+    default: 0,
+  },
+}, { _id: false });
+
 export interface IChallenge extends Document {
   title: string;
   description: string;
@@ -40,14 +57,10 @@ const ChallengeSchema = new Schema<IChallenge>(
       default: 'upcoming',
     },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    // ✅ Fixed: removed `default: null`
+    // ✅ Use the sub-schema
     completionCriteria: {
-      type: {
-        type: { type: String, enum: ['lessons', 'xp', 'course_completion'] },
-        courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
-        targetCount: { type: Number, default: 0 },
-      },
-      required: false, // optional field
+      type: CompletionCriteriaSchema,
+      required: false,
     },
   },
   { timestamps: true }
