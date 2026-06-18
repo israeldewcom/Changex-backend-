@@ -5,7 +5,7 @@ export interface IChallengeProgress extends Document {
   userId: mongoose.Types.ObjectId;
   status: 'enrolled' | 'in_progress' | 'completed' | 'failed';
   progress: number;
-  progressValue: number; // ✅ REQUIRED – used for auto‑completion counters
+  progressValue: number;
   startedAt: Date;
   completedAt?: Date;
   adminNote?: string;
@@ -24,7 +24,7 @@ const ChallengeProgressSchema = new Schema<IChallengeProgress>(
       default: 'enrolled',
     },
     progress: { type: Number, default: 0, min: 0, max: 100 },
-    progressValue: { type: Number, default: 0 }, // ✅ CRITICAL – add this line
+    progressValue: { type: Number, default: 0 },
     startedAt: { type: Date, default: Date.now },
     completedAt: Date,
     adminNote: String,
