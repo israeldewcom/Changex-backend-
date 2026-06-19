@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import User, { IUser } from '../models/User.js';
 import Course from '../models/Course.js';
 import Transaction from '../models/Transaction.js';
@@ -1146,5 +1147,78 @@ export const getTotalSocialEarningsPool = async (req: Request, res: Response) =>
     res.json({ success: true, data: { total: total[0]?.total || 0 } });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ==================== MANUAL TRIGGER SOCIAL EARNINGS ====================
+export const triggerSocialEarnings = async (req: Request, res: Response) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    // Get or create config
+    let config = await SocialEarningsConfig.findOne();
+    if (!config) {
+      const admin = await User.findOne({ roles: 'admin' });
+      if (!admin) throw new Error('No admin found to set social earnings config');
+      config = await SocialEarningsConfig.create({
+        dailyPoolAmount: 10000,
+        engagementWeights: { like: 1, comment: 2, share: 3, view: 0.5 },
+        updatedBy: admin._id,
+      });
+    }
+
+    const poolAmount = config.dailyPoolAmount || 10000;
+
+    // Get posts with engagement
+    const analytics = await PostAnalytics.find({ totalEngagement: { $gt: 0 } })
+      .populate('postId', 'authorId');
+
+    if (analytics.length === 0) {
+      await session.commitTransaction();
+      return res.json({ success: true, message: 'No posts with engagement.' });
+    }
+
+    const totalEngagement = analytics.reduce((sum, a) => sum + a.totalEngagement, 0);
+    if (totalEngagement === 0) {
+      await session.commitTransaction();
+      return res.json({ success: true, message: 'Total engagement is zero.' });
+    }
+
+    for (const a of analytics) {
+      const share = (a.totalEngagement / totalEngagement) * poolAmount;
+      if (share < 0.01) continue;
+
+      const post = a.postId as any;
+      if (!post || !post.authorId) continue;
+
+      const user = await User.findById(post.authorId);
+      if (!user) continue;
+
+      user.walletBalance = (user.walletBalance || 0) + share;
+      await user.save({ session });
+
+      await Transaction.create([{
+        userId: user._id,
+        type: 'bonus',
+        amount: share,
+        status: 'completed',
+        description: `Social engagement reward for post "${post.title || 'Untitled'}"`,
+      }], { session });
+
+      a.earnings = (a.earnings || 0) + share;
+      await a.save({ session });
+    }
+
+    config.lastDistributionDate = new Date();
+    await config.save({ session });
+
+    await session.commitTransaction();
+    res.json({ success: true, message: `Distribution completed: ₦${poolAmount} across ${analytics.length} posts.` });
+  } catch (err) {
+    await session.abortTransaction();
+    console.error('Social earnings trigger error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  } finally {
+    session.endSession();
   }
 };
