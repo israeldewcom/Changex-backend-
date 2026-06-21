@@ -16,6 +16,7 @@ import ChallengeProgress from '../models/ChallengeProgress.js';
 import PostAnalytics from '../models/PostAnalytics.js';
 import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
 import { getIO } from '../socket.js';
+import { uploadToCloudinary } from '../services/cloudinary.js'; // ✅ NEW import
 
 // ==================== DASHBOARD ====================
 export const getDashboard = async (req: Request, res: Response) => {
@@ -1220,5 +1221,19 @@ export const triggerSocialEarnings = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: String(err) });
   } finally {
     session.endSession();
+  }
+};
+
+// ==================== FILE UPLOAD (NEW) ====================
+export const uploadImage = async (req: Request, res: Response) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+    const result = await uploadToCloudinary(req.file.buffer, 'admin/uploads');
+    res.json({ success: true, data: { url: result.secure_url } });
+  } catch (err) {
+    console.error('Upload image error:', err);
+    res.status(500).json({ success: false, message: String(err) });
   }
 };
