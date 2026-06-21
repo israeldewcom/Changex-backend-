@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FULLY UPDATED – includes all routes)
+// FILE: src/index.ts (FULLY UPDATED – includes all routes + currency rates)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -180,6 +180,20 @@ app.get('/api/v1/announcements/latest', async (req, res) => {
   }
 });
 
+// ─── CURRENCY RATES (added for frontend) ──────────────────────────
+app.get('/api/v1/currency/rates', (req, res) => {
+  // Static rates – can be updated from an external API later
+  res.json({
+    success: true,
+    data: {
+      NGN: 1,
+      USD: 0.00062,
+      EUR: 0.00058,
+      GBP: 0.0005,
+    },
+  });
+});
+
 // ─── ROUTE REGISTRATION ──────────────────────────────────────────────
 
 // AUTH (public)
@@ -266,7 +280,7 @@ async function bootstrap() {
       logger.info(`✅ Debug: http://localhost:${PORT}/debug/version`);
       logger.info(`📍 Routes: http://localhost:${PORT}/debug/routes`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books`);
+      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency`);
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
