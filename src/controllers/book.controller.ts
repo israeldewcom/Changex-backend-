@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/book.controller.ts (fixed)
+// FILE: src/controllers/book.controller.ts (FULLY UPDATED)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -20,8 +20,13 @@ export const createBook = async (req: Request, res: Response) => {
     }
     const { title, author, description, price, coverImage, fileUrl } = req.body;
     const book = await Book.create({
-      title, author, description, price: price || 0,
-      coverImage, fileUrl, uploadedBy: user._id
+      title,
+      author,
+      description,
+      price: price || 0,
+      coverImage,
+      fileUrl,
+      uploadedBy: user._id,
     });
     res.status(201).json({ success: true, data: book });
   } catch (err) {
@@ -58,7 +63,17 @@ export const deleteBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── User: List Books ────────────────────────────────────────────────
+// ─── Admin: List All Books (including drafts/unpublished) ───────────
+export const listAllBooks = async (req: Request, res: Response) => {
+  try {
+    const books = await Book.find().sort('-createdAt');
+    res.json({ success: true, data: books });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ─── User: List Published Books ──────────────────────────────────────
 export const listBooks = async (req: Request, res: Response) => {
   try {
     const books = await Book.find({ isPublished: true }).sort('-createdAt');
@@ -93,7 +108,7 @@ export const downloadBook = async (req: Request, res: Response) => {
         userId: user._id,
         type: 'book_purchase',
         'metadata.bookId': book._id,
-        status: 'completed'
+        status: 'completed',
       });
       if (!purchased) {
         return res.status(403).json({ success: false, message: 'You need to purchase this book first' });
@@ -124,7 +139,7 @@ export const purchaseBook = async (req: Request, res: Response) => {
         email: user.email,
         amount: book.price * 100,
         currency: 'NGN',
-        metadata
+        metadata,
       },
       { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}`, 'Content-Type': 'application/json' } }
     );
@@ -132,8 +147,8 @@ export const purchaseBook = async (req: Request, res: Response) => {
       success: true,
       data: {
         paymentUrl: response.data.data.authorization_url,
-        reference: response.data.data.reference
-      }
+        reference: response.data.data.reference,
+      },
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
