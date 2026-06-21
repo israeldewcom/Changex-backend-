@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/Book.ts (ensure default export)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IBook extends Document {
@@ -5,8 +9,8 @@ export interface IBook extends Document {
   author: string;
   description: string;
   coverImage: string;
-  fileUrl: string;        // PDF hosted on Cloudinary or S3
-  price: number;          // 0 for free
+  fileUrl: string;
+  price: number;
   downloads: number;
   views: number;
   isPublished: boolean;
@@ -27,3 +31,5 @@ const BookSchema = new Schema<IBook>({
   isPublished: { type: Boolean, default: true },
   uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true }
 }, { timestamps: true });
+
+export default mongoose.model<IBook>('Book', BookSchema);
