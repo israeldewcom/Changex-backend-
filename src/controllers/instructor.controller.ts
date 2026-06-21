@@ -9,6 +9,7 @@ import { sanitizeHtml } from '../middlewares/sanitize.js';
 import cloudinary from '../config/cloudinary.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
+import mongoose from 'mongoose';
 
 function generateSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -30,8 +31,15 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
+
+    // Additional role check (redundant, but safe)
+    if (!user.roles.includes('instructor') && !user.roles.includes('admin') && !user.isApprovedInstructor) {
+      return res.status(403).json({ success: false, message: 'Insufficient permissions' });
+    }
+
     const { lessons, quizzes, ...courseData } = req.body;
     const slug = generateSlug(courseData.title || 'untitled');
+
     const course = await Course.create({
       ...courseData,
       instructorId: user._id,
@@ -40,20 +48,20 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
       quizzes: quizzes || [],
       approvalStatus: 'draft'
     });
+
     if (lessons && Array.isArray(lessons) && lessons.length > 0) {
-      for (let i = 0; i < lessons.length; i++) {
-        const lesson = lessons[i];
-        await Lesson.create({
-          ...lesson,
-          courseId: course._id,
-          order: i + 1,
-          content: lesson.content || '',
-          videoUrl: lesson.videoUrl || '',
-          resources: lesson.resources || []
-        });
-      }
+      const lessonDocs = lessons.map((lesson: any, i: number) => ({
+        ...lesson,
+        courseId: course._id,
+        order: i + 1,
+        content: lesson.content || '',
+        videoUrl: lesson.videoUrl || '',
+        resources: lesson.resources || []
+      }));
+      await Lesson.insertMany(lessonDocs);
       await Course.findByIdAndUpdate(course._id, { totalLessons: lessons.length });
     }
+
     res.status(201).json({ success: true, data: course });
   } catch (err: any) {
     if (err.code === 11000 && err.keyPattern?.slug) {
@@ -67,32 +75,26 @@ export const updateCourse = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     const { lessons, quizzes, ...updateData } = req.body;
+
     let slug: string | undefined;
-    if (updateData.title) {
-      slug = generateSlug(updateData.title);
-    }
+    if (updateData.title) slug = generateSlug(updateData.title);
 
     const course = await Course.findOne({ _id: req.params.id, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
     const wasApproved = course.approvalStatus === 'approved';
     const updatePayload: any = { ...updateData, description: sanitizeHtml(updateData.description || ''), slug };
-    if (wasApproved) {
-      updatePayload.approvalStatus = 'pending';
-    }
+    if (wasApproved) updatePayload.approvalStatus = 'pending';
 
-    if (quizzes && Array.isArray(quizzes)) {
-      updatePayload.quizzes = quizzes;
-    }
+    if (quizzes && Array.isArray(quizzes)) updatePayload.quizzes = quizzes;
 
     const updatedCourse = await Course.findByIdAndUpdate(req.params.id, updatePayload, { new: true });
     if (!updatedCourse) return res.status(404).json({ success: false, message: 'Course not found' });
 
     if (lessons && Array.isArray(lessons)) {
       await Lesson.deleteMany({ courseId: updatedCourse._id });
-      for (let i = 0; i < lessons.length; i++) {
-        await Lesson.create({ ...lessons[i], courseId: updatedCourse._id, order: i + 1 });
-      }
+      const lessonDocs = lessons.map((l: any, i: number) => ({ ...l, courseId: updatedCourse._id, order: i + 1 }));
+      await Lesson.insertMany(lessonDocs);
       await Course.findByIdAndUpdate(updatedCourse._id, { totalLessons: lessons.length });
     }
 
@@ -110,6 +112,11 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
     const user = req.user as IUser;
     const { id } = req.params;
     const { lessons, quizzes, ...courseData } = req.body;
+
+    // Additional permission check
+    if (!user.roles.includes('instructor') && !user.roles.includes('admin') && !user.isApprovedInstructor) {
+      return res.status(403).json({ success: false, message: 'Insufficient permissions' });
+    }
 
     let course = await Course.findOne({ _id: id, instructorId: user._id });
     if (!course) {
@@ -139,10 +146,19 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
       await course.save();
     }
 
+    // Bulk insert/update lessons
     if (lessons && Array.isArray(lessons)) {
       await Lesson.deleteMany({ courseId: course._id });
-      for (let i = 0; i < lessons.length; i++) {
-        await Lesson.create({ ...lessons[i], courseId: course._id, order: i + 1 });
+      if (lessons.length > 0) {
+        const lessonDocs = lessons.map((l: any, i: number) => ({
+          ...l,
+          courseId: course._id,
+          order: i + 1,
+          content: l.content || '',
+          videoUrl: l.videoUrl || '',
+          resources: l.resources || []
+        }));
+        await Lesson.insertMany(lessonDocs);
       }
       course.totalLessons = lessons.length;
       await course.save();
@@ -153,7 +169,8 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
     if (err.code === 11000 && err.keyPattern?.slug) {
       return res.status(400).json({ success: false, message: 'A course with a similar title already exists. Please change the title.' });
     }
-    res.status(400).json({ success: false, message: err.message });
+    console.error('Save draft error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Failed to save draft' });
   }
 };
 
@@ -162,9 +179,11 @@ export const submitForReview = async (req: Request, res: Response, next: NextFun
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: req.params.id, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
     const lessonCount = await Lesson.countDocuments({ courseId: course._id });
     if (lessonCount < 20) return res.status(400).json({ success: false, message: 'Need at least 20 lessons' });
     if (!course.title || !course.description) return res.status(400).json({ success: false, message: 'Title and description required' });
+
     course.approvalStatus = 'pending';
     await course.save();
     res.json({ success: true, message: 'Submitted for review' });
@@ -179,6 +198,7 @@ export const deleteCourse = async (req: Request, res: Response, next: NextFuncti
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
     await Lesson.deleteMany({ courseId: course._id });
     await Enrollment.deleteMany({ courseId: course._id });
     await course.deleteOne();
@@ -191,6 +211,7 @@ export const createLesson = async (req: Request, res: Response, next: NextFuncti
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: req.params.courseId, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
     const lesson = await Lesson.create({ ...req.body, courseId: course._id });
     await Course.findByIdAndUpdate(course._id, { $inc: { totalLessons: 1 } });
     res.status(201).json({ success: true, data: lesson });
@@ -202,7 +223,12 @@ export const updateLesson = async (req: Request, res: Response, next: NextFuncti
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: req.params.courseId, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    const lesson = await Lesson.findOneAndUpdate({ _id: req.params.lessonId, courseId: course._id }, req.body, { new: true });
+
+    const lesson = await Lesson.findOneAndUpdate(
+      { _id: req.params.lessonId, courseId: course._id },
+      req.body,
+      { new: true }
+    );
     if (!lesson) return res.status(404).json({ success: false, message: 'Lesson not found' });
     res.json({ success: true, data: lesson });
   } catch (err) { next(err); }
@@ -213,8 +239,10 @@ export const deleteLesson = async (req: Request, res: Response, next: NextFuncti
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: req.params.courseId, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
     const lesson = await Lesson.findOneAndDelete({ _id: req.params.lessonId, courseId: course._id });
     if (!lesson) return res.status(404).json({ success: false, message: 'Lesson not found' });
+
     await Course.findByIdAndUpdate(course._id, { $inc: { totalLessons: -1 } });
     res.json({ success: true, message: 'Lesson deleted' });
   } catch (err) { next(err); }
@@ -226,7 +254,9 @@ export const uploadMedia = async (req: Request, res: Response, next: NextFunctio
     const { courseId } = req.params;
     const course = await Course.findOne({ _id: courseId, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+
     const result = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         { folder: `courses/${courseId}/media`, resource_type: 'auto' },
@@ -240,7 +270,9 @@ export const uploadMedia = async (req: Request, res: Response, next: NextFunctio
 
 export const getCourseQuestions = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const questions = await Question.find({ courseId: req.params.courseId }).populate('userId', 'firstName lastName').sort('-createdAt');
+    const questions = await Question.find({ courseId: req.params.courseId })
+      .populate('userId', 'firstName lastName')
+      .sort('-createdAt');
     res.json({ success: true, data: questions });
   } catch (err) { next(err); }
 };
@@ -251,14 +283,25 @@ export const answerQuestion = async (req: Request, res: Response, next: NextFunc
     const { answer } = req.body;
     const question = await Question.findById(id);
     if (!question) return res.status(404).json({ success: false, message: 'Question not found' });
+
     const user = req.user as IUser;
     const course = await Course.findOne({ _id: question.courseId, instructorId: user._id });
-    if (!course && !user.roles.includes('admin')) return res.status(403).json({ success: false, message: 'Not authorized' });
+    if (!course && !user.roles.includes('admin')) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
     question.answer = answer;
     question.answeredAt = new Date();
     await question.save();
-    await Notification.create({ userId: question.userId, title: 'Your question was answered', message: answer.substring(0, 100), type: 'course' });
+
+    await Notification.create({
+      userId: question.userId,
+      title: 'Your question was answered',
+      message: answer.substring(0, 100),
+      type: 'course'
+    });
     getIO().to(`user:${question.userId}`).emit('notification', { title: 'Question answered' });
+
     res.json({ success: true, message: 'Answer posted' });
   } catch (err) { next(err); }
 };
@@ -269,7 +312,9 @@ export const uploadCertificateTemplate = async (req: Request, res: Response, nex
     const { courseId } = req.params;
     const course = await Course.findOne({ _id: courseId, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+
     const result = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         { folder: `certificates/templates/${courseId}`, resource_type: 'image' },
@@ -289,7 +334,9 @@ export const uploadCourseThumbnail = async (req: Request, res: Response, next: N
     const { courseId } = req.params;
     const course = await Course.findOne({ _id: courseId, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
     if (!req.file) return res.status(400).json({ success: false, message: 'No image file uploaded' });
+
     const result = await uploadToCloudinary(req.file.buffer, `courses/${courseId}/thumbnail`, {
       transformation: [{ width: 1280, height: 720, crop: 'fill', quality: 'auto' }]
     });
@@ -305,9 +352,12 @@ export const uploadLessonImage = async (req: Request, res: Response, next: NextF
     const { courseId, lessonId } = req.params;
     const course = await Course.findOne({ _id: courseId, instructorId: user._id });
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
     const lesson = await Lesson.findOne({ _id: lessonId, courseId: course._id });
     if (!lesson) return res.status(404).json({ success: false, message: 'Lesson not found' });
+
     if (!req.file) return res.status(400).json({ success: false, message: 'No image file uploaded' });
+
     const result = await uploadToCloudinary(req.file.buffer, `courses/${courseId}/lessons/${lessonId}/images`, {
       transformation: [{ width: 800, quality: 'auto', fetch_format: 'auto' }]
     });
