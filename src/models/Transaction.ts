@@ -21,15 +21,12 @@ const TransactionSchema = new Schema<ITransaction>(
         'affiliate_commission',
         'instructor_earning',
         'course_purchase',
-        'subscription',
         'withdrawal',
         'bonus',
-        'referral_commission',
-        'commission',
-        'manual_payment',
-        'refund',
+        'subscription',
+        'book_purchase'  // ✅ NEW
       ],
-      required: true,
+      required: true
     },
     amount: { type: Number, required: true },
     status: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' },
