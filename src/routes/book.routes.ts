@@ -4,16 +4,16 @@ import { authenticate, authorize } from '../middlewares/auth.js';
 
 const router = Router();
 
-// Public
+// ─── Public routes (no auth) ──────────────────────────────────────
 router.get('/', bookController.listBooks);
 router.get('/:id', bookController.getBook);
 
-// Authenticated
+// ─── Authenticated routes ─────────────────────────────────────────
 router.use(authenticate);
 router.post('/:id/download', bookController.downloadBook);
 router.post('/purchase', bookController.purchaseBook);
 
-// Admin
+// ─── Admin only ────────────────────────────────────────────────────
 router.use(authorize('admin'));
 router.post('/', bookController.createBook);
 router.put('/:id', bookController.updateBook);
