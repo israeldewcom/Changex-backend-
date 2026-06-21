@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/post.controller.ts (FULLY UPDATED)
+// FILE: src/controllers/post.controller.ts (COMPLETE)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -13,13 +13,11 @@ import PostAnalytics from '../models/PostAnalytics.js';
 import { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
-import { Types } from 'mongoose';
 
 function generateSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now();
 }
 
-// ─── CREATE POST ──────────────────────────────────────────────────────
 export const createPost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -41,14 +39,16 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
       seoKeywords: seoKeywords || tags,
       isPublished: isPublished || false,
     });
-    // Emit new post event via Socket.io
+
     const populatedPost = await Post.findById(post._id).populate('authorId', 'firstName lastName avatarUrl');
     getIO().emit('new_post', populatedPost);
+
     res.status(201).json({ success: true, data: post });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── UPDATE POST ─────────────────────────────────────────────────────
 export const updatePost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -59,10 +59,11 @@ export const updatePost = async (req: Request, res: Response, next: NextFunction
     }
     const updated = await Post.findByIdAndUpdate(id, req.body, { new: true });
     res.json({ success: true, data: updated });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── PUBLISH POST ────────────────────────────────────────────────────
 export const publishPost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -77,7 +78,7 @@ export const publishPost = async (req: Request, res: Response, next: NextFunctio
     post.isPublished = true;
     post.publishedAt = new Date();
     await post.save();
-    
+
     const followers = await Follow.find({ followingId: user._id });
     await Notification.insertMany(followers.map(f => ({
       userId: f.followerId,
@@ -86,15 +87,16 @@ export const publishPost = async (req: Request, res: Response, next: NextFunctio
       type: 'system',
       data: { postId: post._id, slug: post.slug }
     })));
-    
+
     const populatedPost = await Post.findById(post._id).populate('authorId', 'firstName lastName avatarUrl');
     getIO().emit('new_post', populatedPost);
-    
+
     res.json({ success: true, data: post });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── DELETE POST ────────────────────────────────────────────────────
 export const deletePost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -112,10 +114,11 @@ export const deletePost = async (req: Request, res: Response, next: NextFunction
     await Post.findByIdAndDelete(id);
     getIO().emit('post_deleted', { postId: id });
     res.json({ success: true, message: 'Post deleted' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── UPLOAD POST VIDEO ──────────────────────────────────────────────
 export const uploadPostVideo = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -127,10 +130,11 @@ export const uploadPostVideo = async (req: Request, res: Response, next: NextFun
     post.videoUrl = result.secure_url;
     await post.save();
     res.json({ success: true, data: { videoUrl: result.secure_url } });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── GET PUBLISHED POSTS (with pagination & earnings) ──────────────
 export const getPublishedPosts = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { page = 1, limit = 10, tag, type, author } = req.query;
@@ -138,7 +142,7 @@ export const getPublishedPosts = async (req: Request, res: Response, next: NextF
     if (tag) filter.tags = tag;
     if (type) filter.type = type;
     if (author) filter.authorId = author;
-    
+
     const posts = await Post.find(filter)
       .populate('authorId', 'firstName lastName avatarUrl bio')
       .sort('-publishedAt')
@@ -168,10 +172,11 @@ export const getPublishedPosts = async (req: Request, res: Response, next: NextF
         }
       }
     });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── GET POST BY SLUG ───────────────────────────────────────────────
 export const getPostBySlug = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug } = req.params;
@@ -193,10 +198,11 @@ export const getPostBySlug = async (req: Request, res: Response, next: NextFunct
     }
 
     res.json({ success: true, data: { ...post, earnings, userLiked } });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── LIKE / UNLIKE POST ─────────────────────────────────────────────
 export const likePost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -221,10 +227,11 @@ export const likePost = async (req: Request, res: Response, next: NextFunction) 
       );
       res.json({ success: true, liked: true, likes: post?.likes });
     }
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── ADD COMMENT ─────────────────────────────────────────────────────
 export const addComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -251,29 +258,31 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
     }
 
     res.status(201).json({ success: true, data: comment });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── GET COMMENTS (with replies) ────────────────────────────────────
 export const getComments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
     const comments = await Comment.find({ postId: id, parentId: null })
       .populate('userId', 'firstName lastName avatarUrl')
       .sort('createdAt');
-    
+
     const commentsWithReplies = await Promise.all(comments.map(async (comment) => {
       const replies = await Comment.find({ parentId: comment._id })
         .populate('userId', 'firstName lastName avatarUrl')
         .sort('createdAt');
       return { ...comment.toObject(), replies };
     }));
-    
+
     res.json({ success: true, data: commentsWithReplies });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── LIKE COMMENT ────────────────────────────────────────────────────
 export const likeComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -288,10 +297,11 @@ export const likeComment = async (req: Request, res: Response, next: NextFunctio
       await Comment.findByIdAndUpdate(id, { $inc: { likes: 1 } });
       res.json({ success: true, liked: true });
     }
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── SHARE POST ──────────────────────────────────────────────────────
 export const sharePost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -302,10 +312,11 @@ export const sharePost = async (req: Request, res: Response, next: NextFunction)
       { upsert: true }
     );
     res.json({ success: true, message: 'Share counted' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── GET USER POSTS (for profile) ───────────────────────────────────
 export const getUserPosts = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params;
@@ -318,10 +329,11 @@ export const getUserPosts = async (req: Request, res: Response, next: NextFuncti
     const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
     const postsWithEarnings = posts.map(p => ({ ...p, earnings: earningsMap[p._id.toString()] || 0 }));
     res.json({ success: true, data: postsWithEarnings });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── FOLLOWING FEED (posts from followed users + courses) ──────────
 export const getFollowingFeed = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -381,7 +393,6 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
   }
 };
 
-// ─── TRACK POST VIEW ─────────────────────────────────────────────────
 export const trackPostView = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -392,10 +403,11 @@ export const trackPostView = async (req: Request, res: Response, next: NextFunct
       { upsert: true }
     );
     res.json({ success: true });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── GET POST ANALYTICS ──────────────────────────────────────────────
 export const getPostAnalytics = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -404,10 +416,11 @@ export const getPostAnalytics = async (req: Request, res: Response, next: NextFu
       return res.json({ success: true, data: { views: 0, likes: 0, comments: 0, shares: 0, totalEngagement: 0, earnings: 0 } });
     }
     res.json({ success: true, data: analytics });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ─── GET MY SOCIAL EARNINGS ─────────────────────────────────────────
 export const getMySocialEarnings = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -416,12 +429,11 @@ export const getMySocialEarnings = async (req: Request, res: Response, next: Nex
     const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
     const totalEarnings = analytics.reduce((sum, a) => sum + (a.earnings || 0), 0);
     res.json({ success: true, data: { totalEarnings, posts: analytics } });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// ─── NEW: PERSONALIZED FEED (Recommendation Engine) ────────────────
-// ──────────────────────────────────────────────────────────────────────
 export const getPersonalizedFeed = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -429,7 +441,6 @@ export const getPersonalizedFeed = async (req: Request, res: Response, next: Nex
 
     const { page = 1, limit = 10 } = req.query;
 
-    // 1. Get user's liked posts to extract tags
     const likes = await Like.find({ userId: user._id, targetType: 'post' }).populate('targetId');
     const likedPostIds = likes.map(l => l.targetId);
     const likedPosts = await Post.find({ _id: { $in: likedPostIds } });
@@ -441,49 +452,39 @@ export const getPersonalizedFeed = async (req: Request, res: Response, next: Nex
       .slice(0, 5)
       .map(([tag]) => tag);
 
-    // 2. Get posts (exclude those the user already interacted with? we'll include with lower scores)
     const filter: any = { isPublished: true };
-    // Optionally exclude posts the user already liked/commented
-    // const interactedPostIds = [...likedPostIds, ...await Comment.find({ userId: user._id }).distinct('postId')];
-    // if (interactedPostIds.length) filter._id = { $nin: interactedPostIds };
-
     const posts = await Post.find(filter)
       .populate('authorId', 'firstName lastName avatarUrl bio')
       .sort('-publishedAt')
       .lean();
 
-    // 3. Compute score for each post
+    const follows = await Follow.find({ followerId: user._id }).select('followingId');
+    const followedIds = follows.map(f => f.followingId.toString());
+
     const scored = posts.map(post => {
       let score = 0;
-      // a. Follow author
-      const authorId = (post.authorId as any)?._id;
-      if (authorId && S?.following?.includes(authorId.toString())) {
+      const authorId = (post.authorId as any)?._id?.toString();
+      if (authorId && followedIds.includes(authorId)) {
         score += 0.2;
       }
-      // b. Tag similarity
       const postTags = post.tags || [];
       const tagOverlap = postTags.filter(t => topTags.includes(t)).length;
       score += (tagOverlap / (topTags.length || 1)) * 0.3;
-      // c. Recency (days since published)
       const daysAgo = (Date.now() - new Date(post.publishedAt || post.createdAt).getTime()) / (1000 * 60 * 60 * 24);
-      const recency = Math.max(0, 1 - daysAgo / 30); // decay over 30 days
+      const recency = Math.max(0, 1 - daysAgo / 30);
       score += recency * 0.2;
-      // d. Global engagement
       const engagement = (post.likes || 0) + (post.commentsCount || 0) + (post.shares || 0);
       const maxEngagement = 1000;
       score += Math.min(1, engagement / maxEngagement) * 0.3;
       return { ...post, score };
     });
 
-    // Sort by score descending
     scored.sort((a, b) => b.score - a.score);
 
-    // Paginate
     const start = (Number(page) - 1) * Number(limit);
     const end = start + Number(limit);
     const paginated = scored.slice(start, end);
 
-    // Attach earnings
     const postIds = paginated.map(p => p._id);
     const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
     const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
