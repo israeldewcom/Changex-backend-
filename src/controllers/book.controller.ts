@@ -1,7 +1,3 @@
-// ============================================================
-// FILE: src/controllers/book.controller.ts (FULLY UPDATED)
-// ============================================================
-
 import { Request, Response } from 'express';
 import Book from '../models/Book.js';
 import { IUser } from '../models/User.js';
@@ -11,146 +7,94 @@ import axios from 'axios';
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// ─── Admin: Create Book ──────────────────────────────────────────────
+// ─── Admin: Create Book (FULL DEBUG) ──────────────────────────────────
 export const createBook = async (req: Request, res: Response) => {
+  console.log('📚 [createBook] 🔥 START');
+  console.log('📚 [createBook] User ID:', req.user?._id);
+  console.log('📚 [createBook] User Roles:', req.user?.roles);
+  console.log('📚 [createBook] Headers:', req.headers.authorization ? 'Authorization present' : 'NO AUTHORIZATION');
+  console.log('📚 [createBook] Raw Body:', req.body);
+  console.log('📚 [createBook] File:', req.file ? '✅ File attached' : '❌ No file');
+
+  if (req.file) {
+    console.log('📚 [createBook] File details:', {
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype,
+    });
+  }
+
   try {
     const user = req.user as IUser;
+
+    // ─── Auth Check ──────────────────────────────────────────────
+    console.log('📚 [createBook] 🔐 Checking admin role...');
     if (!user.roles.includes('admin')) {
+      console.log('📚 [createBook] ❌ User is NOT admin');
       return res.status(403).json({ success: false, message: 'Admin only' });
     }
+    console.log('📚 [createBook] ✅ User is admin');
+
+    // ─── Extract fields ──────────────────────────────────────────
     const { title, author, description, price, coverImage, fileUrl } = req.body;
+    console.log('📚 [createBook] Extracted fields:', {
+      title: title || '(empty)',
+      author: author || '(empty)',
+      description: description ? `${description.substring(0, 50)}...` : '(empty)',
+      price: price || 0,
+      coverImage: coverImage || '(empty)',
+      fileUrl: fileUrl || '(empty)',
+    });
+
+    // ─── Validation ──────────────────────────────────────────────
+    console.log('📚 [createBook] 🔍 Validating...');
+    if (!title) {
+      console.log('📚 [createBook] ❌ Missing title');
+      return res.status(400).json({ success: false, message: 'Title is required' });
+    }
+    if (!author) {
+      console.log('📚 [createBook] ❌ Missing author');
+      return res.status(400).json({ success: false, message: 'Author is required' });
+    }
+    if (!fileUrl) {
+      console.log('📚 [createBook] ❌ Missing fileUrl');
+      return res.status(400).json({ success: false, message: 'File URL is required. Please upload a PDF first.' });
+    }
+    console.log('📚 [createBook] ✅ Validation passed');
+
+    // ─── Create Book ──────────────────────────────────────────────
+    console.log('📚 [createBook] 💾 Saving to database...');
     const book = await Book.create({
       title,
       author,
-      description,
+      description: description || '',
       price: price || 0,
-      coverImage,
+      coverImage: coverImage || '',
       fileUrl,
       uploadedBy: user._id,
     });
+    console.log('📚 [createBook] ✅ Book created successfully!');
+    console.log('📚 [createBook] Book ID:', book._id);
+    console.log('📚 [createBook] Book Data:', JSON.stringify(book, null, 2));
+
     res.status(201).json({ success: true, data: book });
   } catch (err) {
+    console.error('📚 [createBook] ❌ ERROR:', err);
+    console.error('📚 [createBook] Error stack:', err.stack);
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
-// ─── Admin: Update Book ──────────────────────────────────────────────
-export const updateBook = async (req: Request, res: Response) => {
-  try {
-    const user = req.user as IUser;
-    if (!user.roles.includes('admin')) {
-      return res.status(403).json({ success: false, message: 'Admin only' });
-    }
-    const book = await Book.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
-    res.json({ success: true, data: book });
-  } catch (err) {
-    res.status(500).json({ success: false, message: String(err) });
-  }
-};
-
-// ─── Admin: Delete Book ──────────────────────────────────────────────
-export const deleteBook = async (req: Request, res: Response) => {
-  try {
-    const user = req.user as IUser;
-    if (!user.roles.includes('admin')) {
-      return res.status(403).json({ success: false, message: 'Admin only' });
-    }
-    await Book.findByIdAndDelete(req.params.id);
-    res.json({ success: true, message: 'Book deleted' });
-  } catch (err) {
-    res.status(500).json({ success: false, message: String(err) });
-  }
-};
-
-// ─── Admin: List All Books (including drafts/unpublished) ───────────
+// ─── Admin: List All Books (with count) ──────────────────────────────
 export const listAllBooks = async (req: Request, res: Response) => {
+  console.log('📚 [listAllBooks] 🔥 START');
   try {
     const books = await Book.find().sort('-createdAt');
+    console.log(`📚 [listAllBooks] Found ${books.length} books`);
     res.json({ success: true, data: books });
   } catch (err) {
+    console.error('📚 [listAllBooks] ❌ ERROR:', err);
     res.status(500).json({ success: false, message: String(err) });
-  }
-};
-
-// ─── User: List Published Books ──────────────────────────────────────
-export const listBooks = async (req: Request, res: Response) => {
-  try {
-    const books = await Book.find({ isPublished: true }).sort('-createdAt');
-    res.json({ success: true, data: books });
-  } catch (err) {
-    res.status(500).json({ success: false, message: String(err) });
-  }
-};
-
-// ─── User: Get Single Book ───────────────────────────────────────────
-export const getBook = async (req: Request, res: Response) => {
-  try {
-    const book = await Book.findById(req.params.id);
-    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
-    book.views += 1;
-    await book.save();
-    res.json({ success: true, data: book });
-  } catch (err) {
-    res.status(500).json({ success: false, message: String(err) });
-  }
-};
-
-// ─── User: Download Book (free or paid) ─────────────────────────────
-export const downloadBook = async (req: Request, res: Response) => {
-  try {
-    const user = req.user as IUser;
-    const book = await Book.findById(req.params.id);
-    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
-
-    if (book.price > 0) {
-      const purchased = await Transaction.findOne({
-        userId: user._id,
-        type: 'book_purchase',
-        'metadata.bookId': book._id,
-        status: 'completed',
-      });
-      if (!purchased) {
-        return res.status(403).json({ success: false, message: 'You need to purchase this book first' });
-      }
-    }
-
-    book.downloads += 1;
-    await book.save();
-    res.json({ success: true, data: { downloadUrl: book.fileUrl } });
-  } catch (err) {
-    res.status(500).json({ success: false, message: String(err) });
-  }
-};
-
-// ─── User: Purchase Book (Paystack) ──────────────────────────────────
-export const purchaseBook = async (req: Request, res: Response) => {
-  try {
-    const user = req.user as IUser;
-    const { bookId } = req.body;
-    const book = await Book.findById(bookId);
-    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
-    if (book.price === 0) return res.status(400).json({ success: false, message: 'This book is free' });
-
-    const metadata = { type: 'book_purchase', bookId: book._id, userId: user._id };
-    const response = await axios.post(
-      `${PAYSTACK_BASE}/transaction/initialize`,
-      {
-        email: user.email,
-        amount: book.price * 100,
-        currency: 'NGN',
-        metadata,
-      },
-      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}`, 'Content-Type': 'application/json' } }
-    );
-    res.json({
-      success: true,
-      data: {
-        paymentUrl: response.data.data.authorization_url,
-        reference: response.data.data.reference,
-      },
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
   }
 };
