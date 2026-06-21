@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/index.ts (FULLY UPDATED – includes all routes)
+// ============================================================
+
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -11,31 +15,67 @@ import rateLimit from 'express-rate-limit';
 import { connectDB } from './config/db.js';
 import { connectRedis } from './config/redis.js';
 import { initializePassport } from './config/passport.js';
+
+// ─── AUTH ────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth.routes.js';
+
+// ─── USER & PROFILE ──────────────────────────────────────────────────
 import userRoutes from './routes/user.routes.js';
+
+// ─── COURSES ─────────────────────────────────────────────────────────
 import courseRoutes from './routes/course.routes.js';
 import instructorRoutes from './routes/instructor.routes.js';
+
+// ─── ADMIN ───────────────────────────────────────────────────────────
 import adminRoutes from './routes/admin.routes.js';
+
+// ─── PAYMENTS ────────────────────────────────────────────────────────
 import paymentRoutes from './routes/payment.routes.js';
+
+// ─── AFFILIATE ───────────────────────────────────────────────────────
 import affiliateRoutes from './routes/affiliate.routes.js';
+
+// ─── AI ──────────────────────────────────────────────────────────────
 import aiRoutes from './routes/ai.routes.js';
+
+// ─── WEBHOOKS ────────────────────────────────────────────────────────
 import webhookRoutes from './routes/webhook.routes.js';
+
+// ─── FEEDBACK & CONTACT ─────────────────────────────────────────────
 import feedbackRoutes from './routes/feedback.routes.js';
 import contactRoutes from './routes/contact.routes.js';
-// ========== NEW ROUTES ==========
+
+// ─── SOCIAL FEATURES ────────────────────────────────────────────────
 import postRoutes from './routes/post.routes.js';
 import followRoutes from './routes/follow.routes.js';
 import challengeRoutes from './routes/challenge.routes.js';
 import adRoutes from './routes/ad.routes.js';
 import interactiveRoutes from './routes/interactive.routes.js';
-// ================================
+
+// ─── CERTIFICATES ────────────────────────────────────────────────────
+import certificateRoutes from './routes/certificate.routes.js';
+
+// ─── BOOKS (NEW) ────────────────────────────────────────────────────
+import bookRoutes from './routes/book.routes.js';
+
+// ─── MIDDLEWARE ──────────────────────────────────────────────────────
 import { errorHandler } from './middlewares/errorHandler.js';
+import { authenticate, authorize } from './middlewares/auth.js';
+
+// ─── SOCKET ──────────────────────────────────────────────────────────
 import { setupSocket } from './socket.js';
+
+// ─── WORKERS (CRON) ──────────────────────────────────────────────────
 import { startWorkers } from './workers/index.js';
+
+// ─── LOGGER ──────────────────────────────────────────────────────────
 import logger from './utils/logger.js';
+
+// ─── MONGOOSE & REDIS ────────────────────────────────────────────────
 import mongoose from 'mongoose';
 import redis from './config/redis.js';
-import { authenticate, authorize } from './middlewares/auth.js';
+
+// ─── MODELS (for cleanup) ───────────────────────────────────────────
 import Enrollment from './models/Enrollment.js';
 import Referral from './models/Referral.js';
 import User from './models/User.js';
@@ -43,6 +83,7 @@ import User from './models/User.js';
 const app = express();
 const server = http.createServer(app);
 
+// ─── SECURITY MIDDLEWARE ─────────────────────────────────────────────
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
@@ -54,14 +95,18 @@ app.use(cors({
 app.options('*', cors());
 app.use(cookieParser());
 
+// ─── RATE LIMITING ────────────────────────────────────────────────────
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 100 });
 app.use('/api/', limiter);
 
+// ─── BODY PARSERS ────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// ─── PASSPORT ────────────────────────────────────────────────────────
 initializePassport(app);
 
+// ─── REQUEST LOGGING MIDDLEWARE ──────────────────────────────────────
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
   const oldJson = res.json.bind(res);
@@ -81,10 +126,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// ========== DEBUG ENDPOINTS ==========
+// ─── DEBUG ENDPOINTS ──────────────────────────────────────────────────
 app.get('/debug/version', (req, res) => {
   res.json({
-    version: 'PRODUCTION_2.0.0_FULL',
+    version: 'PRODUCTION_2.1.0_BOOKS',
     features: {
       enrollmentGuard: true,
       referralCaseInsensitive: true,
@@ -94,6 +139,9 @@ app.get('/debug/version', (req, res) => {
       challenges: true,
       ads: true,
       interactiveMaterials: true,
+      certificateGeneration: true,
+      booksLibrary: true,
+      personalizedFeed: true,
     },
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
@@ -111,7 +159,7 @@ app.get('/debug/routes', (req, res) => {
 
 app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
-// ========== PUBLIC ENDPOINTS ==========
+// ─── PUBLIC ENDPOINTS (no auth) ─────────────────────────────────────
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
     const code = req.params.code.trim().toUpperCase();
@@ -132,11 +180,18 @@ app.get('/api/v1/announcements/latest', async (req, res) => {
   }
 });
 
-// ========== ROUTE REGISTRATION ==========
+// ─── ROUTE REGISTRATION ──────────────────────────────────────────────
+
+// AUTH (public)
 app.use('/api/v1/auth', authRoutes);
+
+// WEBHOOKS (public, for Paystack)
 app.use('/api/v1/webhooks', webhookRoutes);
+
+// CONTACT (public)
 app.use('/api/v1/contact', contactRoutes);
 
+// ─── PROTECTED ROUTES ────────────────────────────────────────────────
 app.use('/api/v1/users', authenticate, userRoutes);
 app.use('/api/v1/courses', authenticate, courseRoutes);
 app.use('/api/v1/instructor', authenticate, authorize('instructor', 'admin'), instructorRoutes);
@@ -146,35 +201,43 @@ app.use('/api/v1/affiliate', authenticate, affiliateRoutes);
 app.use('/api/v1/ai', authenticate, aiRoutes);
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
-// ========== MOUNT NEW ROUTES WITH LOGGING ==========
-console.log('📦 Mounting new routes...');
+// ─── SOCIAL FEATURES ─────────────────────────────────────────────────
+// Posts: public GET, but write/update require auth (handled inside)
 app.use('/api/v1/posts', postRoutes);
-console.log('✅ /api/v1/posts mounted');
 
+// Follows: all require auth (handled inside)
 app.use('/api/v1/follows', followRoutes);
-console.log('✅ /api/v1/follows mounted');
 
+// Challenges: public GET for active/upcoming, others auth (handled inside)
 app.use('/api/v1/challenges', challengeRoutes);
-console.log('✅ /api/v1/challenges mounted');
 
+// Ads: public GET for placement, admin routes require auth (handled inside)
 app.use('/api/v1/ads', adRoutes);
-console.log('✅ /api/v1/ads mounted');
 
+// Interactive materials: all require auth (handled inside)
 app.use('/api/v1/interactive', authenticate, interactiveRoutes);
-console.log('✅ /api/v1/interactive mounted');
 
-// ========== ERROR HANDLER & 404 ==========
+// ─── CERTIFICATES ─────────────────────────────────────────────────────
+app.use('/api/v1/certificates', authenticate, certificateRoutes);
+
+// ─── BOOKS ──────────────────────────────────────────────────────────
+// Public: list & view; download & purchase require auth (handled inside)
+app.use('/api/v1/books', bookRoutes);
+
+// ─── ERROR HANDLER & 404 ─────────────────────────────────────────────
 app.use(errorHandler);
 
+// ─── SOCKET.IO ───────────────────────────────────────────────────────
 const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
 setupSocket(io);
 
+// ─── CATCH‑ALL 404 ──────────────────────────────────────────────────
 app.use('*', (req, res) => {
   logger.warn(`[404] Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-// ========== CLEANUP ==========
+// ─── DATA CLEANUP (startup) ──────────────────────────────────────────
 async function cleanupCorruptedData() {
   try {
     const enrollResult = await Enrollment.deleteMany({ userId: null });
@@ -190,7 +253,7 @@ async function cleanupCorruptedData() {
   }
 }
 
-// ========== BOOTSTRAP ==========
+// ─── BOOTSTRAP ────────────────────────────────────────────────────────
 async function bootstrap() {
   try {
     await connectDB();
@@ -200,10 +263,10 @@ async function bootstrap() {
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);
-      logger.info(`✅ Debug endpoint: http://localhost:${PORT}/debug/version`);
+      logger.info(`✅ Debug: http://localhost:${PORT}/debug/version`);
       logger.info(`📍 Routes: http://localhost:${PORT}/debug/routes`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`📝 New features: Posts, Follows, Challenges, Ads, Interactive Materials`);
+      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books`);
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
@@ -211,6 +274,7 @@ async function bootstrap() {
   }
 }
 
+// ─── GRACEFUL SHUTDOWN ──────────────────────────────────────────────
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
   server.close(async () => {
