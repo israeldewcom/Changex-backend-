@@ -1,7 +1,12 @@
+// ============================================================
+// FILE: src/routes/admin.routes.ts (FULLY UPDATED)
+// ============================================================
+
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller.js';
+import * as bookController from '../controllers/book.controller.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
-import { upload } from '../middlewares/upload.js';   // ✅ Add this import
+import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
@@ -62,7 +67,13 @@ router.post('/ads', adminController.createAd);
 router.get('/ads', adminController.getAds);
 router.put('/ads/:id', adminController.updateAd);
 router.delete('/ads/:id', adminController.deleteAd);
-router.get('/ads/placement/:placement', adminController.getActiveAds);   // ✅ This is the one used by frontend
+router.get('/ads/placement/:placement', adminController.getActiveAds); // public, but kept here for admin visibility
+
+// ─── Books (Admin) ──────────────────────────────────────────────────
+router.get('/books', bookController.listAllBooks);          // admin only – sees all books
+router.post('/books', bookController.createBook);
+router.put('/books/:id', bookController.updateBook);
+router.delete('/books/:id', bookController.deleteBook);
 
 // ─── Social Earnings ────────────────────────────────────────────────
 router.get('/social-earnings/config', adminController.getSocialEarningsConfig);
@@ -72,6 +83,6 @@ router.get('/social-earnings/total-pool', adminController.getTotalSocialEarnings
 router.post('/social-earnings/trigger', adminController.triggerSocialEarnings);
 
 // ─── Upload (NEW) ──────────────────────────────────────────────────
-router.post('/upload', upload.single('image'), adminController.uploadImage);   // ✅ Add this
+router.post('/upload', upload.single('image'), adminController.uploadImage);
 
 export default router;
