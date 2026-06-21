@@ -5,30 +5,28 @@ import { authenticate, authorize } from '../middlewares/auth.js';
 
 const router = Router();
 
-// ========== PUBLIC ROUTES (order matters: specific before generic) ==========
+// ─── Public (no auth) ─────────────────────────────────────────────
 router.get('/active', challengeController.getActiveChallenges);
 router.get('/upcoming', challengeController.getUpcomingChallenges);
 
-// ========== ADMIN ROUTES (must come BEFORE /:id) ==========
-router.get('/all', authenticate, authorize('admin'), adminController.getChallenges);
+// ─── Authenticated user routes ──────────────────────────────────
+router.use(authenticate);
 
-// ========== GENERIC ID ROUTE (must be LAST) ==========
+// ⚠️  IMPORTANT: specific routes before dynamic :id
+router.get('/my-progress', challengeController.getUserChallengeProgress);
+router.get('/user/my', challengeController.getUserChallenges);
+
+router.post('/:id/join', challengeController.joinChallenge);
 router.get('/:id', challengeController.getChallengeById);
 
-// ========== AUTHENTICATED USER ROUTES ==========
-router.use(authenticate);
-router.post('/:id/join', challengeController.joinChallenge);
-router.get('/user/my', challengeController.getUserChallenges);
-router.get('/my-progress', challengeController.getUserChallengeProgress);
-
-// ========== ADMIN ONLY (management) ==========
-router.post('/', authenticate, authorize('admin'), adminController.createChallenge);
-router.put('/:id', authenticate, authorize('admin'), adminController.updateChallenge);
-router.delete('/:id', authenticate, authorize('admin'), adminController.deleteChallenge);
-
-// ========== ADMIN CHALLENGE PARTICIPANTS ==========
-router.get('/:challengeId/participants', authenticate, authorize('admin'), adminController.getChallengeParticipants);
-router.put('/:challengeId/complete/:userId', authenticate, authorize('admin'), adminController.completeChallengeForUser);
-router.get('/progress/stats', authenticate, authorize('admin'), adminController.getAllChallengeProgressStats);
+// ─── Admin routes ────────────────────────────────────────────────
+router.use(authorize('admin'));
+router.post('/', adminController.createChallenge);
+router.get('/all', adminController.getChallenges);              // for completed? admin uses this
+router.put('/:id', adminController.updateChallenge);
+router.delete('/:id', adminController.deleteChallenge);
+router.get('/:challengeId/participants', adminController.getChallengeParticipants);
+router.put('/:challengeId/complete/:userId', adminController.completeChallengeForUser);
+router.get('/progress/stats', adminController.getAllChallengeProgressStats);
 
 export default router;
