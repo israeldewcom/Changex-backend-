@@ -1,13 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
-import { v2 as cloudinary } from 'cloudinary';
-import { Readable } from 'stream';
 import { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import Enrollment from '../models/Enrollment.js';
 import Course from '../models/Course.js';
 import User from '../models/User.js';
 import ManualPayment from '../models/ManualPayment.js';
+import Book from '../models/Book.js';
+import { uploadToCloudinary } from '../services/cloudinary.js';
 import { validateManualPayment } from '../services/manualPaymentValidator.js';
 import { getIO } from '../socket.js';
 import Notification from '../models/Notification.js';
@@ -15,37 +15,9 @@ import Notification from '../models/Notification.js';
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// Configure Cloudinary directly
-console.log('🔧 [payment.controller] Configuring Cloudinary...');
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-console.log('✅ Cloudinary config applied. api_secret present?', !!cloudinary.config().api_secret);
-
-async function uploadReceiptToCloudinary(buffer: Buffer, folder: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: 'auto' },
-      (error, result) => {
-        if (error) {
-          console.error('Cloudinary upload error:', error);
-          reject(error);
-        } else {
-          console.log('✅ Cloudinary upload success:', result?.secure_url);
-          resolve(result!.secure_url);
-        }
-      }
-    );
-    const readable = new Readable();
-    readable.push(buffer);
-    readable.push(null);
-    readable.pipe(uploadStream);
-  });
-}
-
-// -------------------- Existing Paystack controllers (unchanged) --------------------
+// ──────────────────────────────────────────────────────────────────────
+// 1. INITIALIZE PAYSTACK TRANSACTION (Course, Subscription, Book)
+// ──────────────────────────────────────────────────────────────────────
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -71,9 +43,12 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
   }
 };
 
+// ──────────────────────────────────────────────────────────────────────
+// 2. VERIFY PAYSTACK TRANSACTION (Supports course, subscription, book)
+// ──────────────────────────────────────────────────────────────────────
 export const verifyTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { reference, courseId } = req.body;
+    const { reference, courseId, bookId } = req.body;
     const user = req.user as IUser;
     if (!reference) return res.status(400).json({ success: false, message: 'Reference required' });
 
@@ -86,19 +61,42 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
     const meta = data.metadata || {};
     const type = meta.type || 'course_purchase';
 
+    // ─── Course Purchase ────────────────────────────────────────────
     if (type === 'course_purchase' && courseId) {
       const existing = await Enrollment.findOne({ userId: user._id, courseId });
       if (!existing) {
         await Enrollment.create({ userId: user._id, courseId });
         await Course.findByIdAndUpdate(courseId, { $inc: { totalStudents: 1 } });
       }
-    } else if (type === 'subscription') {
+    }
+
+    // ─── Subscription ──────────────────────────────────────────────
+    else if (type === 'subscription') {
       await User.findByIdAndUpdate(user._id, {
         isPremium: true,
         subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
     }
 
+    // ─── Book Purchase ─────────────────────────────────────────────
+    else if (type === 'book_purchase' && bookId) {
+      const book = await Book.findById(bookId);
+      if (!book) {
+        return res.status(404).json({ success: false, message: 'Book not found' });
+      }
+      // Record purchase transaction
+      await Transaction.create({
+        userId: user._id,
+        type: 'book_purchase',
+        amount: data.amount / 100,
+        status: 'completed',
+        reference,
+        description: `Book purchase: ${book.title}`,
+        metadata: { bookId: book._id }
+      });
+    }
+
+    // ─── Record the main transaction ──────────────────────────────
     await Transaction.create({
       userId: user._id,
       type,
@@ -107,12 +105,16 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       reference,
       description: `Paystack ${type}`,
     });
+
     res.json({ success: true, message: 'Payment verified' });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.response?.data?.message || err.message });
   }
 };
 
+// ──────────────────────────────────────────────────────────────────────
+// 3. SUBSCRIBE TO PREMIUM (uses Paystack)
+// ──────────────────────────────────────────────────────────────────────
 export const subscribe = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -136,6 +138,9 @@ export const subscribe = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
+// ──────────────────────────────────────────────────────────────────────
+// 4. GET USER TRANSACTIONS
+// ──────────────────────────────────────────────────────────────────────
 export const getTransactions = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -147,6 +152,9 @@ export const getTransactions = async (req: Request, res: Response, next: NextFun
   }
 };
 
+// ──────────────────────────────────────────────────────────────────────
+// 5. REQUEST WITHDRAWAL
+// ──────────────────────────────────────────────────────────────────────
 export const withdraw = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -169,6 +177,9 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
+// ──────────────────────────────────────────────────────────────────────
+// 6. GET SAVED PAYMENT METHODS (Bank Accounts)
+// ──────────────────────────────────────────────────────────────────────
 export const getPaymentMethods = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -179,64 +190,45 @@ export const getPaymentMethods = async (req: Request, res: Response, next: NextF
   }
 };
 
-// -------------------- MANUAL PAYMENT (Admin approval only, no auto-approve) --------------------
+// ──────────────────────────────────────────────────────────────────────
+// 7. MANUAL PAYMENT SUBMISSION (Bank Transfer)
+// ──────────────────────────────────────────────────────────────────────
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if (!user) {
-      return res.status(401).json({ success: false, message: 'User not authenticated' });
-    }
+    if (!user) return res.status(401).json({ success: false, message: 'User not authenticated' });
 
     const { type, courseId, amount, reference, paymentDate } = req.body;
     const file = req.file;
+    if (!file) return res.status(400).json({ success: false, message: 'Receipt file is required' });
+    if (!reference || !amount || !paymentDate) return res.status(400).json({ success: false, message: 'Missing required fields' });
+    if (!['course', 'subscription'].includes(type)) return res.status(400).json({ success: false, message: 'Invalid payment type' });
+    if (type === 'course' && !courseId) return res.status(400).json({ success: false, message: 'Course ID is required' });
 
-    // Validation
-    if (!file) {
-      return res.status(400).json({ success: false, message: 'Receipt file is required' });
-    }
-    if (!reference || !amount || !paymentDate) {
-      return res.status(400).json({ success: false, message: 'Missing required fields: reference, amount, paymentDate' });
-    }
-    if (!['course', 'subscription'].includes(type)) {
-      return res.status(400).json({ success: false, message: 'Invalid payment type' });
-    }
-    if (type === 'course' && !courseId) {
-      return res.status(400).json({ success: false, message: 'Course ID is required for course purchase' });
-    }
-
-    // Determine expected amount (only for reference, not for auto-approve)
     let expectedAmount = 0;
+    let courseTitle = '';
     if (type === 'subscription') {
       expectedAmount = 5000;
     } else if (type === 'course' && courseId) {
       const course = await Course.findById(courseId);
-      if (!course) {
-        return res.status(404).json({ success: false, message: 'Course not found' });
-      }
+      if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
       expectedAmount = course.salePrice || course.price || 0;
+      courseTitle = course.title;
     }
+    if (expectedAmount <= 0) return res.status(400).json({ success: false, message: 'Invalid payment amount' });
 
-    if (expectedAmount <= 0) {
-      return res.status(400).json({ success: false, message: 'Invalid payment amount' });
-    }
-
-    // Upload receipt to Cloudinary
-    let receiptUrl: string;
+    let receiptUrl;
     try {
-      receiptUrl = await uploadReceiptToCloudinary(file.buffer, 'manual_payments');
-      console.log('Receipt uploaded:', receiptUrl);
+      const uploadResult = await uploadToCloudinary(file.buffer, 'manual_payments');
+      receiptUrl = uploadResult.secure_url;
     } catch (uploadError) {
-      console.error('Receipt upload failed:', uploadError);
-      return res.status(500).json({ success: false, message: 'Failed to upload receipt. Please try again.' });
+      return res.status(500).json({ success: false, message: 'Failed to upload receipt' });
     }
 
-    // Check for duplicate reference (optional, but prevents double submission)
-    const existingReference = await ManualPayment.findOne({ reference: reference.toUpperCase() });
-    if (existingReference) {
-      return res.status(400).json({ success: false, message: 'Duplicate reference number. This payment has already been submitted.' });
-    }
+    // Validate against existing references
+    const existingReferences = await ManualPayment.find({ reference }).distinct('reference');
+    const validation = await validateManualPayment(reference, Number(amount), new Date(paymentDate), expectedAmount, existingReferences as string[]);
 
-    // Create manual payment record – ALWAYS pending_review
     const manualPayment = await ManualPayment.create({
       userId: user._id,
       type,
@@ -245,11 +237,76 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       reference: reference.toUpperCase(),
       paymentDate: new Date(paymentDate),
       receiptUrl,
-      status: 'pending_review',   // Force pending review – no auto-approve
-      autoDetected: false,
+      status: validation.autoApprove ? 'approved' : 'pending_review',
+      autoDetected: validation.autoApprove,
     });
 
-    // Notify all admins (real-time socket + database notification)
+    if (validation.autoApprove) {
+      // Auto‑approve: grant access immediately
+      if (type === 'subscription') {
+        await User.findByIdAndUpdate(user._id, {
+          isPremium: true,
+          subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        });
+        await Transaction.create({
+          userId: user._id,
+          type: 'subscription',
+          amount: Number(amount),
+          status: 'completed',
+          description: `Manual payment (auto-approved) - ${reference}`,
+          reference: `MANUAL_${reference}`,
+        });
+      } else if (type === 'course' && courseId) {
+        const existingEnrollment = await Enrollment.findOne({ userId: user._id, courseId });
+        if (!existingEnrollment) {
+          await Enrollment.create({ userId: user._id, courseId });
+          await Course.findByIdAndUpdate(courseId, { $inc: { totalStudents: 1 } });
+          const course = await Course.findById(courseId);
+          if (course && course.instructorId) {
+            const instructorShare = expectedAmount * 0.8;
+            const instructor = await User.findById(course.instructorId);
+            if (instructor) {
+              instructor.walletBalance = (instructor.walletBalance || 0) + instructorShare;
+              await instructor.save();
+              await Transaction.create({
+                userId: instructor._id,
+                type: 'instructor_earning',
+                amount: instructorShare,
+                status: 'completed',
+                description: `Course sale (manual): ${course.title}`,
+              });
+            }
+          }
+        }
+        await Transaction.create({
+          userId: user._id,
+          type: 'course_purchase',
+          amount: Number(amount),
+          status: 'completed',
+          description: `Manual payment for course - ${reference}`,
+          reference: `MANUAL_${reference}`,
+        });
+      }
+
+      await Notification.create({
+        userId: user._id,
+        title: '✅ Payment Verified Automatically',
+        message: `Your payment of ₦${amount.toLocaleString()} for ${type === 'subscription' ? 'Premium subscription' : courseTitle} has been automatically verified and approved.`,
+        type: 'payment',
+      });
+      getIO().to(`user:${user._id}`).emit('notification', {
+        title: 'Payment Approved',
+        message: 'Your manual payment has been verified!',
+      });
+      return res.json({
+        success: true,
+        message: 'Payment verified automatically! Access granted.',
+        autoApproved: true,
+        data: manualPayment,
+      });
+    }
+
+    // Notify admins for manual review
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('admin_manual_payment_alert', {
@@ -258,41 +315,44 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
         userName: `${user.firstName} ${user.lastName}`,
         userEmail: user.email,
         amount: Number(amount),
-        reference: reference.toUpperCase(),
+        reference,
         type,
         receiptUrl,
+        reason: validation.reason || 'Needs manual review',
         createdAt: manualPayment.createdAt,
       });
-      
       await Notification.create({
         userId: admin._id,
         title: '📋 Manual Payment Pending Review',
-        message: `${user.firstName} ${user.lastName} submitted a manual payment of ₦${amount.toLocaleString()} for ${type}. Reference: ${reference.toUpperCase()}`,
+        message: `${user.firstName} ${user.lastName} submitted a manual payment of ₦${amount.toLocaleString()} for ${type}. Reference: ${reference}`,
         type: 'system',
         data: { paymentId: manualPayment._id, type: 'manual_payment_review' },
       });
     }
 
-    // Notify user that payment is pending
     await Notification.create({
       userId: user._id,
       title: '⏳ Payment Submitted for Review',
-      message: `Your manual payment of ₦${amount.toLocaleString()} has been submitted. An admin will review it shortly. You will be notified once approved.`,
+      message: `Your manual payment of ₦${amount.toLocaleString()} has been submitted. An admin will review it shortly.`,
       type: 'payment',
     });
 
     res.json({
       success: true,
-      message: 'Payment submitted for admin review. You will be notified once approved.',
+      message: validation.reason
+        ? `Payment submitted for admin review. Reason: ${validation.reason}`
+        : 'Payment submitted for admin review. You will be notified once approved.',
       autoApproved: false,
       data: manualPayment,
     });
   } catch (err) {
-    console.error('Manual payment submission error:', err);
     next(err);
   }
 };
 
+// ──────────────────────────────────────────────────────────────────────
+// 8. GET SINGLE MANUAL PAYMENT STATUS (for user)
+// ──────────────────────────────────────────────────────────────────────
 export const getManualPaymentStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -305,11 +365,65 @@ export const getManualPaymentStatus = async (req: Request, res: Response, next: 
   }
 };
 
+// ──────────────────────────────────────────────────────────────────────
+// 9. GET ALL MANUAL PAYMENTS FOR CURRENT USER
+// ──────────────────────────────────────────────────────────────────────
 export const getUserManualPayments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const payments = await ManualPayment.find({ userId: user._id }).sort('-createdAt');
     res.json({ success: true, data: payments });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 10. PURCHASE BOOK (NEW)
+// ──────────────────────────────────────────────────────────────────────
+export const purchaseBook = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { bookId } = req.body;
+    if (!bookId) return res.status(400).json({ success: false, message: 'Book ID required' });
+
+    const book = await Book.findById(bookId);
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+    if (book.price === 0) return res.status(400).json({ success: false, message: 'This book is free' });
+
+    const metadata = { type: 'book_purchase', bookId: book._id, userId: user._id };
+    const response = await axios.post(
+      `${PAYSTACK_BASE}/transaction/initialize`,
+      {
+        email: user.email,
+        amount: book.price * 100,
+        currency: 'NGN',
+        metadata,
+      },
+      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` } }
+    );
+    res.json({
+      success: true,
+      data: {
+        paymentUrl: response.data.data.authorization_url,
+        reference: response.data.data.reference,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// 11. CANCEL SUBSCRIPTION
+// ──────────────────────────────────────────────────────────────────────
+export const cancelSubscription = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    user.isPremium = false;
+    user.subscriptionExpires = undefined;
+    await user.save();
+    res.json({ success: true, message: 'Subscription cancelled successfully.' });
   } catch (err) {
     next(err);
   }
