@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (FULLY UPDATED)
+// FILE: src/routes/admin.routes.ts (COMPLETE)
 // ============================================================
 
 import { Router } from 'express';
@@ -67,10 +67,10 @@ router.post('/ads', adminController.createAd);
 router.get('/ads', adminController.getAds);
 router.put('/ads/:id', adminController.updateAd);
 router.delete('/ads/:id', adminController.deleteAd);
-router.get('/ads/placement/:placement', adminController.getActiveAds); // public, but kept here for admin visibility
+router.get('/ads/placement/:placement', adminController.getActiveAds);
 
 // ─── Books (Admin) ──────────────────────────────────────────────────
-router.get('/books', bookController.listAllBooks);          // admin only – sees all books
+router.get('/books', bookController.listAllBooks);
 router.post('/books', bookController.createBook);
 router.put('/books/:id', bookController.updateBook);
 router.delete('/books/:id', bookController.deleteBook);
@@ -82,7 +82,8 @@ router.get('/social-earnings/top-posts', adminController.getTopEarningPosts);
 router.get('/social-earnings/total-pool', adminController.getTotalSocialEarningsPool);
 router.post('/social-earnings/trigger', adminController.triggerSocialEarnings);
 
-// ─── Upload (NEW) ──────────────────────────────────────────────────
+// ─── Upload ──────────────────────────────────────────────────────────
 router.post('/upload', upload.single('image'), adminController.uploadImage);
+router.post('/upload-file', upload.single('file'), adminController.uploadImage);
 
 export default router;
