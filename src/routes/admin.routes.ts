@@ -1,10 +1,7 @@
-// ============================================================
-// FILE: src/routes/admin.routes.ts
-// ============================================================
-
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
+import { upload } from '../middlewares/upload.js';   // ✅ Add this import
 
 const router = Router();
 
@@ -12,38 +9,38 @@ const router = Router();
 router.use(authenticate);
 router.use(authorize('admin'));
 
-// ===== DASHBOARD =====
+// ─── Dashboard ──────────────────────────────────────────────────────
 router.get('/dashboard', adminController.getDashboard);
 
-// ===== USERS =====
+// ─── Users ──────────────────────────────────────────────────────────
 router.get('/users', adminController.getUsers);
 router.get('/users/:id/full', adminController.getUserFullDetails);
 router.patch('/users/:id', adminController.updateUserRole);
 router.patch('/users/:id/ban', adminController.toggleUserBan);
 router.post('/users/:userId/approve-instructor', adminController.approveInstructor);
 
-// ===== COURSES =====
+// ─── Courses ────────────────────────────────────────────────────────
 router.get('/courses', adminController.getAdminCourses);
 router.post('/courses/:id/approve', adminController.approveCourse);
 router.post('/courses/:id/reject', adminController.rejectCourse);
 
-// ===== WITHDRAWALS =====
+// ─── Withdrawals ────────────────────────────────────────────────────
 router.get('/withdrawals', adminController.getWithdrawals);
 router.post('/withdrawals/:id/process', adminController.processWithdrawal);
 
-// ===== ANNOUNCEMENTS =====
+// ─── Announcements ──────────────────────────────────────────────────
 router.post('/announcements', adminController.createAnnouncement);
 router.get('/announcements', adminController.getAnnouncements);
 router.delete('/announcements/:id', adminController.deleteAnnouncement);
-router.get('/announcements/latest', adminController.getPublicAnnouncements); // public, but kept for admin
+router.get('/announcements/latest', adminController.getPublicAnnouncements);
 
-// ===== COUPONS =====
+// ─── Coupons ────────────────────────────────────────────────────────
 router.get('/coupons', adminController.getCoupons);
 router.post('/coupons', adminController.createCoupon);
 router.put('/coupons/:id', adminController.updateCoupon);
 router.delete('/coupons/:id', adminController.deleteCoupon);
 
-// ===== MANUAL PAYMENTS =====
+// ─── Manual Payments ────────────────────────────────────────────────
 router.get('/manual-payments/pending', adminController.getPendingManualPayments);
 router.get('/manual-payments/all', adminController.getAllManualPayments);
 router.get('/manual-payments/stats', adminController.getManualPaymentStats);
@@ -51,7 +48,7 @@ router.get('/manual-payments/:id', adminController.getManualPaymentById);
 router.post('/manual-payments/:id/approve', adminController.approveManualPayment);
 router.post('/manual-payments/:id/reject', adminController.rejectManualPayment);
 
-// ===== CHALLENGES =====
+// ─── Challenges ──────────────────────────────────────────────────────
 router.post('/challenges', adminController.createChallenge);
 router.get('/challenges', adminController.getChallenges);
 router.put('/challenges/:id', adminController.updateChallenge);
@@ -60,20 +57,21 @@ router.get('/challenges/:challengeId/participants', adminController.getChallenge
 router.put('/challenges/:challengeId/complete/:userId', adminController.completeChallengeForUser);
 router.get('/challenges/progress/stats', adminController.getAllChallengeProgressStats);
 
-// ===== ADS =====
+// ─── Ads ──────────────────────────────────────────────────────────────
 router.post('/ads', adminController.createAd);
 router.get('/ads', adminController.getAds);
 router.put('/ads/:id', adminController.updateAd);
 router.delete('/ads/:id', adminController.deleteAd);
-// Public routes for ad serving are defined elsewhere, but admin can also see
-router.get('/ads/placement/:placement', adminController.getActiveAds);
+router.get('/ads/placement/:placement', adminController.getActiveAds);   // ✅ This is the one used by frontend
 
-// ===== SOCIAL EARNINGS =====
+// ─── Social Earnings ────────────────────────────────────────────────
 router.get('/social-earnings/config', adminController.getSocialEarningsConfig);
 router.put('/social-earnings/config', adminController.updateSocialEarningsConfig);
 router.get('/social-earnings/top-posts', adminController.getTopEarningPosts);
 router.get('/social-earnings/total-pool', adminController.getTotalSocialEarningsPool);
-// Manual trigger for social earnings distribution (admin only)
 router.post('/social-earnings/trigger', adminController.triggerSocialEarnings);
+
+// ─── Upload (NEW) ──────────────────────────────────────────────────
+router.post('/upload', upload.single('image'), adminController.uploadImage);   // ✅ Add this
 
 export default router;
