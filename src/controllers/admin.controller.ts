@@ -1226,7 +1226,7 @@ export const triggerSocialEarnings = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== FILE UPLOADS ====================
+// ==================== FILE UPLOAD (UPDATED) ====================
 
 // ─── Upload Image (for Ads, Avatars, etc.) ──────────────────────────
 export const uploadImage = async (req: Request, res: Response) => {
@@ -1270,12 +1270,11 @@ export const uploadFile = async (req: Request, res: Response) => {
 
     const result = await uploadToCloudinary(req.file.buffer, 'books', {
       resource_type: resourceType,
-      access_mode: 'public', // ✅ Makes the file publicly accessible
+      access_mode: 'public',
       use_filename: true,
       unique_filename: true,
     });
 
-    // For PDFs, Cloudinary returns a URL with /raw/upload/ – this works directly in the browser
     res.json({ success: true, data: { url: result.secure_url } });
   } catch (err) {
     console.error('Upload file error:', err);
