@@ -1,8 +1,13 @@
+// ============================================================
+// FILE: src/controllers/book.controller.ts (FULLY UPDATED WITH CLOUDINARY SIGNED URL)
+// ============================================================
+
 import { Request, Response } from 'express';
 import Book from '../models/Book.js';
 import { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import axios from 'axios';
+import cloudinary from '../config/cloudinary.js';
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
@@ -173,7 +178,7 @@ export const getBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── User: Download Book (free or paid) ─────────────────────────────
+// ─── User: Download Book (free or paid) with Signed URL ──────────────
 export const downloadBook = async (req: Request, res: Response) => {
   console.log('📚 [downloadBook] 🔥 START');
   console.log('📚 [downloadBook] Book ID:', req.params.id);
@@ -187,6 +192,7 @@ export const downloadBook = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'Book not found' });
     }
 
+    // ─── Check if user has purchased (if paid) ───────────────────────
     if (book.price > 0) {
       const purchased = await Transaction.findOne({
         userId: user._id,
@@ -201,10 +207,43 @@ export const downloadBook = async (req: Request, res: Response) => {
       console.log('📚 [downloadBook] ✅ User has purchased this book');
     }
 
+    // ─── Increment download counter ──────────────────────────────────
     book.downloads += 1;
     await book.save();
     console.log('📚 [downloadBook] ✅ Download counted:', book.downloads);
-    res.json({ success: true, data: { downloadUrl: book.fileUrl } });
+
+    // ─── Generate signed Cloudinary URL (if file is on Cloudinary) ───
+    let signedUrl = book.fileUrl;
+    if (book.fileUrl && book.fileUrl.includes('cloudinary')) {
+      try {
+        // Extract public ID from the URL
+        const urlParts = book.fileUrl.split('/');
+        const filename = urlParts[urlParts.length - 1];
+        const publicId = filename.split('.')[0];
+        const folder = urlParts.slice(urlParts.indexOf('upload') + 1, urlParts.length - 1).join('/');
+        const fullPublicId = folder ? `${folder}/${publicId}` : publicId;
+        
+        console.log('📚 [downloadBook] Generating signed URL for publicId:', fullPublicId);
+        
+        // Generate signed URL with 5-minute expiry
+        signedUrl = cloudinary.url(fullPublicId, {
+          resource_type: 'raw',
+          sign_url: true,
+          expires_at: Math.floor(Date.now() / 1000) + 300, // 5 minutes
+          secure: true,
+        });
+        console.log('📚 [downloadBook] ✅ Signed URL generated');
+      } catch (cloudinaryErr) {
+        console.error('📚 [downloadBook] ⚠️ Cloudinary signing failed, using original URL:', cloudinaryErr);
+        // Fallback to original URL (will still work if file is public)
+        signedUrl = book.fileUrl;
+      }
+    } else {
+      console.log('📚 [downloadBook] File not on Cloudinary, using stored URL');
+      signedUrl = book.fileUrl;
+    }
+
+    res.json({ success: true, data: { downloadUrl: signedUrl } });
   } catch (err) {
     console.error('📚 [downloadBook] ❌ ERROR:', err);
     res.status(500).json({ success: false, message: String(err) });
