@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (COMPLETE)
+// FILE: src/routes/admin.routes.ts (FULLY UPDATED)
 // ============================================================
 
 import { Router } from 'express';
@@ -82,8 +82,8 @@ router.get('/social-earnings/top-posts', adminController.getTopEarningPosts);
 router.get('/social-earnings/total-pool', adminController.getTotalSocialEarningsPool);
 router.post('/social-earnings/trigger', adminController.triggerSocialEarnings);
 
-// ─── Upload ──────────────────────────────────────────────────────────
-router.post('/upload', upload.single('image'), adminController.uploadImage);
-router.post('/upload-file', upload.single('file'), adminController.uploadImage);
+// ─── Upload (Universal) ──────────────────────────────────────────
+// Accepts any file field name (image, file, etc.) using `any()` middleware
+router.post('/upload', upload.any(), adminController.uploadImage);
 
 export default router;
