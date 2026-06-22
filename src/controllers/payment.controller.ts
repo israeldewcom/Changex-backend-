@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/controllers/payment.controller.ts (COMPLETE – FULLY UPDATED)
+// ============================================================
+
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { IUser } from '../models/User.js';
@@ -44,7 +48,7 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 2. VERIFY PAYSTACK TRANSACTION (Supports course, subscription, book)
+// 2. VERIFY PAYSTACK TRANSACTION
 // ──────────────────────────────────────────────────────────────────────
 export const verifyTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -61,30 +65,22 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
     const meta = data.metadata || {};
     const type = meta.type || 'course_purchase';
 
-    // ─── Course Purchase ────────────────────────────────────────────
     if (type === 'course_purchase' && courseId) {
       const existing = await Enrollment.findOne({ userId: user._id, courseId });
       if (!existing) {
         await Enrollment.create({ userId: user._id, courseId });
         await Course.findByIdAndUpdate(courseId, { $inc: { totalStudents: 1 } });
       }
-    }
-
-    // ─── Subscription ──────────────────────────────────────────────
-    else if (type === 'subscription') {
+    } else if (type === 'subscription') {
       await User.findByIdAndUpdate(user._id, {
         isPremium: true,
         subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
-    }
-
-    // ─── Book Purchase ─────────────────────────────────────────────
-    else if (type === 'book_purchase' && bookId) {
+    } else if (type === 'book_purchase' && bookId) {
       const book = await Book.findById(bookId);
       if (!book) {
         return res.status(404).json({ success: false, message: 'Book not found' });
       }
-      // Record purchase transaction
       await Transaction.create({
         userId: user._id,
         type: 'book_purchase',
@@ -92,11 +88,10 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         status: 'completed',
         reference,
         description: `Book purchase: ${book.title}`,
-        metadata: { bookId: book._id }
+        metadata: { bookId: book._id },
       });
     }
 
-    // ─── Record the main transaction ──────────────────────────────
     await Transaction.create({
       userId: user._id,
       type,
@@ -113,7 +108,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 3. SUBSCRIBE TO PREMIUM (uses Paystack)
+// 3. SUBSCRIBE TO PREMIUM
 // ──────────────────────────────────────────────────────────────────────
 export const subscribe = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -178,7 +173,7 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 6. GET SAVED PAYMENT METHODS (Bank Accounts)
+// 6. GET SAVED PAYMENT METHODS
 // ──────────────────────────────────────────────────────────────────────
 export const getPaymentMethods = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -191,7 +186,7 @@ export const getPaymentMethods = async (req: Request, res: Response, next: NextF
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 7. MANUAL PAYMENT SUBMISSION (Bank Transfer)
+// 7. MANUAL PAYMENT SUBMISSION – ADMIN REVIEW REQUIRED FOR ALL
 // ──────────────────────────────────────────────────────────────────────
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -201,9 +196,15 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
     const { type, courseId, amount, reference, paymentDate } = req.body;
     const file = req.file;
     if (!file) return res.status(400).json({ success: false, message: 'Receipt file is required' });
-    if (!reference || !amount || !paymentDate) return res.status(400).json({ success: false, message: 'Missing required fields' });
-    if (!['course', 'subscription'].includes(type)) return res.status(400).json({ success: false, message: 'Invalid payment type' });
-    if (type === 'course' && !courseId) return res.status(400).json({ success: false, message: 'Course ID is required' });
+    if (!reference || !amount || !paymentDate) {
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+    if (!['course', 'subscription'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment type' });
+    }
+    if (type === 'course' && !courseId) {
+      return res.status(400).json({ success: false, message: 'Course ID is required' });
+    }
 
     let expectedAmount = 0;
     let courseTitle = '';
@@ -215,7 +216,9 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       expectedAmount = course.salePrice || course.price || 0;
       courseTitle = course.title;
     }
-    if (expectedAmount <= 0) return res.status(400).json({ success: false, message: 'Invalid payment amount' });
+    if (expectedAmount <= 0) {
+      return res.status(400).json({ success: false, message: 'Invalid payment amount' });
+    }
 
     let receiptUrl;
     try {
@@ -225,10 +228,17 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(500).json({ success: false, message: 'Failed to upload receipt' });
     }
 
-    // Validate against existing references
+    // Validate but do NOT auto‑approve – always send to admin review
     const existingReferences = await ManualPayment.find({ reference }).distinct('reference');
-    const validation = await validateManualPayment(reference, Number(amount), new Date(paymentDate), expectedAmount, existingReferences as string[]);
+    const validation = await validateManualPayment(
+      reference,
+      Number(amount),
+      new Date(paymentDate),
+      expectedAmount,
+      existingReferences as string[]
+    );
 
+    // ✅ Always create as pending_review – no auto‑approval
     const manualPayment = await ManualPayment.create({
       userId: user._id,
       type,
@@ -237,76 +247,12 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       reference: reference.toUpperCase(),
       paymentDate: new Date(paymentDate),
       receiptUrl,
-      status: validation.autoApprove ? 'approved' : 'pending_review',
-      autoDetected: validation.autoApprove,
+      status: 'pending_review',
+      autoDetected: false,
+      adminNote: validation.isValid ? 'Valid format, pending admin review' : 'Format validation failed – admin review required',
     });
 
-    if (validation.autoApprove) {
-      // Auto‑approve: grant access immediately
-      if (type === 'subscription') {
-        await User.findByIdAndUpdate(user._id, {
-          isPremium: true,
-          subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-        });
-        await Transaction.create({
-          userId: user._id,
-          type: 'subscription',
-          amount: Number(amount),
-          status: 'completed',
-          description: `Manual payment (auto-approved) - ${reference}`,
-          reference: `MANUAL_${reference}`,
-        });
-      } else if (type === 'course' && courseId) {
-        const existingEnrollment = await Enrollment.findOne({ userId: user._id, courseId });
-        if (!existingEnrollment) {
-          await Enrollment.create({ userId: user._id, courseId });
-          await Course.findByIdAndUpdate(courseId, { $inc: { totalStudents: 1 } });
-          const course = await Course.findById(courseId);
-          if (course && course.instructorId) {
-            const instructorShare = expectedAmount * 0.8;
-            const instructor = await User.findById(course.instructorId);
-            if (instructor) {
-              instructor.walletBalance = (instructor.walletBalance || 0) + instructorShare;
-              await instructor.save();
-              await Transaction.create({
-                userId: instructor._id,
-                type: 'instructor_earning',
-                amount: instructorShare,
-                status: 'completed',
-                description: `Course sale (manual): ${course.title}`,
-              });
-            }
-          }
-        }
-        await Transaction.create({
-          userId: user._id,
-          type: 'course_purchase',
-          amount: Number(amount),
-          status: 'completed',
-          description: `Manual payment for course - ${reference}`,
-          reference: `MANUAL_${reference}`,
-        });
-      }
-
-      await Notification.create({
-        userId: user._id,
-        title: '✅ Payment Verified Automatically',
-        message: `Your payment of ₦${amount.toLocaleString()} for ${type === 'subscription' ? 'Premium subscription' : courseTitle} has been automatically verified and approved.`,
-        type: 'payment',
-      });
-      getIO().to(`user:${user._id}`).emit('notification', {
-        title: 'Payment Approved',
-        message: 'Your manual payment has been verified!',
-      });
-      return res.json({
-        success: true,
-        message: 'Payment verified automatically! Access granted.',
-        autoApproved: true,
-        data: manualPayment,
-      });
-    }
-
-    // Notify admins for manual review
+    // Notify admins
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('admin_manual_payment_alert', {
@@ -318,7 +264,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
         reference,
         type,
         receiptUrl,
-        reason: validation.reason || 'Needs manual review',
+        reason: validation.isValid ? 'Valid payment, awaiting admin approval' : validation.reason || 'Format mismatch, manual review required',
         createdAt: manualPayment.createdAt,
       });
       await Notification.create({
@@ -330,18 +276,19 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       });
     }
 
+    // Notify user
     await Notification.create({
       userId: user._id,
       title: '⏳ Payment Submitted for Review',
-      message: `Your manual payment of ₦${amount.toLocaleString()} has been submitted. An admin will review it shortly.`,
+      message: `Your manual payment of ₦${amount.toLocaleString()} has been submitted. An admin will review it shortly. You will be notified once approved.`,
       type: 'payment',
     });
 
     res.json({
       success: true,
-      message: validation.reason
-        ? `Payment submitted for admin review. Reason: ${validation.reason}`
-        : 'Payment submitted for admin review. You will be notified once approved.',
+      message: validation.isValid
+        ? 'Payment submitted for admin review. You will be notified once approved.'
+        : 'Payment submitted for admin review. Please ensure all details are correct.',
       autoApproved: false,
       data: manualPayment,
     });
@@ -351,7 +298,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 8. GET SINGLE MANUAL PAYMENT STATUS (for user)
+// 8. GET SINGLE MANUAL PAYMENT STATUS
 // ──────────────────────────────────────────────────────────────────────
 export const getManualPaymentStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -379,7 +326,7 @@ export const getUserManualPayments = async (req: Request, res: Response, next: N
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 10. PURCHASE BOOK (NEW)
+// 10. PURCHASE BOOK
 // ──────────────────────────────────────────────────────────────────────
 export const purchaseBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
