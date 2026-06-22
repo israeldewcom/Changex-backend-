@@ -1,7 +1,3 @@
-// ============================================================
-// FILE: src/routes/admin.routes.ts (FULLY UPDATED)
-// ============================================================
-
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller.js';
 import * as bookController from '../controllers/book.controller.js';
@@ -10,7 +6,6 @@ import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
-// All admin routes require authentication and admin role
 router.use(authenticate);
 router.use(authorize('admin'));
 
@@ -82,8 +77,11 @@ router.get('/social-earnings/top-posts', adminController.getTopEarningPosts);
 router.get('/social-earnings/total-pool', adminController.getTotalSocialEarningsPool);
 router.post('/social-earnings/trigger', adminController.triggerSocialEarnings);
 
-// ─── Upload (Universal) ──────────────────────────────────────────
-// Accepts any file field name (image, file, etc.) using `any()` middleware
-router.post('/upload', upload.any(), adminController.uploadImage);
+// ─── Upload Routes ──────────────────────────────────────────────────
+// For images (ads, avatars) – expects field name 'image'
+router.post('/upload', upload.single('image'), adminController.uploadImage);
+
+// For files (PDFs, documents) – expects field name 'file'
+router.post('/upload-file', upload.single('file'), adminController.uploadFile);
 
 export default router;
