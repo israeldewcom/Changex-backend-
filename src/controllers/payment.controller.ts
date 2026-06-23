@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/payment.controller.ts (COMPLETE – FULLY UPDATED)
+// FILE: src/controllers/payment.controller.ts (COMPLETE - FULLY UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -11,6 +11,8 @@ import Course from '../models/Course.js';
 import User from '../models/User.js';
 import ManualPayment from '../models/ManualPayment.js';
 import Book from '../models/Book.js';
+import Referral from '../models/Referral.js';
+import AffiliateLink from '../models/AffiliateLink.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { validateManualPayment } from '../services/manualPaymentValidator.js';
 import { getIO } from '../socket.js';
@@ -28,10 +30,13 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
     if (!user) return res.status(401).json({ success: false, message: 'User not authenticated' });
     const { email, amount, currency = 'NGN', metadata } = req.body;
     let finalMetadata = metadata || {};
+    
+    // Add referral code if available
     if (!finalMetadata.referralCode && user.referredBy) {
       const referrer = await User.findById(user.referredBy);
       if (referrer) finalMetadata.referralCode = referrer.referralCode;
     }
+    
     const userEmail = email || user.email;
     if (!userEmail) return res.status(400).json({ success: false, message: 'Email is required' });
     if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Valid amount is required' });
@@ -48,7 +53,7 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 2. VERIFY PAYSTACK TRANSACTION
+// 2. VERIFY PAYSTACK TRANSACTION (with Referral & Affiliate handling)
 // ──────────────────────────────────────────────────────────────────────
 export const verifyTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -64,19 +69,120 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
 
     const meta = data.metadata || {};
     const type = meta.type || 'course_purchase';
+    const referralCode = meta.referralCode ? String(meta.referralCode).trim().toUpperCase() : null;
+    const affiliateCode = meta.affiliateCode ? String(meta.affiliateCode).trim() : null;
+    const course = courseId ? await Course.findById(courseId) : null;
+    let coursePrice = 0;
 
+    // ─── Course Purchase ──────────────────────────────────────────────
     if (type === 'course_purchase' && courseId) {
       const existing = await Enrollment.findOne({ userId: user._id, courseId });
       if (!existing) {
         await Enrollment.create({ userId: user._id, courseId });
         await Course.findByIdAndUpdate(courseId, { $inc: { totalStudents: 1 } });
+        
+        // Get course for revenue share
+        const courseData = await Course.findById(courseId);
+        if (courseData) {
+          coursePrice = courseData.salePrice || courseData.price || 0;
+          
+          // Instructor gets 80%
+          if (courseData.instructorId) {
+            const instructorShare = coursePrice * 0.8;
+            const instructor = await User.findById(courseData.instructorId);
+            if (instructor) {
+              instructor.walletBalance = (instructor.walletBalance || 0) + instructorShare;
+              await instructor.save();
+              await Transaction.create({
+                userId: instructor._id,
+                type: 'instructor_earning',
+                amount: instructorShare,
+                status: 'completed',
+                description: `Course sale: ${courseData.title}`,
+                metadata: { courseId: courseData._id, studentId: user._id }
+              });
+            }
+          }
+        }
       }
-    } else if (type === 'subscription') {
+
+      // ─── Affiliate Commission ──────────────────────────────────────
+      if (affiliateCode && course) {
+        const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
+        if (affiliateLink && affiliateLink.courseId.toString() === courseId) {
+          const price = course.salePrice || course.price || 0;
+          const percent = course.affiliatePercent || 15;
+          const commission = price * (percent / 100);
+          
+          affiliateLink.conversions += 1;
+          affiliateLink.totalEarned += commission;
+          await affiliateLink.save();
+          
+          const affiliate = await User.findById(affiliateLink.userId);
+          if (affiliate) {
+            affiliate.walletBalance = (affiliate.walletBalance || 0) + commission;
+            await affiliate.save();
+            await Transaction.create({
+              userId: affiliate._id,
+              type: 'affiliate_commission',
+              amount: commission,
+              status: 'completed',
+              description: `Affiliate commission for course: ${course.title}`,
+              metadata: { courseId: course._id, studentId: user._id, affiliateCode }
+            });
+          }
+        }
+      }
+
+      // ─── Referral Commission (only if no affiliate) ──────────────
+      if (referralCode && !affiliateCode && course) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== user._id.toString()) {
+          const referrerShare = coursePrice * 0.1;
+          referrer.walletBalance = (referrer.walletBalance || 0) + referrerShare;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_commission',
+            amount: referrerShare,
+            status: 'completed',
+            description: `Referral commission for course: ${course.title}`,
+            metadata: { courseId: course._id, studentId: user._id }
+          });
+        }
+      }
+    }
+
+    // ─── Subscription (Premium) ──────────────────────────────────────
+    else if (type === 'subscription') {
+      const referral = await Referral.findOne({ referredId: user._id, status: 'pending' });
+      if (referral) {
+        referral.status = 'converted';
+        referral.earned = 500;
+        await referral.save();
+        
+        const referrer = await User.findById(referral.referrerId);
+        if (referrer) {
+          referrer.walletBalance = (referrer.walletBalance || 0) + 500;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_bonus',
+            amount: 500,
+            status: 'completed',
+            description: 'Referral bonus for premium subscription'
+          });
+        }
+      }
+      
       await User.findByIdAndUpdate(user._id, {
         isPremium: true,
         subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
-    } else if (type === 'book_purchase' && bookId) {
+    }
+
+    // ─── Book Purchase ──────────────────────────────────────────────
+    else if (type === 'book_purchase' && bookId) {
       const book = await Book.findById(bookId);
       if (!book) {
         return res.status(404).json({ success: false, message: 'Book not found' });
@@ -92,6 +198,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       });
     }
 
+    // ─── Record the main transaction ──────────────────────────────────
     await Transaction.create({
       userId: user._id,
       type,
@@ -99,9 +206,22 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       status: 'completed',
       reference,
       description: `Paystack ${type}`,
+      metadata: { ...meta, referralCode, affiliateCode }
     });
 
-    res.json({ success: true, message: 'Payment verified' });
+    // ─── Update user wallet balance ──────────────────────────────────
+    // (already updated above via instructor/affiliate/referrer updates)
+    // Refresh user object to get updated balance
+    const updatedUser = await User.findById(user._id);
+    if (updatedUser) {
+      // Emit wallet update via socket
+      getIO().to(`user:${user._id}`).emit('wallet_updated', {
+        balance: updatedUser.walletBalance,
+        userId: user._id
+      });
+    }
+
+    res.json({ success: true, message: 'Payment verified', data: { balance: updatedUser?.walletBalance || 0 } });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.response?.data?.message || err.message });
   }
@@ -121,7 +241,13 @@ export const subscribe = async (req: Request, res: Response, next: NextFunction)
       const referrer = await User.findById(user.referredBy);
       if (referrer) finalReferralCode = referrer.referralCode;
     }
-    const metadata = { userId: user._id, type: 'subscription', plan, referralCode: finalReferralCode };
+    const metadata = { 
+      userId: user._id, 
+      type: 'subscription', 
+      plan, 
+      referralCode: finalReferralCode,
+      discountApplied: false
+    };
     const response = await axios.post(
       `${PAYSTACK_BASE}/transaction/initialize`,
       { email: user.email, amount: amount * 100, currency: 'NGN', metadata },
@@ -186,7 +312,7 @@ export const getPaymentMethods = async (req: Request, res: Response, next: NextF
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 7. MANUAL PAYMENT SUBMISSION – ADMIN REVIEW REQUIRED FOR ALL
+// 7. MANUAL PAYMENT SUBMISSION – SUPPORTS 'course' AND 'subscription'
 // ──────────────────────────────────────────────────────────────────────
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -200,21 +326,22 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
     if (!['course', 'subscription'].includes(type)) {
-      return res.status(400).json({ success: false, message: 'Invalid payment type' });
+      return res.status(400).json({ success: false, message: 'Invalid payment type. Must be "course" or "subscription"' });
     }
     if (type === 'course' && !courseId) {
-      return res.status(400).json({ success: false, message: 'Course ID is required' });
+      return res.status(400).json({ success: false, message: 'Course ID is required for course purchase' });
     }
 
     let expectedAmount = 0;
     let courseTitle = '';
+    let courseData = null;
     if (type === 'subscription') {
       expectedAmount = 5000;
     } else if (type === 'course' && courseId) {
-      const course = await Course.findById(courseId);
-      if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-      expectedAmount = course.salePrice || course.price || 0;
-      courseTitle = course.title;
+      courseData = await Course.findById(courseId);
+      if (!courseData) return res.status(404).json({ success: false, message: 'Course not found' });
+      expectedAmount = courseData.salePrice || courseData.price || 0;
+      courseTitle = courseData.title;
     }
     if (expectedAmount <= 0) {
       return res.status(400).json({ success: false, message: 'Invalid payment amount' });
@@ -238,7 +365,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       existingReferences as string[]
     );
 
-    // ✅ Always create as pending_review – no auto‑approval
+    // Always create as pending_review – no auto‑approval
     const manualPayment = await ManualPayment.create({
       userId: user._id,
       type,
@@ -293,6 +420,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       data: manualPayment,
     });
   } catch (err) {
+    console.error('Manual payment submission error:', err);
     next(err);
   }
 };
@@ -338,7 +466,12 @@ export const purchaseBook = async (req: Request, res: Response, next: NextFuncti
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
     if (book.price === 0) return res.status(400).json({ success: false, message: 'This book is free' });
 
-    const metadata = { type: 'book_purchase', bookId: book._id, userId: user._id };
+    const metadata = { 
+      type: 'book_purchase', 
+      bookId: book._id, 
+      userId: user._id,
+      referralCode: user.referredBy ? (await User.findById(user.referredBy))?.referralCode : null
+    };
     const response = await axios.post(
       `${PAYSTACK_BASE}/transaction/initialize`,
       {
