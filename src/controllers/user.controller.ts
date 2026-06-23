@@ -139,20 +139,33 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
   } catch (err) { next(err); }
 };
 
+// ─── Welcome Bonus (updated to use hasClaimedWelcomeBonus) ──────────
 export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if ((user as any).welcomeBonusClaimed) return res.status(400).json({ success: false, message: 'Bonus already claimed' });
-    if (!user.bio && !user.location) return res.status(400).json({ success: false, message: 'Complete your profile first' });
+    if (user.hasClaimedWelcomeBonus) {
+      return res.status(400).json({ success: false, message: 'Bonus already claimed' });
+    }
+    if (!user.bio && !user.location) {
+      return res.status(400).json({ success: false, message: 'Complete your profile first' });
+    }
     user.walletBalance += 500;
-    (user as any).welcomeBonusClaimed = true;
+    user.hasClaimedWelcomeBonus = true;
     await user.save();
-    await Transaction.create({ userId: user._id, type: 'bonus', amount: 500, status: 'completed', description: 'Welcome bonus' });
+
+    await Transaction.create({
+      userId: user._id,
+      type: 'bonus',
+      amount: 500,
+      status: 'completed',
+      description: 'Welcome bonus',
+    });
+
     res.json({ success: true, message: '₦500 added to your wallet', balance: user.walletBalance });
   } catch (err) { next(err); }
 };
 
-// ========== NEW: Get User Profile (Public) ==========
+// ─── Public Profile ───────────────────────────────────────────────────
 export const getUserProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params;
