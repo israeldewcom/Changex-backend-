@@ -23,7 +23,8 @@ export interface ICourse extends Document {
   instructorId: mongoose.Types.ObjectId;
   slug?: string;
   certificateTemplate?: string;
-  quizzes?: Array<{
+  views: number;
+  quizzes: Array<{
     title: string;
     questions: Array<{
       question: string;
@@ -61,6 +62,7 @@ const CourseSchema = new Schema<ICourse>(
     instructorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     slug: { type: String, unique: true, sparse: true },
     certificateTemplate: { type: String, default: '' },
+    views: { type: Number, default: 0 },
     quizzes: {
       type: [{
         title: String,
