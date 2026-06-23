@@ -5,16 +5,17 @@ import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
-// Public routes (no auth)
+// Public routes
 router.get('/', postController.getPublishedPosts);
 router.get('/slug/:slug', postController.getPostBySlug);
 router.get('/user/:userId', postController.getUserPosts);
 router.get('/:id/analytics', postController.getPostAnalytics);
 
-// ─── Authenticated routes ────────────────────────────────────────────
+// Authenticated routes
 router.use(authenticate);
 router.get('/following', postController.getFollowingFeed);
-router.get('/personalized', postController.getPersonalizedFeed);   // ✅ This is the "For You" route
+router.get('/personalized', postController.getPersonalizedFeed);
+router.get('/my/titles', postController.getMyPostTitles);
 router.post('/', postController.createPost);
 router.put('/:id', postController.updatePost);
 router.put('/:id/publish', postController.publishPost);
