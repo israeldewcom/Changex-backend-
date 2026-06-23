@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (FULL – with referral bonus on manual subscription)
+// FILE: src/controllers/admin.controller.ts (COMPLETE – FULLY UPDATED)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -21,6 +21,7 @@ import PostAnalytics from '../models/PostAnalytics.js';
 import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
 import Book from '../models/Book.js';
 import Referral from '../models/Referral.js';
+import AffiliateLink from '../models/AffiliateLink.js'; // ✅ ADDED THIS IMPORT
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 
@@ -627,7 +628,7 @@ export const getManualPaymentById = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== APPROVE MANUAL PAYMENT (UPDATED – with referral bonus) ====================
+// ==================== APPROVE MANUAL PAYMENT (UPDATED – with referral bonus and affiliate) ====================
 export const approveManualPayment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
