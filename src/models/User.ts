@@ -29,7 +29,7 @@ export interface IUser extends Document {
   };
   preferredCurrency: string;
   welcomeBonusClaimed: boolean;
-  hasClaimedWelcomeBonus: boolean; // added
+  hasClaimedWelcomeBonus: boolean;
   isBanned: boolean;
   seoSlug?: string;
   socialLinks?: {
@@ -76,7 +76,7 @@ const UserSchema = new Schema<IUser>(
     },
     preferredCurrency: { type: String, default: 'NGN' },
     welcomeBonusClaimed: { type: Boolean, default: false },
-    hasClaimedWelcomeBonus: { type: Boolean, default: false }, // added
+    hasClaimedWelcomeBonus: { type: Boolean, default: false },
     isBanned: { type: Boolean, default: false },
     seoSlug: { type: String, unique: true, sparse: true },
     socialLinks: {
