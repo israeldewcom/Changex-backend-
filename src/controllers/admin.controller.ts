@@ -19,7 +19,7 @@ import Ad from '../models/Ad.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
 import PostAnalytics from '../models/PostAnalytics.js';
 import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
-import Book from '../models/Book.js'; // added
+import Book from '../models/Book.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 
@@ -647,7 +647,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       const course = await Course.findById(payment.metadata?.courseId || payment.courseId);
       if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
-      // Enroll user
       const existingEnrollment = await Enrollment.findOne({ userId: payment.userId, courseId: course._id });
       if (!existingEnrollment) {
         await Enrollment.create({ userId: payment.userId, courseId: course._id });
@@ -675,7 +674,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
-      // User purchase transaction
       await Transaction.create({
         userId: payment.userId,
         type: 'course_purchase',
@@ -711,7 +709,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       const book = await Book.findById(bookId);
       if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-      // Create purchase transaction
       await Transaction.create({
         userId: payment.userId,
         type: 'book_purchase',
@@ -722,19 +719,16 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         metadata: { bookId: book._id },
       });
 
-      // Increment downloads (optional)
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
     }
 
-    // Mark payment as approved
     payment.status = 'approved';
     payment.adminNote = adminNote;
     payment.approvedBy = admin._id;
     payment.approvedAt = new Date();
     await payment.save();
 
-    // Notify user
     await Notification.create({
       userId: payment.userId,
       title: '✅ Manual Payment Approved',
