@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE – FULLY UPDATED)
+// FILE: src/controllers/admin.controller.ts (FULL – with referral bonus on manual subscription)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -20,6 +20,7 @@ import ChallengeProgress from '../models/ChallengeProgress.js';
 import PostAnalytics from '../models/PostAnalytics.js';
 import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
 import Book from '../models/Book.js';
+import Referral from '../models/Referral.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 
@@ -626,7 +627,7 @@ export const getManualPaymentById = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== APPROVE MANUAL PAYMENT (UPDATED) ====================
+// ==================== APPROVE MANUAL PAYMENT (UPDATED – with referral bonus) ====================
 export const approveManualPayment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -654,12 +655,44 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         await course.save();
       }
 
-      // Instructor earnings (80%)
+      // Affiliate commission (if any)
+      const affiliateCode = payment.metadata?.affiliateCode;
+      let affiliateCommission = 0;
+      if (affiliateCode) {
+        const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
+        if (affiliateLink) {
+          const percent = course.affiliatePercent || 15;
+          affiliateCommission = (course.salePrice || course.price || 0) * (percent / 100);
+          affiliateLink.conversions += 1;
+          affiliateLink.totalEarned = (affiliateLink.totalEarned || 0) + affiliateCommission;
+          await affiliateLink.save();
+
+          const affiliate = await User.findById(affiliateLink.userId);
+          if (affiliate) {
+            affiliate.walletBalance = (affiliate.walletBalance || 0) + affiliateCommission;
+            await affiliate.save();
+            await Transaction.create({
+              userId: affiliate._id,
+              type: 'affiliate_commission',
+              amount: affiliateCommission,
+              status: 'completed',
+              description: `Commission for course: ${course.title} (manual approval)`,
+              reference: payment.reference,
+              metadata: { courseId: course._id },
+            });
+          }
+        }
+      }
+
+      // Net amount after affiliate
+      const price = course.salePrice || course.price || 0;
+      const netAmount = price - affiliateCommission;
+      const instructorShare = netAmount * 0.8;
+
+      // Instructor earnings
       if (course.instructorId) {
         const instructor = await User.findById(course.instructorId);
         if (instructor) {
-          const price = course.salePrice || course.price || 0;
-          const instructorShare = price * 0.8;
           instructor.walletBalance = (instructor.walletBalance || 0) + instructorShare;
           await instructor.save();
           await Transaction.create({
@@ -667,7 +700,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
             type: 'instructor_earning',
             amount: instructorShare,
             status: 'completed',
-            description: `Manual course sale: ${course.title} (admin approved)`,
+            description: `Manual course sale (net after affiliate): ${course.title}`,
             reference: payment.reference,
             metadata: { courseId: course._id },
           });
@@ -700,6 +733,28 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         description: 'Manual premium subscription (admin approved)',
         reference: payment.reference,
       });
+
+      // Referral bonus ₦500
+      const referralCode = payment.metadata?.referralCode;
+      if (referralCode) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== payment.userId.toString()) {
+          referrer.walletBalance = (referrer.walletBalance || 0) + 500;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_bonus',
+            amount: 500,
+            status: 'completed',
+            description: `Referral bonus for new subscriber (manual approval)`,
+            reference: payment.reference,
+          });
+          await Referral.findOneAndUpdate(
+            { referredId: payment.userId, status: 'pending' },
+            { status: 'converted', earned: 500 }
+          );
+        }
+      }
     }
 
     // ─── BOOK PURCHASE ──────────────────────────────────────────────────────
