@@ -29,8 +29,9 @@ export interface IUser extends Document {
   };
   preferredCurrency: string;
   welcomeBonusClaimed: boolean;
+  hasClaimedWelcomeBonus: boolean; // added
   isBanned: boolean;
-  seoSlug?: string; // for public profile
+  seoSlug?: string;
   socialLinks?: {
     twitter?: string;
     github?: string;
@@ -75,6 +76,7 @@ const UserSchema = new Schema<IUser>(
     },
     preferredCurrency: { type: String, default: 'NGN' },
     welcomeBonusClaimed: { type: Boolean, default: false },
+    hasClaimedWelcomeBonus: { type: Boolean, default: false }, // added
     isBanned: { type: Boolean, default: false },
     seoSlug: { type: String, unique: true, sparse: true },
     socialLinks: {
@@ -91,7 +93,6 @@ UserSchema.index({ email: 1 });
 UserSchema.index({ referralCode: 1 });
 UserSchema.index({ seoSlug: 1 });
 
-// Generate seoSlug from name if not provided
 UserSchema.pre('save', function(next) {
   if (!this.seoSlug && this.firstName && this.lastName) {
     this.seoSlug = `${this.firstName.toLowerCase()}-${this.lastName.toLowerCase()}-${this._id.toString().slice(-6)}`;
