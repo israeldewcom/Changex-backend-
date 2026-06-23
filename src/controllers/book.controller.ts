@@ -1,18 +1,12 @@
-// ============================================================
-// FILE: src/controllers/book.controller.ts (FIXED – DOWNLOAD WORKS)
-// ============================================================
-
 import { Request, Response } from 'express';
-import axios from 'axios';
 import Book from '../models/Book.js';
 import { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
-import { uploadToCloudinary } from '../services/cloudinary.js';
+import axios from 'axios';
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// ─── Admin: Create Book ──────────────────────────────────────────────
 export const createBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -23,10 +17,10 @@ export const createBook = async (req: Request, res: Response) => {
     const book = await Book.create({
       title,
       author,
-      description,
+      description: description || '',
       price: price || 0,
-      coverImage,
-      fileUrl, // ✅ Full Cloudinary URL
+      coverImage: coverImage || '',
+      fileUrl,
       uploadedBy: user._id,
     });
     res.status(201).json({ success: true, data: book });
@@ -35,7 +29,6 @@ export const createBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── Admin: Update Book ──────────────────────────────────────────────
 export const updateBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -50,7 +43,6 @@ export const updateBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── Admin: Delete Book ──────────────────────────────────────────────
 export const deleteBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -64,27 +56,24 @@ export const deleteBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── Admin: List All Books ───────────────────────────────────────────
 export const listAllBooks = async (req: Request, res: Response) => {
   try {
-    const books = await Book.find().sort('-createdAt');
+    const books = await Book.find().sort({ createdAt: -1 });
     res.json({ success: true, data: books });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
-// ─── User: List Published Books ──────────────────────────────────────
 export const listBooks = async (req: Request, res: Response) => {
   try {
-    const books = await Book.find({ isPublished: true }).sort('-createdAt');
+    const books = await Book.find({ isPublished: true }).sort({ createdAt: -1 });
     res.json({ success: true, data: books });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
-// ─── User: Get Single Book ───────────────────────────────────────────
 export const getBook = async (req: Request, res: Response) => {
   try {
     const book = await Book.findById(req.params.id);
@@ -97,14 +86,12 @@ export const getBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── User: Download Book (streams from Cloudinary) ──────────────────
 export const downloadBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
     const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-    // Check if paid
     if (book.price > 0) {
       const purchased = await Transaction.findOne({
         userId: user._id,
@@ -117,23 +104,14 @@ export const downloadBook = async (req: Request, res: Response) => {
       }
     }
 
-    // ✅ Increment downloads
     book.downloads += 1;
     await book.save();
-
-    // ✅ If fileUrl is a full Cloudinary URL, redirect to it
-    if (book.fileUrl && book.fileUrl.startsWith('http')) {
-      return res.json({ success: true, data: { downloadUrl: book.fileUrl } });
-    }
-
-    // ❌ If fileUrl is missing or invalid, return error
-    return res.status(404).json({ success: false, message: 'File not found. Please contact support.' });
+    res.json({ success: true, data: { downloadUrl: book.fileUrl } });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
-// ─── User: Purchase Book ─────────────────────────────────────────────
 export const purchaseBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
