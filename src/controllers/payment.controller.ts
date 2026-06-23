@@ -355,19 +355,31 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       existingReferences as string[]
     );
 
-    const manualPayment = await ManualPayment.create({
-      userId: user._id,
-      type,
-      courseId: type === 'course' ? courseId : undefined,
-      amount: Number(amount),
-      reference: reference.toUpperCase(),
-      paymentDate: new Date(paymentDate),
-      receiptUrl,
-      status: 'pending_review',
-      autoDetected: false,
-      adminNote: validation.isValid ? 'Valid format, pending admin review' : 'Format validation failed – admin review required',
-      metadata,
-    });
+    let manualPayment;
+    try {
+      manualPayment = await ManualPayment.create({
+        userId: user._id,
+        type,
+        courseId: type === 'course' ? courseId : undefined,
+        amount: Number(amount),
+        reference: reference.toUpperCase(),
+        paymentDate: new Date(paymentDate),
+        receiptUrl,
+        status: 'pending_review',
+        autoDetected: false,
+        adminNote: validation.isValid ? 'Valid format, pending admin review' : 'Format validation failed – admin review required',
+        metadata,
+      });
+    } catch (err: any) {
+      if (err.code === 11000) {
+        return res.status(400).json({
+          success: false,
+          message: 'This reference has already been used. Please use a unique transaction reference.'
+        });
+      }
+      console.error('ManualPayment creation error:', err);
+      return res.status(500).json({ success: false, message: 'Failed to create manual payment request.' });
+    }
 
     // Notify admins
     const admins = await User.find({ roles: 'admin' }).select('_id');
