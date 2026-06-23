@@ -2,7 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IManualPayment extends Document {
   userId: mongoose.Types.ObjectId;
-  type: 'course' | 'subscription';
+  type: 'course' | 'subscription' | 'book';
   courseId?: mongoose.Types.ObjectId;
   amount: number;
   reference: string;
@@ -14,6 +14,7 @@ export interface IManualPayment extends Document {
   rejectionReason?: string;
   approvedBy?: mongoose.Types.ObjectId;
   approvedAt?: Date;
+  metadata?: Record<string, any>; // ✅ Added for courseId, bookId, etc.
   createdAt: Date;
   updatedAt: Date;
 }
@@ -21,7 +22,7 @@ export interface IManualPayment extends Document {
 const ManualPaymentSchema = new Schema<IManualPayment>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    type: { type: String, enum: ['course', 'subscription'], required: true },
+    type: { type: String, enum: ['course', 'subscription', 'book'], required: true },
     courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
     amount: { type: Number, required: true },
     reference: { type: String, required: true, unique: true },
@@ -37,6 +38,7 @@ const ManualPaymentSchema = new Schema<IManualPayment>(
     rejectionReason: String,
     approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedAt: Date,
+    metadata: { type: Schema.Types.Mixed, default: {} }, // ✅ Added
   },
   { timestamps: true }
 );
