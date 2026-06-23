@@ -42,13 +42,68 @@ export const uploadAvatar = async (req: Request, res: Response, next: NextFuncti
 export const getWallet = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(50);
+    
+    // Get all completed transactions for this user
+    const transactions = await Transaction.find({ userId: user._id, status: 'completed' }).sort('-createdAt').limit(50);
+    
+    // Calculate breakdowns by type
+    const breakdown = {
+      referralEarnings: 0,
+      courseBonuses: 0,
+      affiliateCommissions: 0,
+      instructorEarnings: 0,
+      welcomeBonus: 0,
+      totalEarnings: 0,
+    };
+
+    for (const tx of transactions) {
+      const amount = Number(tx.amount) || 0;
+      // Only count positive amounts as earnings (income)
+      if (amount > 0) {
+        switch (tx.type) {
+          case 'referral_bonus':
+          case 'referral_commission':
+            breakdown.referralEarnings += amount;
+            break;
+          case 'bonus':
+            // Welcome bonus is stored as 'bonus' with description containing 'welcome'
+            if (tx.description && tx.description.toLowerCase().includes('welcome')) {
+              breakdown.welcomeBonus += amount;
+            } else {
+              breakdown.courseBonuses += amount; // other bonuses (course completion, challenges)
+            }
+            break;
+          case 'affiliate_commission':
+            breakdown.affiliateCommissions += amount;
+            break;
+          case 'instructor_earning':
+            breakdown.instructorEarnings += amount;
+            break;
+          default:
+            // Other types like 'withdrawal' are negative, but we skip them above
+            break;
+        }
+      }
+    }
+
+    // Also include welcome bonus from user's hasClaimedWelcomeBonus flag if not captured
+    if (user.hasClaimedWelcomeBonus && breakdown.welcomeBonus === 0) {
+      // If welcome bonus was claimed but not in transactions (e.g., older data), add 500
+      breakdown.welcomeBonus = 500;
+    }
+
+    breakdown.totalEarnings = breakdown.referralEarnings + breakdown.courseBonuses + breakdown.affiliateCommissions + breakdown.instructorEarnings + breakdown.welcomeBonus;
+
+    // Fetch recent transactions (same as before)
+    const recentTransactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(50);
+
     res.json({
       success: true,
       data: {
         balance: Number(user.walletBalance) || 0,
         pending: Number(user.pendingWithdrawal) || 0,
-        transactions,
+        transactions: recentTransactions,
+        earningsBreakdown: breakdown,
       },
     });
   } catch (err) { next(err); }
@@ -139,7 +194,7 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
   } catch (err) { next(err); }
 };
 
-// ─── Welcome Bonus (updated to use hasClaimedWelcomeBonus) ──────────
+// ─── Welcome Bonus ────────────────────────────────────────────────────
 export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
