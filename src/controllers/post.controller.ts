@@ -1,7 +1,3 @@
-// ============================================================
-// FILE: src/controllers/post.controller.ts (COMPLETE)
-// ============================================================
-
 import { Request, Response, NextFunction } from 'express';
 import Post from '../models/Post.js';
 import Comment from '../models/Comment.js';
@@ -22,7 +18,7 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
   try {
     const user = req.user as IUser;
     const { title, content, excerpt, type, tags, featuredImage, seoTitle, seoDescription, seoKeywords, courseId, isPublished } = req.body;
-    
+
     const slug = generateSlug(title);
     const post = await Post.create({
       title,
@@ -37,7 +33,7 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
       seoTitle: seoTitle || title,
       seoDescription: seoDescription || excerpt || content.substring(0, 160).replace(/<[^>]*>/g, ''),
       seoKeywords: seoKeywords || tags,
-      isPublished: isPublished || false,
+      isPublished: true, // ✅ Always published
     });
 
     const populatedPost = await Post.findById(post._id).populate('authorId', 'firstName lastName avatarUrl');
@@ -145,7 +141,7 @@ export const getPublishedPosts = async (req: Request, res: Response, next: NextF
 
     const posts = await Post.find(filter)
       .populate('authorId', 'firstName lastName avatarUrl bio')
-      .sort('-publishedAt')
+      .sort({ createdAt: -1 })
       .skip((Number(page) - 1) * Number(limit))
       .limit(Number(limit))
       .lean();
@@ -322,7 +318,7 @@ export const getUserPosts = async (req: Request, res: Response, next: NextFuncti
     const { userId } = req.params;
     const posts = await Post.find({ authorId: userId, isPublished: true })
       .populate('authorId', 'firstName lastName avatarUrl')
-      .sort('-publishedAt')
+      .sort({ createdAt: -1 })
       .lean();
     const postIds = posts.map(p => p._id);
     const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
@@ -351,7 +347,7 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
       isPublished: true
     })
       .populate('authorId', 'firstName lastName avatarUrl')
-      .sort('-publishedAt')
+      .sort({ createdAt: -1 })
       .limit(20)
       .lean();
 
@@ -361,7 +357,7 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
       approvalStatus: 'approved'
     })
       .populate('instructorId', 'firstName lastName avatarUrl')
-      .sort('-createdAt')
+      .sort({ createdAt: -1 })
       .limit(20)
       .lean();
 
@@ -434,6 +430,17 @@ export const getMySocialEarnings = async (req: Request, res: Response, next: Nex
   }
 };
 
+export const getMyPostTitles = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const posts = await Post.find({ authorId: user._id }).select('title').lean();
+    const titles = posts.map(p => p.title);
+    res.json({ success: true, data: titles });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const getPersonalizedFeed = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -455,7 +462,7 @@ export const getPersonalizedFeed = async (req: Request, res: Response, next: Nex
     const filter: any = { isPublished: true };
     const posts = await Post.find(filter)
       .populate('authorId', 'firstName lastName avatarUrl bio')
-      .sort('-publishedAt')
+      .sort({ createdAt: -1 })
       .lean();
 
     const follows = await Follow.find({ followerId: user._id }).select('followingId');
