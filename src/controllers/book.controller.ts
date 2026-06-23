@@ -7,6 +7,7 @@ import axios from 'axios';
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
+// ─── Admin: Create Book ──────────────────────────────────────────────
 export const createBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -17,9 +18,9 @@ export const createBook = async (req: Request, res: Response) => {
     const book = await Book.create({
       title,
       author,
-      description: description || '',
+      description,
       price: price || 0,
-      coverImage: coverImage || '',
+      coverImage,
       fileUrl,
       uploadedBy: user._id,
     });
@@ -29,6 +30,7 @@ export const createBook = async (req: Request, res: Response) => {
   }
 };
 
+// ─── Admin: Update Book ──────────────────────────────────────────────
 export const updateBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -43,6 +45,7 @@ export const updateBook = async (req: Request, res: Response) => {
   }
 };
 
+// ─── Admin: Delete Book ──────────────────────────────────────────────
 export const deleteBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -56,36 +59,54 @@ export const deleteBook = async (req: Request, res: Response) => {
   }
 };
 
+// ─── Admin: List All Books ──────────────────────────────────────────
 export const listAllBooks = async (req: Request, res: Response) => {
   try {
-    const books = await Book.find().sort({ createdAt: -1 });
+    const books = await Book.find().sort('-createdAt');
     res.json({ success: true, data: books });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
+// ─── User: List Published Books ──────────────────────────────────────
 export const listBooks = async (req: Request, res: Response) => {
   try {
-    const books = await Book.find({ isPublished: true }).sort({ createdAt: -1 });
+    const books = await Book.find({ isPublished: true }).sort('-createdAt');
     res.json({ success: true, data: books });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
+// ─── User: Get Single Book – with isPurchased flag ──────────────────
 export const getBook = async (req: Request, res: Response) => {
   try {
     const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+
+    let isPurchased = false;
+    if (req.user) {
+      const user = req.user as IUser;
+      const purchase = await Transaction.findOne({
+        userId: user._id,
+        type: 'book_purchase',
+        'metadata.bookId': book._id,
+        status: 'completed',
+      });
+      isPurchased = !!purchase;
+    }
+
     book.views += 1;
     await book.save();
-    res.json({ success: true, data: book });
+
+    res.json({ success: true, data: { ...book.toObject(), isPurchased } });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
+// ─── User: Download Book – with purchase check & download count ────
 export const downloadBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -106,12 +127,14 @@ export const downloadBook = async (req: Request, res: Response) => {
 
     book.downloads += 1;
     await book.save();
+
     res.json({ success: true, data: { downloadUrl: book.fileUrl } });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
+// ─── User: Purchase Book (Paystack) ──────────────────────────────────
 export const purchaseBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
