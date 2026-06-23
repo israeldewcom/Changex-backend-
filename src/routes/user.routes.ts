@@ -18,7 +18,7 @@ router.put('/notifications/read-all', userController.markAllNotificationsRead);
 router.get('/referrals', userController.getReferrals);
 router.get('/leaderboard', userController.getLeaderboard);
 router.get('/badges', userController.getUserBadges);
-router.post('/claim-welcome-bonus', userController.claimWelcomeBonus); // added
+router.post('/claim-welcome-bonus', userController.claimWelcomeBonus);
 router.post('/update-premium-status', userController.updatePremiumStatus);
 router.get('/:userId/profile', userController.getUserProfile);
 
