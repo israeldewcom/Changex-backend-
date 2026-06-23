@@ -219,7 +219,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         metadata: { bookId: book._id },
       });
 
-      // Increment downloads (optional – also on download)
+      // Increment downloads (also on download)
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
     }
@@ -230,9 +230,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 3. SUBSCRIBE TO PREMIUM
-// ──────────────────────────────────────────────────────────────────────
+// ─── SUBSCRIBE ──────────────────────────────────────────────────────
 export const subscribe = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -256,23 +254,17 @@ export const subscribe = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 4. GET USER TRANSACTIONS
-// ──────────────────────────────────────────────────────────────────────
+// ─── GET TRANSACTIONS ────────────────────────────────────────────────
 export const getTransactions = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const { limit = 50 } = req.query;
     const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(Number(limit));
     res.json({ success: true, data: transactions });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 5. REQUEST WITHDRAWAL
-// ──────────────────────────────────────────────────────────────────────
+// ─── WITHDRAW ──────────────────────────────────────────────────────
 export const withdraw = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -290,27 +282,19 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
       description: 'Withdrawal request',
     });
     res.json({ success: true, message: 'Withdrawal request submitted' });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 6. GET SAVED PAYMENT METHODS
-// ──────────────────────────────────────────────────────────────────────
+// ─── GET PAYMENT METHODS ─────────────────────────────────────────────
 export const getPaymentMethods = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const bankAccounts = user.bankAccount ? [user.bankAccount] : [];
     res.json({ success: true, data: { bankAccounts } });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 7. MANUAL PAYMENT SUBMISSION – ALL TYPES (course, subscription, book)
-// ──────────────────────────────────────────────────────────────────────
+// ─── MANUAL PAYMENT SUBMISSION ──────────────────────────────────────
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -371,7 +355,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       existingReferences as string[]
     );
 
-    // Always create as pending_review
     const manualPayment = await ManualPayment.create({
       userId: user._id,
       type,
@@ -426,14 +409,10 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       autoApproved: false,
       data: manualPayment,
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 8. GET SINGLE MANUAL PAYMENT STATUS
-// ──────────────────────────────────────────────────────────────────────
+// ─── GET MANUAL PAYMENT STATUS ──────────────────────────────────────
 export const getManualPaymentStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -441,27 +420,18 @@ export const getManualPaymentStatus = async (req: Request, res: Response, next: 
     const payment = await ManualPayment.findOne({ _id: paymentId, userId: user._id });
     if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
     res.json({ success: true, data: payment });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 9. GET ALL MANUAL PAYMENTS FOR CURRENT USER
-// ──────────────────────────────────────────────────────────────────────
 export const getUserManualPayments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const payments = await ManualPayment.find({ userId: user._id }).sort('-createdAt');
     res.json({ success: true, data: payments });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 10. PURCHASE BOOK (Paystack) – moved from book.controller
-// ──────────────────────────────────────────────────────────────────────
+// ─── PURCHASE BOOK (Paystack) ──────────────────────────────────────
 export const purchaseBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -495,9 +465,7 @@ export const purchaseBook = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 11. CANCEL SUBSCRIPTION
-// ──────────────────────────────────────────────────────────────────────
+// ─── CANCEL SUBSCRIPTION ────────────────────────────────────────────
 export const cancelSubscription = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -505,14 +473,10 @@ export const cancelSubscription = async (req: Request, res: Response, next: Next
     user.subscriptionExpires = undefined;
     await user.save();
     res.json({ success: true, message: 'Subscription cancelled successfully.' });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
 
-// ──────────────────────────────────────────────────────────────────────
-// 12. CLAIM WELCOME BONUS
-// ──────────────────────────────────────────────────────────────────────
+// ─── CLAIM WELCOME BONUS ────────────────────────────────────────────
 export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -532,7 +496,5 @@ export const claimWelcomeBonus = async (req: Request, res: Response, next: NextF
     });
 
     res.json({ success: true, message: '🎉 ₦500 welcome bonus added to your wallet!' });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
