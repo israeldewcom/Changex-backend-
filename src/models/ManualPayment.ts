@@ -14,7 +14,7 @@ export interface IManualPayment extends Document {
   rejectionReason?: string;
   approvedBy?: mongoose.Types.ObjectId;
   approvedAt?: Date;
-  metadata?: Record<string, any>; // ✅ Added for courseId, bookId, etc.
+  metadata?: Record<string, any>;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -38,7 +38,7 @@ const ManualPaymentSchema = new Schema<IManualPayment>(
     rejectionReason: String,
     approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     approvedAt: Date,
-    metadata: { type: Schema.Types.Mixed, default: {} }, // ✅ Added
+    metadata: { type: Schema.Types.Mixed, default: {} },
   },
   { timestamps: true }
 );
