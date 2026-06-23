@@ -1,25 +1,23 @@
 import { Router } from 'express';
-import * as userController from '../controllers/user.controller.js';
+import * as paymentController from '../controllers/payment.controller.js';
 import { authenticate } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
-router.use(authenticate);
+router.post('/initialize-paystack', authenticate, paymentController.initializeTransaction);
+router.post('/verify-paystack', authenticate, paymentController.verifyTransaction);
+router.post('/subscribe', authenticate, paymentController.subscribe);
+router.get('/transactions', authenticate, paymentController.getTransactions);
+router.post('/withdraw', authenticate, paymentController.withdraw);
+router.get('/methods', authenticate, paymentController.getPaymentMethods);
 
-router.get('/profile', userController.getProfile);
-router.put('/profile', userController.updateProfile);
-router.post('/avatar', upload.single('avatar'), userController.uploadAvatar);
-router.get('/wallet', userController.getWallet);
-router.post('/withdraw', userController.requestWithdrawal);
-router.get('/notifications', userController.getNotifications);
-router.put('/notifications/:id/read', userController.markNotificationRead);
-router.put('/notifications/read-all', userController.markAllNotificationsRead);
-router.get('/referrals', userController.getReferrals);
-router.get('/leaderboard', userController.getLeaderboard);
-router.get('/badges', userController.getUserBadges);
-router.post('/claim-welcome-bonus', userController.claimWelcomeBonus);
-router.post('/update-premium-status', userController.updatePremiumStatus);
-router.get('/:userId/profile', userController.getUserProfile);
+// Manual payment routes
+router.post('/manual', authenticate, upload.single('receipt'), paymentController.submitManualPayment);
+router.get('/manual/:paymentId', authenticate, paymentController.getManualPaymentStatus);
+router.get('/manual/user/all', authenticate, paymentController.getUserManualPayments);
+
+// Book purchase via Paystack
+router.post('/purchase-book', authenticate, paymentController.purchaseBook);
 
 export default router;
