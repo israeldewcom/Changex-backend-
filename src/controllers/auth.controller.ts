@@ -58,9 +58,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     // ✅ CRITICAL: Only create referral if both referrerObjectId and user._id are valid
     if (referrerObjectId && user && user._id) {
       const userIdObj = user._id;
-      // Extra safeguard: ensure userIdObj is not null/undefined
       if (userIdObj && userIdObj.toString() !== 'null') {
-        // Avoid duplicate referral (should not happen, but safe)
         const existingReferral = await Referral.findOne({ referredId: userIdObj });
         if (!existingReferral) {
           await Referral.create({
@@ -174,7 +172,6 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 };
 
 export const logout = async (req: Request, res: Response) => {
-  // Frontend will remove the token – no backend action needed
   res.json({ success: true, message: 'Logged out' });
 };
 
