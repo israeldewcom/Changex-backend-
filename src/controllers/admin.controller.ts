@@ -19,6 +19,7 @@ import Ad from '../models/Ad.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
 import PostAnalytics from '../models/PostAnalytics.js';
 import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
+import Book from '../models/Book.js'; // added
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 
@@ -625,99 +626,127 @@ export const getManualPaymentById = async (req: Request, res: Response) => {
   }
 };
 
+// ==================== APPROVE MANUAL PAYMENT (UPDATED) ====================
 export const approveManualPayment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { adminNote } = req.body;
     const admin = req.user as any;
-    
+
     const payment = await ManualPayment.findById(id);
     if (!payment) {
       return res.status(404).json({ success: false, message: 'Payment not found' });
     }
-    
+
     if (payment.status !== 'pending_review') {
       return res.status(400).json({ success: false, message: `Payment already ${payment.status}` });
     }
-    
-    if (payment.type === 'subscription') {
-      await User.findByIdAndUpdate(payment.userId, {
-        isPremium: true,
-        subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      });
-      
-      await Transaction.create({
-        userId: payment.userId,
-        type: 'subscription',
-        amount: payment.amount,
-        status: 'completed',
-        description: `Manual payment approved by admin ${admin.email} - ${payment.reference}`,
-        reference: `MANUAL_ADMIN_${payment.reference}`,
-        metadata: { paymentId: payment._id, approvedBy: admin._id },
-      });
-      
-    } else if (payment.type === 'course' && payment.courseId) {
-      const existingEnrollment = await Enrollment.findOne({ 
-        userId: payment.userId, 
-        courseId: payment.courseId 
-      });
-      
+
+    // ─── COURSE PURCHASE ──────────────────────────────────────────────────
+    if (payment.type === 'course') {
+      const course = await Course.findById(payment.metadata?.courseId || payment.courseId);
+      if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+
+      // Enroll user
+      const existingEnrollment = await Enrollment.findOne({ userId: payment.userId, courseId: course._id });
       if (!existingEnrollment) {
-        await Enrollment.create({ 
-          userId: payment.userId, 
-          courseId: payment.courseId 
-        });
-        await Course.findByIdAndUpdate(payment.courseId, { $inc: { totalStudents: 1 } });
-        
-        const course = await Course.findById(payment.courseId);
-        if (course && course.instructorId) {
-          const instructorShare = payment.amount * 0.8;
-          const instructor = await User.findById(course.instructorId);
-          if (instructor) {
-            instructor.walletBalance = (instructor.walletBalance || 0) + instructorShare;
-            await instructor.save();
-            await Transaction.create({
-              userId: instructor._id,
-              type: 'instructor_earning',
-              amount: instructorShare,
-              status: 'completed',
-              description: `Course sale (manual admin approval): ${course.title} - ${payment.reference}`,
-              reference: `MANUAL_ADMIN_${payment.reference}`,
-              metadata: { paymentId: payment._id, approvedBy: admin._id },
-            });
-          }
+        await Enrollment.create({ userId: payment.userId, courseId: course._id });
+        course.totalStudents += 1;
+        await course.save();
+      }
+
+      // Instructor earnings (80%)
+      if (course.instructorId) {
+        const instructor = await User.findById(course.instructorId);
+        if (instructor) {
+          const price = course.salePrice || course.price || 0;
+          const instructorShare = price * 0.8;
+          instructor.walletBalance = (instructor.walletBalance || 0) + instructorShare;
+          await instructor.save();
+          await Transaction.create({
+            userId: instructor._id,
+            type: 'instructor_earning',
+            amount: instructorShare,
+            status: 'completed',
+            description: `Manual course sale: ${course.title} (admin approved)`,
+            reference: payment.reference,
+            metadata: { courseId: course._id },
+          });
         }
       }
-      
+
+      // User purchase transaction
       await Transaction.create({
         userId: payment.userId,
         type: 'course_purchase',
         amount: payment.amount,
         status: 'completed',
-        description: `Manual payment approved by admin for course - ${payment.reference}`,
-        reference: `MANUAL_ADMIN_${payment.reference}`,
-        metadata: { paymentId: payment._id, approvedBy: admin._id, courseId: payment.courseId },
+        description: `Manual purchase of course: ${course.title}`,
+        reference: payment.reference,
+        metadata: { courseId: course._id },
       });
     }
-    
+
+    // ─── SUBSCRIPTION ──────────────────────────────────────────────────────
+    else if (payment.type === 'subscription') {
+      await User.findByIdAndUpdate(payment.userId, {
+        isPremium: true,
+        subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      });
+
+      await Transaction.create({
+        userId: payment.userId,
+        type: 'subscription',
+        amount: payment.amount,
+        status: 'completed',
+        description: 'Manual premium subscription (admin approved)',
+        reference: payment.reference,
+      });
+    }
+
+    // ─── BOOK PURCHASE ──────────────────────────────────────────────────────
+    else if (payment.type === 'book') {
+      const bookId = payment.metadata?.bookId;
+      if (!bookId) return res.status(400).json({ success: false, message: 'Book ID missing in metadata' });
+      const book = await Book.findById(bookId);
+      if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+
+      // Create purchase transaction
+      await Transaction.create({
+        userId: payment.userId,
+        type: 'book_purchase',
+        amount: payment.amount,
+        status: 'completed',
+        description: `Manual purchase of book: ${book.title}`,
+        reference: payment.reference,
+        metadata: { bookId: book._id },
+      });
+
+      // Increment downloads (optional)
+      book.downloads = (book.downloads || 0) + 1;
+      await book.save();
+    }
+
+    // Mark payment as approved
     payment.status = 'approved';
     payment.adminNote = adminNote;
     payment.approvedBy = admin._id;
     payment.approvedAt = new Date();
     await payment.save();
-    
+
+    // Notify user
     await Notification.create({
       userId: payment.userId,
       title: '✅ Manual Payment Approved',
-      message: `Your manual payment of ₦${payment.amount.toLocaleString()} has been approved. You now have access to ${payment.type === 'subscription' ? 'Premium features' : 'your course'}.`,
+      message: `Your manual payment of ₦${payment.amount.toLocaleString()} has been approved. You now have access to ${payment.type === 'subscription' ? 'Premium features' : payment.type === 'book' ? 'your book' : 'your course'}.`,
       type: 'payment',
     });
-    
+
     getIO().to(`user:${payment.userId}`).emit('notification', {
       title: 'Payment Approved',
       message: `Your manual payment of ₦${payment.amount.toLocaleString()} has been approved!`
     });
-    
+
     res.json({ success: true, message: 'Payment approved and access granted', data: payment });
   } catch (err) {
     console.error('Approve manual payment error:', err);
@@ -725,6 +754,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
   }
 };
 
+// ==================== REJECT MANUAL PAYMENT ====================
 export const rejectManualPayment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -1155,7 +1185,6 @@ export const getTotalSocialEarningsPool = async (req: Request, res: Response) =>
   }
 };
 
-// ==================== MANUAL TRIGGER SOCIAL EARNINGS ====================
 export const triggerSocialEarnings = async (req: Request, res: Response) => {
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -1226,16 +1255,13 @@ export const triggerSocialEarnings = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== FILE UPLOAD (UPDATED) ====================
-
-// ─── Upload Image (for Ads, Avatars, etc.) ──────────────────────────
+// ==================== FILE UPLOAD ====================
 export const uploadImage = async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    // Check if it's actually an image
     if (!req.file.mimetype.startsWith('image/')) {
       return res.status(400).json({ success: false, message: 'File must be an image' });
     }
@@ -1252,14 +1278,12 @@ export const uploadImage = async (req: Request, res: Response) => {
   }
 };
 
-// ─── Upload File (for PDFs, documents) ──────────────────────────────
 export const uploadFile = async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    // Accept PDFs and other documents
     const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
     if (!allowedTypes.includes(req.file.mimetype) && !req.file.mimetype.startsWith('image/')) {
       return res.status(400).json({ success: false, message: 'File type not supported. Please upload PDF or image.' });
