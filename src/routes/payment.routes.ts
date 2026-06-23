@@ -17,4 +17,7 @@ router.post('/manual', authenticate, upload.single('receipt'), paymentController
 router.get('/manual/:paymentId', authenticate, paymentController.getManualPaymentStatus);
 router.get('/manual/user/all', authenticate, paymentController.getUserManualPayments);
 
+// Book purchase via Paystack
+router.post('/purchase-book', authenticate, paymentController.purchaseBook);
+
 export default router;
