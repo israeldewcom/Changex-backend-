@@ -20,6 +20,8 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
     const { title, content, excerpt, type, tags, featuredImage, seoTitle, seoDescription, seoKeywords, courseId, isPublished } = req.body;
 
     const slug = generateSlug(title);
+    // Respect isPublished from body, default to true if not provided
+    const published = isPublished !== undefined ? isPublished : true;
     const post = await Post.create({
       title,
       slug,
@@ -33,7 +35,8 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
       seoTitle: seoTitle || title,
       seoDescription: seoDescription || excerpt || content.substring(0, 160).replace(/<[^>]*>/g, ''),
       seoKeywords: seoKeywords || tags,
-      isPublished: true, // ✅ Always published
+      isPublished: published,
+      publishedAt: published ? new Date() : undefined,
     });
 
     const populatedPost = await Post.findById(post._id).populate('authorId', 'firstName lastName avatarUrl');
