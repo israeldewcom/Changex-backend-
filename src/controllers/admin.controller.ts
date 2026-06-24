@@ -21,7 +21,7 @@ import PostAnalytics from '../models/PostAnalytics.js';
 import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
 import Book from '../models/Book.js';
 import Referral from '../models/Referral.js';
-import AffiliateLink from '../models/AffiliateLink.js'; // ✅ ADDED THIS IMPORT
+import AffiliateLink from '../models/AffiliateLink.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 
@@ -628,7 +628,7 @@ export const getManualPaymentById = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== APPROVE MANUAL PAYMENT (UPDATED – with referral bonus and affiliate) ====================
+// ==================== APPROVE MANUAL PAYMENT (UPDATED) ====================
 export const approveManualPayment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -649,6 +649,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       const course = await Course.findById(payment.metadata?.courseId || payment.courseId);
       if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
+      // Enroll user
       const existingEnrollment = await Enrollment.findOne({ userId: payment.userId, courseId: course._id });
       if (!existingEnrollment) {
         await Enrollment.create({ userId: payment.userId, courseId: course._id });
@@ -656,9 +657,11 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         await course.save();
       }
 
-      // Affiliate commission (if any)
-      const affiliateCode = payment.metadata?.affiliateCode;
       let affiliateCommission = 0;
+      let affiliateUserId = null;
+
+      // 1. Check for explicit affiliate code first
+      const affiliateCode = payment.metadata?.affiliateCode;
       if (affiliateCode) {
         const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
         if (affiliateLink) {
@@ -667,30 +670,62 @@ export const approveManualPayment = async (req: Request, res: Response) => {
           affiliateLink.conversions += 1;
           affiliateLink.totalEarned = (affiliateLink.totalEarned || 0) + affiliateCommission;
           await affiliateLink.save();
-
-          const affiliate = await User.findById(affiliateLink.userId);
-          if (affiliate) {
-            affiliate.walletBalance = (affiliate.walletBalance || 0) + affiliateCommission;
-            await affiliate.save();
-            await Transaction.create({
-              userId: affiliate._id,
-              type: 'affiliate_commission',
-              amount: affiliateCommission,
-              status: 'completed',
-              description: `Commission for course: ${course.title} (manual approval)`,
-              reference: payment.reference,
-              metadata: { courseId: course._id },
-            });
-          }
+          affiliateUserId = affiliateLink.userId;
         }
       }
 
-      // Net amount after affiliate
-      const price = course.salePrice || course.price || 0;
-      const netAmount = price - affiliateCommission;
-      const instructorShare = netAmount * 0.8;
+      // 2. If no affiliate code but referral code exists, treat referral as affiliate
+      const referralCode = payment.metadata?.referralCode;
+      if (!affiliateCode && referralCode && course.hasAffiliate && course.affiliatePercent > 0) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== payment.userId.toString()) {
+          const percent = course.affiliatePercent || 15;
+          affiliateCommission = (course.salePrice || course.price || 0) * (percent / 100);
+          affiliateUserId = referrer._id;
+        }
+      }
 
-      // Instructor earnings
+      // 3. Credit affiliate (if any)
+      if (affiliateUserId && affiliateCommission > 0) {
+        const affiliate = await User.findById(affiliateUserId);
+        if (affiliate) {
+          affiliate.walletBalance = (affiliate.walletBalance || 0) + affiliateCommission;
+          await affiliate.save();
+          await Transaction.create({
+            userId: affiliate._id,
+            type: 'affiliate_commission',
+            amount: affiliateCommission,
+            status: 'completed',
+            description: `Commission for course: ${course.title} (manual ${affiliateCode ? 'affiliate' : 'referral affiliate'})`,
+            reference: payment.reference,
+            metadata: { courseId: course._id },
+          });
+        }
+      }
+
+      // 4. Referral bonus (only if no affiliate commission was given)
+      const netAmount = (course.salePrice || course.price || 0) - affiliateCommission;
+      let referralBonus = 0;
+      if (!affiliateCommission && referralCode) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== payment.userId.toString()) {
+          referralBonus = netAmount * 0.1;
+          referrer.walletBalance = (referrer.walletBalance || 0) + referralBonus;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_commission',
+            amount: referralBonus,
+            status: 'completed',
+            description: `Referral commission for course: ${course.title} (manual)`,
+            reference: payment.reference,
+            metadata: { courseId: course._id },
+          });
+        }
+      }
+
+      // 5. Instructor earnings (80% of net after affiliate commission)
+      const instructorShare = netAmount * 0.8;
       if (course.instructorId) {
         const instructor = await User.findById(course.instructorId);
         if (instructor) {
@@ -708,6 +743,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
+      // User purchase transaction
       await Transaction.create({
         userId: payment.userId,
         type: 'course_purchase',
