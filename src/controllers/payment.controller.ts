@@ -17,7 +17,9 @@ import Notification from '../models/Notification.js';
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// ─── INITIALIZE PAYSTACK ──────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────
+// 1. INITIALIZE PAYSTACK TRANSACTION
+// ──────────────────────────────────────────────────────────────────────
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -43,7 +45,9 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
   }
 };
 
-// ─── VERIFY PAYSTACK ──────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────
+// 2. VERIFY PAYSTACK TRANSACTION – FULL LOGIC (course, subscription, book)
+// ──────────────────────────────────────────────────────────────────────
 export const verifyTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { reference, courseId, bookId } = req.body;
@@ -77,41 +81,76 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         await course.save();
       }
 
-      // ── AFFILIATE COMMISSION ──
       let affiliateCommission = 0;
+      let affiliateUserId = null;
+
+      // 1. Check for explicit affiliate code first
       const affiliateCode = meta.affiliateCode;
       if (affiliateCode) {
         const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
         if (affiliateLink) {
           const percent = course.affiliatePercent || 15;
           affiliateCommission = price * (percent / 100);
-          affiliateLink.clicks += 1; // track click
           affiliateLink.conversions += 1;
           affiliateLink.totalEarned = (affiliateLink.totalEarned || 0) + affiliateCommission;
           await affiliateLink.save();
-
-          const affiliate = await User.findById(affiliateLink.userId);
-          if (affiliate) {
-            affiliate.walletBalance = (affiliate.walletBalance || 0) + affiliateCommission;
-            await affiliate.save();
-            await Transaction.create({
-              userId: affiliate._id,
-              type: 'affiliate_commission',
-              amount: affiliateCommission,
-              status: 'completed',
-              description: `Commission for course: ${course.title}`,
-              reference,
-              metadata: { courseId: course._id },
-            });
-          }
+          affiliateUserId = affiliateLink.userId;
         }
       }
 
-      // ── NET AMOUNT AFTER AFFILIATE ──
-      const netAmount = price - affiliateCommission;
-      const instructorShare = netAmount * 0.8;
+      // 2. If no affiliate code but referral code exists, treat referral as affiliate
+      const referralCode = meta.referralCode;
+      if (!affiliateCode && referralCode && course.hasAffiliate && course.affiliatePercent > 0) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== user._id.toString()) {
+          const percent = course.affiliatePercent || 15;
+          affiliateCommission = price * (percent / 100);
+          affiliateUserId = referrer._id;
+        }
+      }
 
-      // ── INSTRUCTOR EARNINGS ──
+      // 3. Credit affiliate (if any)
+      if (affiliateUserId && affiliateCommission > 0) {
+        const affiliate = await User.findById(affiliateUserId);
+        if (affiliate) {
+          affiliate.walletBalance = (affiliate.walletBalance || 0) + affiliateCommission;
+          await affiliate.save();
+          await Transaction.create({
+            userId: affiliate._id,
+            type: 'affiliate_commission',
+            amount: affiliateCommission,
+            status: 'completed',
+            description: `Commission for course: ${course.title}${affiliateCode ? ' (affiliate)' : ' (referral affiliate)'}`,
+            reference,
+            metadata: { courseId: course._id },
+          });
+        }
+      }
+
+      // 4. Referral bonus (only if no affiliate commission was given)
+      //    If no affiliate commission and referralCode exists, give 10% bonus
+      const netAmount = price - affiliateCommission;
+      let referralBonus = 0;
+      if (!affiliateCommission && referralCode) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== user._id.toString()) {
+          referralBonus = netAmount * 0.1; // 10% of net
+          referrer.walletBalance = (referrer.walletBalance || 0) + referralBonus;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_commission',
+            amount: referralBonus,
+            status: 'completed',
+            description: `Referral commission for course: ${course.title}`,
+            reference,
+            metadata: { courseId: course._id },
+          });
+        }
+      }
+
+      // 5. Instructor earnings (80% of net after affiliate commission)
+      const instructorShare = netAmount * 0.8;
       if (course.instructorId) {
         const instructor = await User.findById(course.instructorId);
         if (instructor) {
@@ -129,27 +168,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         }
       }
 
-      // ── REFERRAL BONUS (if no affiliate and referralCode exists) ──
-      const referralCode = meta.referralCode;
-      if (referralCode && !affiliateCode) {
-        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
-        if (referrer && referrer._id.toString() !== user._id.toString()) {
-          const bonus = netAmount * 0.1; // 10% of net
-          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
-          await referrer.save();
-          await Transaction.create({
-            userId: referrer._id,
-            type: 'referral_commission',
-            amount: bonus,
-            status: 'completed',
-            description: `Referral commission for course: ${course.title}`,
-            reference,
-            metadata: { courseId: course._id },
-          });
-        }
-      }
-
-      // ── USER PURCHASE TRANSACTION ──
+      // Record user purchase transaction
       await Transaction.create({
         userId: user._id,
         type: 'course_purchase',
@@ -178,7 +197,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         description: 'Premium subscription',
       });
 
-      // ── REFERRAL BONUS (₦500) ──
+      // Referral bonus (₦500)
       const referralCode = meta.referralCode;
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
@@ -260,7 +279,7 @@ export const getTransactions = async (req: Request, res: Response, next: NextFun
   } catch (err) { next(err); }
 };
 
-// ─── WITHDRAW – WITH 10% FEE ──────────────────────────────────────
+// ─── WITHDRAW ──────────────────────────────────────────────────────
 export const withdraw = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -299,7 +318,6 @@ export const getPaymentMethods = async (req: Request, res: Response, next: NextF
 };
 
 // ─── MANUAL PAYMENT SUBMISSION ──────────────────────────────────────
-// UPDATED: now accepts affiliateCode and referralCode from body
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
