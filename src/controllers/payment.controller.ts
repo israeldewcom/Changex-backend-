@@ -1,7 +1,3 @@
-// ═══════════════════════════════════════════════════════════════════
-// FILE: src/controllers/payment.controller.ts (FULL – FEE LOGIC FIXED)
-// ═══════════════════════════════════════════════════════════════════
-
 import { Request, Response, NextFunction } from 'express';
 import axios from 'axios';
 import { IUser } from '../models/User.js';
@@ -21,7 +17,7 @@ import Notification from '../models/Notification.js';
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// ─── INITIALIZE ──────────────────────────────────────────────────────
+// ─── INITIALIZE PAYSTACK ──────────────────────────────────────────────
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -47,7 +43,7 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
   }
 };
 
-// ─── VERIFY PAYMENT ──────────────────────────────────────────────────
+// ─── VERIFY PAYSTACK ──────────────────────────────────────────────────
 export const verifyTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { reference, courseId, bookId } = req.body;
@@ -81,7 +77,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         await course.save();
       }
 
-      // Calculate affiliate commission
+      // ── AFFILIATE COMMISSION ──
       let affiliateCommission = 0;
       const affiliateCode = meta.affiliateCode;
       if (affiliateCode) {
@@ -89,6 +85,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         if (affiliateLink) {
           const percent = course.affiliatePercent || 15;
           affiliateCommission = price * (percent / 100);
+          affiliateLink.clicks += 1; // track click
           affiliateLink.conversions += 1;
           affiliateLink.totalEarned = (affiliateLink.totalEarned || 0) + affiliateCommission;
           await affiliateLink.save();
@@ -110,13 +107,11 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         }
       }
 
-      // Net amount after affiliate deduction
+      // ── NET AMOUNT AFTER AFFILIATE ──
       const netAmount = price - affiliateCommission;
-      // Instructor share = 80% of net
       const instructorShare = netAmount * 0.8;
-      // Platform fee = 20% of net (kept by system – no transaction needed but track if you want)
 
-      // Credit instructor
+      // ── INSTRUCTOR EARNINGS ──
       if (course.instructorId) {
         const instructor = await User.findById(course.instructorId);
         if (instructor) {
@@ -134,12 +129,12 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         }
       }
 
-      // Referral bonus (if no affiliate and referralCode exists)
+      // ── REFERRAL BONUS (if no affiliate and referralCode exists) ──
       const referralCode = meta.referralCode;
       if (referralCode && !affiliateCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== user._id.toString()) {
-          const bonus = netAmount * 0.1; // 10% of net after affiliate? Or fixed? Adjust as needed.
+          const bonus = netAmount * 0.1; // 10% of net
           referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
           await referrer.save();
           await Transaction.create({
@@ -154,7 +149,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         }
       }
 
-      // Record user purchase transaction
+      // ── USER PURCHASE TRANSACTION ──
       await Transaction.create({
         userId: user._id,
         type: 'course_purchase',
@@ -168,6 +163,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
 
     // ─── SUBSCRIPTION ──────────────────────────────────────────────────────
     else if (type === 'subscription') {
+      // Activate premium
       await User.findByIdAndUpdate(user._id, {
         isPremium: true,
         subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
@@ -182,7 +178,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         description: 'Premium subscription',
       });
 
-      // Referral bonus (₦500)
+      // ── REFERRAL BONUS (₦500) ──
       const referralCode = meta.referralCode;
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
@@ -303,12 +299,13 @@ export const getPaymentMethods = async (req: Request, res: Response, next: NextF
 };
 
 // ─── MANUAL PAYMENT SUBMISSION ──────────────────────────────────────
+// UPDATED: now accepts affiliateCode and referralCode from body
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'User not authenticated' });
 
-    const { type, courseId, bookId, amount, reference, paymentDate } = req.body;
+    const { type, courseId, bookId, amount, reference, paymentDate, referralCode, affiliateCode } = req.body;
     const file = req.file;
     if (!file) return res.status(400).json({ success: false, message: 'Receipt file is required' });
     if (!reference || !amount || !paymentDate) {
@@ -323,7 +320,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
     let expectedAmount = 0;
     let courseTitle = '';
     let bookTitle = '';
-    let metadata: any = {};
+    let metadata: any = { referralCode, affiliateCode };
 
     if (type === 'subscription') {
       expectedAmount = Number(process.env.SUBSCRIPTION_PRICE) || 5000;
@@ -353,6 +350,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(500).json({ success: false, message: 'Failed to upload receipt' });
     }
 
+    // Validate but never auto‑approve – always send to admin review
     const existingReferences = await ManualPayment.find({ reference }).distinct('reference');
     const validation = await validateManualPayment(
       reference,
@@ -412,6 +410,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       });
     }
 
+    // Notify user
     await Notification.create({
       userId: user._id,
       title: '⏳ Payment Submitted for Review',
