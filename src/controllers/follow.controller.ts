@@ -8,18 +8,18 @@ export const followUser = async (req: Request, res: Response, next: NextFunction
   try {
     const user = req.user as IUser;
     const { userId } = req.params;
-    
+
     if (user._id.toString() === userId) {
       return res.status(400).json({ success: false, message: 'Cannot follow yourself' });
     }
-    
+
     const existing = await Follow.findOne({ followerId: user._id, followingId: userId });
     if (existing) {
       await existing.deleteOne();
       res.json({ success: true, followed: false, message: 'Unfollowed' });
     } else {
       await Follow.create({ followerId: user._id, followingId: userId });
-      
+
       // Notify the followed user
       await Notification.create({
         userId: userId,
@@ -29,7 +29,7 @@ export const followUser = async (req: Request, res: Response, next: NextFunction
         data: { followerId: user._id }
       });
       getIO().to(`user:${userId}`).emit('notification', { title: 'New Follower' });
-      
+
       res.json({ success: true, followed: true, message: 'Followed' });
     }
   } catch (err) { next(err); }
