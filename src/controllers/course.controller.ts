@@ -29,7 +29,6 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   const user = await User.findById(userId);
   if (!user) return;
 
-  // Award XP
   user.xp = (user.xp || 0) + (challenge.rewardXP || 0);
   let xpNeeded = user.level * 1000;
   while (user.xp >= xpNeeded) {
@@ -38,7 +37,6 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
     xpNeeded = user.level * 1000;
   }
 
-  // Wallet bonus
   if (challenge.rewardAmount && challenge.rewardAmount > 0) {
     user.walletBalance = (user.walletBalance || 0) + challenge.rewardAmount;
     await Transaction.create({
@@ -50,7 +48,6 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
     });
   }
 
-  // Premium days
   if (challenge.rewardPremiumDays && challenge.rewardPremiumDays > 0) {
     const currentExpiry = user.subscriptionExpires || new Date();
     const newExpiry = new Date(currentExpiry.getTime() + challenge.rewardPremiumDays * 24 * 60 * 60 * 1000);
@@ -74,7 +71,6 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
-// ==================== GET PUBLISHED COURSES ====================
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { category, level, search, limit = 20, offset = 0 } = req.query;
@@ -93,7 +89,6 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
   }
 };
 
-// ==================== GET SINGLE COURSE ====================
 export const getCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const course = await Course.findById(req.params.id)
@@ -108,7 +103,6 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
-// ==================== GET USER ENROLLMENTS ====================
 export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -137,12 +131,10 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
   }
 };
 
-// ==================== ENROLL IN COURSE ====================
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     if (!user || !user._id) {
-      console.error('[ENROLL] Unauthenticated attempt. Headers:', req.headers.authorization);
       return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
     }
     const course = await Course.findById(req.params.id);
@@ -179,7 +171,6 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ==================== UPDATE LESSON PROGRESS ====================
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -201,7 +192,6 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       progress.timeSpent += timeSpent || 0;
     }
 
-    // TIME‑SENSITIVE XP: require at least 80% of lesson duration
     if (completed && !progress.completed) {
       const lesson = await Lesson.findById(lessonId);
       if (lesson) {
@@ -228,19 +218,19 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
     if (enrollment.progress === 100 && enrollment.status !== 'completed') {
       enrollment.status = 'completed';
       enrollment.completedAt = new Date();
-      user.walletBalance = (user.walletBalance || 0) + 100;
+      // ─── COMPLETION BONUS UPDATED TO ₦300 ───
+      user.walletBalance = (user.walletBalance || 0) + 300;
       await user.save();
       await Transaction.create({
         userId: user._id,
         type: 'bonus',
-        amount: 100,
+        amount: 300,
         status: 'completed',
         description: 'Course completion bonus',
       });
     }
     await enrollment.save();
 
-    // ========== AUTO‑COMPLETE CHALLENGES ==========
     const activeChallenges = await ChallengeProgress.find({
       userId: user._id,
       status: 'enrolled'
@@ -284,7 +274,6 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
   }
 };
 
-// ==================== RATE COURSE ====================
 export const rateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -313,21 +302,18 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-// ==================== SUBMIT QUIZ – AWARD XP ====================
 export const submitQuiz = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const { courseId } = req.params;
-    const { answers } = req.body; // array of { questionIndex: number, selectedOption: number }
+    const { answers } = req.body;
 
     const course = await Course.findById(courseId);
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
-    // Check enrollment
     const enrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id });
     if (!enrollment) return res.status(403).json({ success: false, message: 'Not enrolled' });
 
-    // Get all quiz questions from the course
     const allQuestions = course.quizzes?.flatMap(q => q.questions) || [];
     if (!allQuestions.length) return res.status(400).json({ success: false, message: 'No quiz questions' });
 
@@ -338,16 +324,13 @@ export const submitQuiz = async (req: Request, res: Response, next: NextFunction
     }
     const score = Math.round((correct / allQuestions.length) * 100);
 
-    // Award XP based on score
     let xpEarned = 0;
     if (score >= 80) xpEarned = 100;
     else if (score >= 60) xpEarned = 50;
     else if (score >= 40) xpEarned = 20;
-    // else no XP
 
     if (xpEarned > 0) {
       user.xp = (user.xp || 0) + xpEarned;
-      // Level up
       let xpNeeded = user.level * 1000;
       while (user.xp >= xpNeeded) {
         user.level += 1;
