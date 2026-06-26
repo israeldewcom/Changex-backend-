@@ -1,15 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import Follow from '../models/Follow.js';
 import Notification from '../models/Notification.js';
-import { IUser } from '../models/User.js';
+import User, { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
-
-// ─── Helper: filter out admin users ──────────────────────────────────
-async function filterNonAdminUsers(userIds: string[]) {
-  const admins = await User.find({ roles: 'admin' }).select('_id');
-  const adminIds = admins.map(a => a._id.toString());
-  return userIds.filter(id => !adminIds.includes(id));
-}
 
 export const followUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -53,7 +46,7 @@ export const getFollowers = async (req: Request, res: Response, next: NextFuncti
     const followers = await Follow.find({ followingId: userId })
       .populate('followerId', 'firstName lastName avatarUrl bio')
       .sort('-createdAt');
-    // Filter out admin users from the list
+    // Filter out admin users
     const filtered = followers.filter(f => {
       const follower = f.followerId as any;
       return follower && !follower.roles?.includes('admin');
@@ -82,7 +75,6 @@ export const getFollowStats = async (req: Request, res: Response, next: NextFunc
     const { userId } = req.params;
     const followers = await Follow.countDocuments({ followingId: userId });
     const following = await Follow.countDocuments({ followerId: userId });
-    // Stats are just counts – no user data exposed
     res.json({ success: true, data: { followers, following } });
   } catch (err) { next(err); }
 };
