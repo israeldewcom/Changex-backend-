@@ -4,12 +4,12 @@ import { authenticate } from '../middlewares/auth.js';
 
 const router = Router();
 
-// ─── Public routes (no auth) ──────────────────────────────────────
+// ─── Public routes (no auth) ──────────────────────────────────────────
 router.get('/placement/:placement', adminController.getActiveAds);
 router.post('/:id/impression', adminController.trackAdImpression);
 router.post('/:id/click', adminController.trackAdClick);
 
-// ─── Admin only (auth + admin role) ──────────────────────────────
+// ─── Admin only ────────────────────────────────────────────────────────
 router.use(authenticate);
 router.use((req, res, next) => {
   if (!(req.user as any)?.roles?.includes('admin')) {
