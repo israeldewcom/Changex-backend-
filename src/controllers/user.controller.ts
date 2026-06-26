@@ -9,24 +9,9 @@ import Follow from '../models/Follow.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 
-// ─── Helper: filter out admin users from public lists ──────────────
-function filterPublicUsers(users: any[]) {
-  return users.map(user => {
-    const obj = user.toObject ? user.toObject() : user;
-    // Remove roles from public view (unless it's the requesting user)
-    if (obj._id.toString() !== req.user?._id?.toString()) {
-      delete obj.roles;
-    }
-    return obj;
-  });
-}
-
 export const getProfile = async (req: Request, res: Response) => {
   const user = req.user as IUser;
-  // Always hide roles from profile if not the user themselves
-  const publicUser = user.toObject ? user.toObject() : user;
-  // Keep roles only for the user themselves; admin can see all via admin routes
-  res.json({ success: true, data: publicUser });
+  res.json({ success: true, data: user });
 };
 
 export const updateProfile = async (req: Request, res: Response, next: NextFunction) => {
@@ -146,13 +131,11 @@ export const markAllNotificationsRead = async (req: Request, res: Response, next
   } catch (err) { next(err); }
 };
 
-// ─── LEADERBOARD – exclude admins ────────────────────────────────────
 export const getLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { type = 'xp', limit = 20 } = req.query;
     let sortField = 'xp';
     if (type === 'earnings') sortField = 'walletBalance';
-    // Exclude users with 'admin' role
     const users = await User.find({ roles: { $ne: 'admin' } })
       .sort({ [sortField]: -1 })
       .limit(Number(limit))
@@ -223,7 +206,6 @@ export const claimWelcomeBonus = async (req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 };
 
-// ─── PUBLIC PROFILE – exclude admin exposure ────────────────────────
 export const getUserProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params;
@@ -268,14 +250,15 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
 
     // Remove roles from public profile (except for self or admin)
     const publicUser = user.toObject ? user.toObject() : user;
+    const responseUser = { ...publicUser };
     if (req.user && (req.user as IUser)._id.toString() !== userId && !(req.user as IUser).roles.includes('admin')) {
-      delete publicUser.roles;
+      delete (responseUser as any).roles;
     }
 
     res.json({
       success: true,
       data: {
-        user: publicUser,
+        user: responseUser,
         posts,
         courses,
         challengeProgress,
