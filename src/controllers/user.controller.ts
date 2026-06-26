@@ -9,9 +9,24 @@ import Follow from '../models/Follow.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 
+// ─── Helper: filter out admin users from public lists ──────────────
+function filterPublicUsers(users: any[]) {
+  return users.map(user => {
+    const obj = user.toObject ? user.toObject() : user;
+    // Remove roles from public view (unless it's the requesting user)
+    if (obj._id.toString() !== req.user?._id?.toString()) {
+      delete obj.roles;
+    }
+    return obj;
+  });
+}
+
 export const getProfile = async (req: Request, res: Response) => {
   const user = req.user as IUser;
-  res.json({ success: true, data: user });
+  // Always hide roles from profile if not the user themselves
+  const publicUser = user.toObject ? user.toObject() : user;
+  // Keep roles only for the user themselves; admin can see all via admin routes
+  res.json({ success: true, data: publicUser });
 };
 
 export const updateProfile = async (req: Request, res: Response, next: NextFunction) => {
@@ -42,11 +57,7 @@ export const uploadAvatar = async (req: Request, res: Response, next: NextFuncti
 export const getWallet = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    
-    // Get all completed transactions for this user
-    const transactions = await Transaction.find({ userId: user._id, status: 'completed' }).sort('-createdAt').limit(50);
-    
-    // Calculate breakdowns by type
+    const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(50);
     const breakdown = {
       referralEarnings: 0,
       courseBonuses: 0,
@@ -55,10 +66,8 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
       welcomeBonus: 0,
       totalEarnings: 0,
     };
-
     for (const tx of transactions) {
       const amount = Number(tx.amount) || 0;
-      // Only count positive amounts as earnings (income)
       if (amount > 0) {
         switch (tx.type) {
           case 'referral_bonus':
@@ -66,11 +75,10 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
             breakdown.referralEarnings += amount;
             break;
           case 'bonus':
-            // Welcome bonus is stored as 'bonus' with description containing 'welcome'
             if (tx.description && tx.description.toLowerCase().includes('welcome')) {
               breakdown.welcomeBonus += amount;
             } else {
-              breakdown.courseBonuses += amount; // other bonuses (course completion, challenges)
+              breakdown.courseBonuses += amount;
             }
             break;
           case 'affiliate_commission':
@@ -79,24 +87,15 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
           case 'instructor_earning':
             breakdown.instructorEarnings += amount;
             break;
-          default:
-            // Other types like 'withdrawal' are negative, but we skip them above
-            break;
         }
       }
     }
-
-    // Also include welcome bonus from user's hasClaimedWelcomeBonus flag if not captured
     if (user.hasClaimedWelcomeBonus && breakdown.welcomeBonus === 0) {
-      // If welcome bonus was claimed but not in transactions (e.g., older data), add 500
       breakdown.welcomeBonus = 500;
     }
-
     breakdown.totalEarnings = breakdown.referralEarnings + breakdown.courseBonuses + breakdown.affiliateCommissions + breakdown.instructorEarnings + breakdown.welcomeBonus;
 
-    // Fetch recent transactions (same as before)
     const recentTransactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(50);
-
     res.json({
       success: true,
       data: {
@@ -147,12 +146,14 @@ export const markAllNotificationsRead = async (req: Request, res: Response, next
   } catch (err) { next(err); }
 };
 
+// ─── LEADERBOARD – exclude admins ────────────────────────────────────
 export const getLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { type = 'xp', limit = 20 } = req.query;
     let sortField = 'xp';
     if (type === 'earnings') sortField = 'walletBalance';
-    const users = await User.find({})
+    // Exclude users with 'admin' role
+    const users = await User.find({ roles: { $ne: 'admin' } })
       .sort({ [sortField]: -1 })
       .limit(Number(limit))
       .select('firstName lastName xp walletBalance level avatarUrl streakDays');
@@ -164,13 +165,18 @@ export const getReferrals = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     const referrals = await Referral.find({ referrerId: user._id }).populate('referredId', 'firstName lastName email');
-    const formatted = referrals.map((r: any) => ({
-      id: r._id,
-      name: r.referredId ? `${r.referredId.firstName} ${r.referredId.lastName}` : 'User',
-      date: r.createdAt,
-      status: r.status,
-      earned: r.earned,
-    }));
+    const formatted = referrals.map((r: any) => {
+      if (!r.referredId) {
+        return { id: r._id, name: '⚠️ User Removed', date: r.createdAt, status: 'invalid', earned: r.earned || 0 };
+      }
+      return {
+        id: r._id,
+        name: `${r.referredId.firstName || ''} ${r.referredId.lastName || ''}`.trim() || 'User',
+        date: r.createdAt,
+        status: r.status,
+        earned: r.earned || 0,
+      };
+    });
     res.json({ success: true, data: formatted });
   } catch (err) { next(err); }
 };
@@ -194,7 +200,6 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
   } catch (err) { next(err); }
 };
 
-// ─── Welcome Bonus ────────────────────────────────────────────────────
 export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -207,7 +212,6 @@ export const claimWelcomeBonus = async (req: Request, res: Response, next: NextF
     user.walletBalance += 500;
     user.hasClaimedWelcomeBonus = true;
     await user.save();
-
     await Transaction.create({
       userId: user._id,
       type: 'bonus',
@@ -215,18 +219,24 @@ export const claimWelcomeBonus = async (req: Request, res: Response, next: NextF
       status: 'completed',
       description: 'Welcome bonus',
     });
-
     res.json({ success: true, message: '₦500 added to your wallet', balance: user.walletBalance });
   } catch (err) { next(err); }
 };
 
-// ─── Public Profile ───────────────────────────────────────────────────
+// ─── PUBLIC PROFILE – exclude admin exposure ────────────────────────
 export const getUserProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params;
     const user = await User.findById(userId).select('-passwordHash');
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    // If the requested user is admin and the requester is not admin, deny access
+    if (user.roles.includes('admin')) {
+      const requester = req.user as IUser;
+      if (!requester || !requester.roles.includes('admin')) {
+        return res.status(403).json({ success: false, message: 'Access denied' });
+      }
     }
 
     const posts = await Post.find({ authorId: userId, isPublished: true })
@@ -256,10 +266,16 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
     const followersCount = await Follow.countDocuments({ followingId: userId });
     const followingCount = await Follow.countDocuments({ followerId: userId });
 
+    // Remove roles from public profile (except for self or admin)
+    const publicUser = user.toObject ? user.toObject() : user;
+    if (req.user && (req.user as IUser)._id.toString() !== userId && !(req.user as IUser).roles.includes('admin')) {
+      delete publicUser.roles;
+    }
+
     res.json({
       success: true,
       data: {
-        user,
+        user: publicUser,
         posts,
         courses,
         challengeProgress,
