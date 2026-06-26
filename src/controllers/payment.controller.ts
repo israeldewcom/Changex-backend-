@@ -128,13 +128,12 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       }
 
       // 4. Referral bonus (only if no affiliate commission was given)
-      //    If no affiliate commission and referralCode exists, give 10% bonus
       const netAmount = price - affiliateCommission;
       let referralBonus = 0;
       if (!affiliateCommission && referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== user._id.toString()) {
-          referralBonus = netAmount * 0.1; // 10% of net
+          referralBonus = netAmount * 0.1;
           referrer.walletBalance = (referrer.walletBalance || 0) + referralBonus;
           await referrer.save();
           await Transaction.create({
@@ -226,6 +225,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       if (!book) {
         return res.status(404).json({ success: false, message: 'Book not found' });
       }
+      
       await Transaction.create({
         userId: user._id,
         type: 'book_purchase',
@@ -235,8 +235,29 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         description: `Purchase of book: ${book.title}`,
         metadata: { bookId: book._id },
       });
+      
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
+
+      // ─── REFERRAL BONUS FOR BOOK (10% of book price) ──────────────────
+      const referralCode = meta.referralCode;
+      if (referralCode) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== user._id.toString()) {
+          const bonus = (book.price || 0) * 0.1;
+          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_commission',
+            amount: bonus,
+            status: 'completed',
+            description: `Referral commission for book: ${book.title}`,
+            reference,
+            metadata: { bookId: book._id },
+          });
+        }
+      }
     }
 
     res.json({ success: true, message: 'Payment verified' });
@@ -287,7 +308,7 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
     if (amount < 2000) return res.status(400).json({ success: false, message: 'Minimum withdrawal is ₦2,000' });
     if (amount > user.walletBalance) return res.status(400).json({ success: false, message: 'Insufficient balance' });
 
-    const feeRate = 0.1; // 10%
+    const feeRate = 0.1;
     const fee = amount * feeRate;
     const netAmount = amount - fee;
 
@@ -368,7 +389,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(500).json({ success: false, message: 'Failed to upload receipt' });
     }
 
-    // Validate but never auto‑approve – always send to admin review
     const existingReferences = await ManualPayment.find({ reference }).distinct('reference');
     const validation = await validateManualPayment(
       reference,
@@ -404,7 +424,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(500).json({ success: false, message: 'Failed to create manual payment request.' });
     }
 
-    // Notify admins
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('admin_manual_payment_alert', {
@@ -428,7 +447,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       });
     }
 
-    // Notify user
     await Notification.create({
       userId: user._id,
       title: '⏳ Payment Submitted for Review',
