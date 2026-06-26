@@ -41,7 +41,7 @@ export const trackAffiliateClick = async (req: Request, res: Response, next: Nex
     if (!link) return res.redirect(process.env.CLIENT_URL || '/');
     link.clicks += 1;
     await link.save();
-    res.cookie('affiliate_code', code, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true });
+    res.cookie('affiliate_code', code, { maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax' });
     const redirectUrl = `${process.env.CLIENT_URL}/courses/${link.courseId}`;
     res.redirect(redirectUrl);
   } catch (err) { next(err); }
@@ -50,17 +50,32 @@ export const trackAffiliateClick = async (req: Request, res: Response, next: Nex
 export const getAffiliateStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const links = await AffiliateLink.find({ userId: user._id });
-    const totalClicks = links.reduce((acc, l) => acc + l.clicks, 0);
-    const totalConversions = links.reduce((acc, l) => acc + l.conversions, 0);
-    const totalEarned = links.reduce((acc, l) => acc + l.totalEarned, 0);
-    res.json({ success: true, data: { totalClicks, totalConversions, totalEarned, linksCount: links.length } });
+    const links = await AffiliateLink.find({ userId: user._id }).populate('courseId', 'title');
+    const totalClicks = links.reduce((acc, l) => acc + (l.clicks || 0), 0);
+    const totalConversions = links.reduce((acc, l) => acc + (l.conversions || 0), 0);
+    const totalEarned = links.reduce((acc, l) => acc + (l.totalEarned || 0), 0);
+    const enriched = links.map(l => ({
+      ...l.toObject(),
+      courseTitle: (l.courseId as any)?.title || 'Course',
+    }));
+    res.json({
+      success: true,
+      data: {
+        totalClicks,
+        totalConversions,
+        totalEarned,
+        linksCount: links.length,
+        links: enriched,
+      },
+    });
   } catch (err) { next(err); }
 };
 
 export const getAffiliateLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Exclude admins from affiliate leaderboard
     const leaderboard = await User.aggregate([
+      { $match: { roles: { $ne: 'admin' } } },
       { $lookup: { from: 'affiliatelinks', localField: '_id', foreignField: 'userId', as: 'links' } },
       { $addFields: { totalAffiliateEarnings: { $sum: '$links.totalEarned' }, totalAffiliateConversions: { $sum: '$links.conversions' }, affiliateLinksCount: { $size: '$links' } } },
       { $sort: { totalAffiliateEarnings: -1 } },
