@@ -5,6 +5,10 @@ import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
+// ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────
+router.get('/leaderboard', userController.getLeaderboard); // ✅ PUBLIC
+
+// ─── AUTHENTICATED ROUTES ─────────────────────────────────────────────
 router.use(authenticate);
 
 router.get('/profile', userController.getProfile);
@@ -16,7 +20,6 @@ router.get('/notifications', userController.getNotifications);
 router.put('/notifications/:id/read', userController.markNotificationRead);
 router.put('/notifications/read-all', userController.markAllNotificationsRead);
 router.get('/referrals', userController.getReferrals);
-router.get('/leaderboard', userController.getLeaderboard);
 router.get('/badges', userController.getUserBadges);
 router.post('/claim-welcome-bonus', userController.claimWelcomeBonus);
 router.post('/update-premium-status', userController.updatePremiumStatus);
