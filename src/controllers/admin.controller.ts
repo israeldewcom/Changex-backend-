@@ -22,6 +22,7 @@ import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
 import Book from '../models/Book.js';
 import Referral from '../models/Referral.js';
 import AffiliateLink from '../models/AffiliateLink.js';
+import Rating from '../models/Rating.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 
@@ -245,7 +246,9 @@ export const getCourseDetails = async (req: Request, res: Response) => {
       metadata: { courseId: course._id }
     }).sort('-createdAt');
     
-    res.json({ success: true, data: { course, enrollments, transactions } });
+    const ratings = await Rating.find({ courseId: course._id }).populate('userId', 'firstName lastName');
+    
+    res.json({ success: true, data: { course, enrollments, transactions, ratings } });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
@@ -271,6 +274,13 @@ export const approveCourse = async (req: Request, res: Response) => {
         title: 'Course Approved', 
         message: `Your course "${course.title}" is now live!`
       });
+      
+      // Ping search engines for SEO
+      try {
+        const sitemapUrl = `${process.env.BACKEND_URL || process.env.FRONTEND_URL}/seo/sitemap.xml`;
+        await fetch(`https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
+        await fetch(`https://www.bing.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
+      } catch (_) {}
     }
     
     res.json({ success: true, message: 'Course approved and published', data: course });
@@ -628,7 +638,7 @@ export const getManualPaymentById = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== APPROVE MANUAL PAYMENT (UPDATED) ====================
+// ==================== APPROVE MANUAL PAYMENT ====================
 export const approveManualPayment = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -813,6 +823,26 @@ export const approveManualPayment = async (req: Request, res: Response) => {
 
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
+
+      // Referral bonus for book (10% of book price)
+      const referralCode = payment.metadata?.referralCode;
+      if (referralCode) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== payment.userId.toString()) {
+          const bonus = (book.price || 0) * 0.1;
+          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_commission',
+            amount: bonus,
+            status: 'completed',
+            description: `Referral commission for book: ${book.title} (manual)`,
+            reference: payment.reference,
+            metadata: { bookId: book._id },
+          });
+        }
+      }
     }
 
     payment.status = 'approved';
