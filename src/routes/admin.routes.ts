@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as adminController from '../controllers/admin.controller.js';
 import * as bookController from '../controllers/book.controller.js';
+import * as postController from '../controllers/post.controller.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
 
@@ -54,13 +55,17 @@ router.put('/ads/:id', adminController.updateAd);
 router.delete('/ads/:id', adminController.deleteAd);
 router.get('/ads/placement/:placement', adminController.getActiveAds);
 
-// ─── Books (Admin) ──────────────────────────────────────────────────
+// Books (Admin)
 router.get('/books', bookController.listAllBooks);
 router.post('/books', bookController.createBook);
 router.put('/books/:id', bookController.updateBook);
 router.delete('/books/:id', bookController.deleteBook);
 
-// ─── Uploads ──────────────────────────────────────────────────────
+// ─── NEW ADMIN POSTS ROUTES ──────────────────────────────────────────
+router.get('/posts', postController.getAdminPosts);
+router.delete('/posts/:id', postController.deletePost);
+
+// Uploads
 router.post('/upload', upload.single('image'), adminController.uploadImage);
 router.post('/upload-file', upload.single('file'), adminController.uploadFile);
 
