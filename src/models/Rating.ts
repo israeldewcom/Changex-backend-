@@ -1,4 +1,3 @@
-// File: src/models/Rating.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IRating extends Document {
@@ -6,6 +5,8 @@ export interface IRating extends Document {
   courseId: mongoose.Types.ObjectId;
   rating: number;
   review?: string;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const RatingSchema = new Schema<IRating>(
