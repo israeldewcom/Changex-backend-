@@ -20,7 +20,6 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
     const { title, content, excerpt, type, tags, featuredImage, seoTitle, seoDescription, seoKeywords, courseId, isPublished } = req.body;
 
     const slug = generateSlug(title);
-    // Respect isPublished from body, default to true if not provided
     const published = isPublished !== undefined ? isPublished : true;
     const post = await Post.create({
       title,
@@ -519,5 +518,17 @@ export const getPersonalizedFeed = async (req: Request, res: Response, next: Nex
     });
   } catch (err) {
     next(err);
+  }
+};
+
+// ─── NEW ADMIN FUNCTION ──────────────────────────────────────────────
+export const getAdminPosts = async (req: Request, res: Response) => {
+  try {
+    const posts = await Post.find()
+      .populate('authorId', 'firstName lastName email')
+      .sort('-createdAt');
+    res.json({ success: true, data: posts });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
   }
 };
