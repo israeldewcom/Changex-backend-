@@ -1,3 +1,8 @@
+// ============================================================
+// FILE: src/routes/admin.routes.ts
+// COMPLETE UPDATED VERSION – all admin endpoints
+// ============================================================
+
 import { Router } from 'express';
 import {
     // Dashboard
@@ -34,6 +39,7 @@ import {
     createAnnouncement,
     getAnnouncements,
     deleteAnnouncement,
+    getPublicAnnouncements,
 
     // Coupons
     getCoupons,
@@ -46,6 +52,7 @@ import {
     getChallenges,
     updateChallenge,
     deleteChallenge,
+    joinChallenge,
     getChallengeParticipants,
     completeChallengeForUser,
     getAllChallengeProgressStats,
@@ -66,7 +73,7 @@ import {
     getTotalSocialEarningsPool,
     triggerSocialEarnings,
 
-    // Books (admin CRUD)
+    // Books (Admin CRUD)
     createBook,
     updateBook,
     deleteBook,
@@ -75,9 +82,6 @@ import {
     uploadImage,
     uploadFile,
 
-    // Audit (placeholder)
-    // (audit log endpoints if any)
-
 } from '../controllers/admin.controller.js';
 
 import { authenticate, authorize } from '../middlewares/auth.js';
@@ -85,32 +89,32 @@ import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
-// All admin routes require authentication and admin role
+// ─── All admin routes require authentication and admin role ──────────
 router.use(authenticate, authorize('admin'));
 
-// ─── Dashboard ─────────────────────────────────────────────────────────
+// ==================== DASHBOARD ====================
 router.get('/dashboard', getDashboard);
 
-// ─── User Management ──────────────────────────────────────────────────
+// ==================== USER MANAGEMENT ====================
 router.get('/users', getUsers);
 router.get('/users/:id', getUserById);
 router.get('/users/:userId/full', getUserFullDetails);
 router.get('/users/:userId/posts', getUserPosts);
-router.patch('/users/:userId', updateUserRole);
+router.patch('/users/:userId/role', updateUserRole);
 router.patch('/users/:userId/ban', toggleUserBan);
 router.post('/users/:userId/approve-instructor', approveInstructor);
 
-// ─── Course Management ────────────────────────────────────────────────
+// ==================== COURSE MANAGEMENT ====================
 router.get('/courses', getAdminCourses);
 router.get('/courses/:id', getCourseDetails);
 router.post('/courses/:id/approve', approveCourse);
 router.post('/courses/:id/reject', rejectCourse);
 
-// ─── Withdrawals ──────────────────────────────────────────────────────
+// ==================== WITHDRAWALS ====================
 router.get('/withdrawals', getWithdrawals);
 router.post('/withdrawals/:id/process', processWithdrawal);
 
-// ─── Manual Payments ──────────────────────────────────────────────────
+// ==================== MANUAL PAYMENTS ====================
 router.get('/manual-payments/pending', getPendingManualPayments);
 router.get('/manual-payments/all', getAllManualPayments);
 router.get('/manual-payments/stats', getManualPaymentStats);
@@ -118,52 +122,54 @@ router.get('/manual-payments/:id', getManualPaymentById);
 router.post('/manual-payments/:id/approve', approveManualPayment);
 router.post('/manual-payments/:id/reject', rejectManualPayment);
 
-// ─── Announcements ────────────────────────────────────────────────────
+// ==================== ANNOUNCEMENTS ====================
 router.post('/announcements', createAnnouncement);
 router.get('/announcements', getAnnouncements);
 router.delete('/announcements/:id', deleteAnnouncement);
+router.get('/announcements/public/latest', getPublicAnnouncements);
 
-// ─── Coupons ──────────────────────────────────────────────────────────
+// ==================== COUPONS ====================
 router.get('/coupons', getCoupons);
 router.post('/coupons', createCoupon);
 router.put('/coupons/:id', updateCoupon);
 router.delete('/coupons/:id', deleteCoupon);
 
-// ─── Challenges ──────────────────────────────────────────────────────
+// ==================== CHALLENGES ====================
 router.post('/challenges', createChallenge);
 router.get('/challenges', getChallenges);
 router.put('/challenges/:id', updateChallenge);
 router.delete('/challenges/:id', deleteChallenge);
+router.post('/challenges/:id/join', joinChallenge);
 router.get('/challenges/:challengeId/participants', getChallengeParticipants);
 router.put('/challenges/:challengeId/complete/:userId', completeChallengeForUser);
 router.get('/challenges/progress/stats', getAllChallengeProgressStats);
 
-// ─── Ads ─────────────────────────────────────────────────────────────
+// ==================== ADS ====================
 router.post('/ads', createAd);
 router.get('/ads', getAds);
 router.put('/ads/:id', updateAd);
 router.delete('/ads/:id', deleteAd);
 router.post('/ads/:id/impression', trackAdImpression);
 router.post('/ads/:id/click', trackAdClick);
-router.get('/ads/placement/:placement', getActiveAds); // public, but kept here
+router.get('/ads/placement/:placement', getActiveAds); // public, but admin can also list
 
-// ─── Social Earnings ─────────────────────────────────────────────────
+// ==================== SOCIAL EARNINGS ====================
 router.get('/social-earnings/config', getSocialEarningsConfig);
 router.put('/social-earnings/config', updateSocialEarningsConfig);
 router.get('/social-earnings/top-posts', getTopEarningPosts);
 router.get('/social-earnings/total-pool', getTotalSocialEarningsPool);
 router.post('/social-earnings/trigger', triggerSocialEarnings);
 
-// ─── Books (Admin) ──────────────────────────────────────────────────
+// ==================== BOOKS (Admin CRUD) ====================
 router.post('/books', createBook);
 router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
 
-// ─── File Uploads ────────────────────────────────────────────────────
+// ==================== FILE UPLOADS ====================
 router.post('/upload', upload.single('image'), uploadImage);
 router.post('/upload-file', upload.single('file'), uploadFile);
 
-// ─── Audit logs (placeholder) ────────────────────────────────────────
+// ==================== AUDIT LOGS (placeholder) ====================
 // router.get('/audit-logs', getAuditLogs);
 
 export default router;
