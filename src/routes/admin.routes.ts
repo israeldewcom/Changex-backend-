@@ -1,78 +1,169 @@
 import { Router } from 'express';
-import * as adminController from '../controllers/admin.controller.js';
-import * as bookController from '../controllers/book.controller.js';
-import * as postController from '../controllers/post.controller.js';
+import {
+    // Dashboard
+    getDashboard,
+
+    // User Management
+    getUsers,
+    getUserById,
+    getUserFullDetails,
+    getUserPosts,
+    updateUserRole,
+    toggleUserBan,
+    approveInstructor,
+
+    // Course Management
+    getAdminCourses,
+    getCourseDetails,
+    approveCourse,
+    rejectCourse,
+
+    // Withdrawals
+    getWithdrawals,
+    processWithdrawal,
+
+    // Manual Payments
+    getPendingManualPayments,
+    getAllManualPayments,
+    getManualPaymentStats,
+    getManualPaymentById,
+    approveManualPayment,
+    rejectManualPayment,
+
+    // Announcements
+    createAnnouncement,
+    getAnnouncements,
+    deleteAnnouncement,
+
+    // Coupons
+    getCoupons,
+    createCoupon,
+    updateCoupon,
+    deleteCoupon,
+
+    // Challenges
+    createChallenge,
+    getChallenges,
+    updateChallenge,
+    deleteChallenge,
+    getChallengeParticipants,
+    completeChallengeForUser,
+    getAllChallengeProgressStats,
+
+    // Ads
+    createAd,
+    getAds,
+    updateAd,
+    deleteAd,
+    trackAdImpression,
+    trackAdClick,
+    getActiveAds,
+
+    // Social Earnings
+    getSocialEarningsConfig,
+    updateSocialEarningsConfig,
+    getTopEarningPosts,
+    getTotalSocialEarningsPool,
+    triggerSocialEarnings,
+
+    // Books (admin CRUD)
+    createBook,
+    updateBook,
+    deleteBook,
+
+    // File uploads
+    uploadImage,
+    uploadFile,
+
+    // Audit (placeholder)
+    // (audit log endpoints if any)
+
+} from '../controllers/admin.controller.js';
+
 import { authenticate, authorize } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
-router.use(authenticate);
-router.use(authorize('admin'));
+// All admin routes require authentication and admin role
+router.use(authenticate, authorize('admin'));
 
-router.get('/dashboard', adminController.getDashboard);
-router.get('/users', adminController.getUsers);
-router.get('/users/:id/full', adminController.getUserFullDetails);
-router.patch('/users/:id', adminController.updateUserRole);
-router.patch('/users/:id/ban', adminController.toggleUserBan);
-router.post('/users/:userId/approve-instructor', adminController.approveInstructor);
+// ─── Dashboard ─────────────────────────────────────────────────────────
+router.get('/dashboard', getDashboard);
 
-router.get('/courses', adminController.getAdminCourses);
-router.post('/courses/:id/approve', adminController.approveCourse);
-router.post('/courses/:id/reject', adminController.rejectCourse);
+// ─── User Management ──────────────────────────────────────────────────
+router.get('/users', getUsers);
+router.get('/users/:id', getUserById);
+router.get('/users/:userId/full', getUserFullDetails);
+router.get('/users/:userId/posts', getUserPosts);
+router.patch('/users/:userId', updateUserRole);
+router.patch('/users/:userId/ban', toggleUserBan);
+router.post('/users/:userId/approve-instructor', approveInstructor);
 
-router.get('/withdrawals', adminController.getWithdrawals);
-router.post('/withdrawals/:id/process', adminController.processWithdrawal);
+// ─── Course Management ────────────────────────────────────────────────
+router.get('/courses', getAdminCourses);
+router.get('/courses/:id', getCourseDetails);
+router.post('/courses/:id/approve', approveCourse);
+router.post('/courses/:id/reject', rejectCourse);
 
-router.post('/announcements', adminController.createAnnouncement);
-router.get('/announcements', adminController.getAnnouncements);
-router.delete('/announcements/:id', adminController.deleteAnnouncement);
-router.get('/announcements/latest', adminController.getPublicAnnouncements);
+// ─── Withdrawals ──────────────────────────────────────────────────────
+router.get('/withdrawals', getWithdrawals);
+router.post('/withdrawals/:id/process', processWithdrawal);
 
-router.get('/coupons', adminController.getCoupons);
-router.post('/coupons', adminController.createCoupon);
-router.put('/coupons/:id', adminController.updateCoupon);
-router.delete('/coupons/:id', adminController.deleteCoupon);
+// ─── Manual Payments ──────────────────────────────────────────────────
+router.get('/manual-payments/pending', getPendingManualPayments);
+router.get('/manual-payments/all', getAllManualPayments);
+router.get('/manual-payments/stats', getManualPaymentStats);
+router.get('/manual-payments/:id', getManualPaymentById);
+router.post('/manual-payments/:id/approve', approveManualPayment);
+router.post('/manual-payments/:id/reject', rejectManualPayment);
 
-router.get('/manual-payments/pending', adminController.getPendingManualPayments);
-router.get('/manual-payments/all', adminController.getAllManualPayments);
-router.get('/manual-payments/stats', adminController.getManualPaymentStats);
-router.get('/manual-payments/:id', adminController.getManualPaymentById);
-router.post('/manual-payments/:id/approve', adminController.approveManualPayment);
-router.post('/manual-payments/:id/reject', adminController.rejectManualPayment);
+// ─── Announcements ────────────────────────────────────────────────────
+router.post('/announcements', createAnnouncement);
+router.get('/announcements', getAnnouncements);
+router.delete('/announcements/:id', deleteAnnouncement);
 
-router.post('/challenges', adminController.createChallenge);
-router.get('/challenges', adminController.getChallenges);
-router.put('/challenges/:id', adminController.updateChallenge);
-router.delete('/challenges/:id', adminController.deleteChallenge);
-router.get('/challenges/:challengeId/participants', adminController.getChallengeParticipants);
-router.put('/challenges/:challengeId/complete/:userId', adminController.completeChallengeForUser);
-router.get('/challenges/progress/stats', adminController.getAllChallengeProgressStats);
+// ─── Coupons ──────────────────────────────────────────────────────────
+router.get('/coupons', getCoupons);
+router.post('/coupons', createCoupon);
+router.put('/coupons/:id', updateCoupon);
+router.delete('/coupons/:id', deleteCoupon);
 
-router.post('/ads', adminController.createAd);
-router.get('/ads', adminController.getAds);
-router.put('/ads/:id', adminController.updateAd);
-router.delete('/ads/:id', adminController.deleteAd);
-router.get('/ads/placement/:placement', adminController.getActiveAds);
+// ─── Challenges ──────────────────────────────────────────────────────
+router.post('/challenges', createChallenge);
+router.get('/challenges', getChallenges);
+router.put('/challenges/:id', updateChallenge);
+router.delete('/challenges/:id', deleteChallenge);
+router.get('/challenges/:challengeId/participants', getChallengeParticipants);
+router.put('/challenges/:challengeId/complete/:userId', completeChallengeForUser);
+router.get('/challenges/progress/stats', getAllChallengeProgressStats);
 
-// Books (Admin)
-router.get('/books', bookController.listAllBooks);
-router.post('/books', bookController.createBook);
-router.put('/books/:id', bookController.updateBook);
-router.delete('/books/:id', bookController.deleteBook);
+// ─── Ads ─────────────────────────────────────────────────────────────
+router.post('/ads', createAd);
+router.get('/ads', getAds);
+router.put('/ads/:id', updateAd);
+router.delete('/ads/:id', deleteAd);
+router.post('/ads/:id/impression', trackAdImpression);
+router.post('/ads/:id/click', trackAdClick);
+router.get('/ads/placement/:placement', getActiveAds); // public, but kept here
 
-// ─── NEW ADMIN POSTS ROUTES ──────────────────────────────────────────
-router.get('/posts', postController.getAdminPosts);
-router.delete('/posts/:id', postController.deletePost);
+// ─── Social Earnings ─────────────────────────────────────────────────
+router.get('/social-earnings/config', getSocialEarningsConfig);
+router.put('/social-earnings/config', updateSocialEarningsConfig);
+router.get('/social-earnings/top-posts', getTopEarningPosts);
+router.get('/social-earnings/total-pool', getTotalSocialEarningsPool);
+router.post('/social-earnings/trigger', triggerSocialEarnings);
 
-// Uploads
-router.post('/upload', upload.single('image'), adminController.uploadImage);
-router.post('/upload-file', upload.single('file'), adminController.uploadFile);
+// ─── Books (Admin) ──────────────────────────────────────────────────
+router.post('/books', createBook);
+router.put('/books/:id', updateBook);
+router.delete('/books/:id', deleteBook);
 
-router.get('/social-earnings/config', adminController.getSocialEarningsConfig);
-router.put('/social-earnings/config', adminController.updateSocialEarningsConfig);
-router.get('/social-earnings/top-posts', adminController.getTopEarningPosts);
-router.get('/social-earnings/total-pool', adminController.getTotalSocialEarningsPool);
-router.post('/social-earnings/trigger', adminController.triggerSocialEarnings);
+// ─── File Uploads ────────────────────────────────────────────────────
+router.post('/upload', upload.single('image'), uploadImage);
+router.post('/upload-file', upload.single('file'), uploadFile);
+
+// ─── Audit logs (placeholder) ────────────────────────────────────────
+// router.get('/audit-logs', getAuditLogs);
 
 export default router;
