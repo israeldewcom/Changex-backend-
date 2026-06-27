@@ -1,6 +1,6 @@
 // ============================================================
 // FILE: src/controllers/affiliate.controller.ts
-// COMPLETE UPDATED VERSION
+// FIXED – Uses Transaction for withdrawal tracking
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -24,7 +24,6 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
 
-    // Validate course exists and has affiliate enabled
     const course = await Course.findById(courseId);
     if (!course) {
       return res.status(404).json({ success: false, message: 'Course not found' });
@@ -33,11 +32,9 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
       return res.status(400).json({ success: false, message: 'Affiliate not available for this course' });
     }
 
-    // Check if affiliate link already exists for this user and course
     let link = await AffiliateLink.findOne({ userId: user._id, courseId });
 
     if (link) {
-      // Return existing link with hash-based URL
       const fullLink = `${process.env.CLIENT_URL}/#courses/${courseId}?aff=${link.code}`;
       return res.json({
         success: true,
@@ -48,10 +45,7 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
       });
     }
 
-    // Generate unique affiliate code
     const code = uuid().slice(0, 8).toUpperCase();
-
-    // Create new affiliate link
     link = await AffiliateLink.create({
       userId: user._id,
       courseId,
@@ -61,10 +55,8 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
       totalEarned: 0,
     });
 
-    // ✅ Build hash-based URL for SPA routing
     const fullLink = `${process.env.CLIENT_URL}/#courses/${courseId}?aff=${code}`;
 
-    // Send notification to user
     await Notification.create({
       userId: user._id,
       title: '✅ Affiliate Link Created',
@@ -91,7 +83,6 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
 export const getMyLinks = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
@@ -100,7 +91,6 @@ export const getMyLinks = async (req: Request, res: Response, next: NextFunction
       .populate('courseId', 'title price affiliatePercent thumbnail')
       .sort('-createdAt');
 
-    // Enrich each link with a hash-based full URL
     const enriched = links.map(l => {
       const course = l.courseId as any;
       const courseId = course?._id || l.courseId;
@@ -128,31 +118,24 @@ export const getMyLinks = async (req: Request, res: Response, next: NextFunction
 export const trackAffiliateClick = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { code } = req.params;
-
     if (!code) {
       return res.redirect(process.env.CLIENT_URL || '/');
     }
 
-    // Find the affiliate link
     const link = await AffiliateLink.findOne({ code });
     if (!link) {
       return res.redirect(process.env.CLIENT_URL || '/');
     }
 
-    // Increment click count
     link.clicks += 1;
     await link.save();
 
-    // Set affiliate cookie for tracking purchases (30-day expiry)
     res.cookie('affiliate_code', code, {
       maxAge: 30 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       path: '/',
-      // If frontend and backend are on different subdomains, set domain:
-      // domain: '.changex.academy'
     });
 
-    // ✅ Redirect to hash-based SPA route
     const redirectUrl = `${process.env.CLIENT_URL}/#courses/${link.courseId}?aff=${code}`;
     res.redirect(redirectUrl);
   } catch (err) {
@@ -166,21 +149,18 @@ export const trackAffiliateClick = async (req: Request, res: Response, next: Nex
 export const getAffiliateStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
 
     const links = await AffiliateLink.find({ userId: user._id });
-
     const totalClicks = links.reduce((acc, l) => acc + (l.clicks || 0), 0);
     const totalConversions = links.reduce((acc, l) => acc + (l.conversions || 0), 0);
     const totalEarned = links.reduce((acc, l) => acc + (l.totalEarned || 0), 0);
 
-    // Count unique signups attributed to affiliate
     const totalSignups = await User.countDocuments({
       referredBy: user._id,
-      isPremium: true // Only count converted signups
+      isPremium: true
     });
 
     res.json({
@@ -298,7 +278,8 @@ export const getCourseAffiliateStats = async (req: Request, res: Response, next:
 };
 
 /**
- * Withdraw affiliate earnings (transfer to wallet).
+ * Withdraw affiliate earnings to wallet.
+ * Uses Transaction collection to track total withdrawn.
  */
 export const withdrawAffiliateEarnings = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -320,9 +301,23 @@ export const withdrawAffiliateEarnings = async (req: Request, res: Response, nex
     const links = await AffiliateLink.find({ userId: user._id });
     const totalEarned = links.reduce((acc, l) => acc + (l.totalEarned || 0), 0);
 
-    // Get already withdrawn amount (track in user metadata or separate model)
-    // For simplicity, we'll use a field on the user model
-    const alreadyWithdrawn = (user as any).affiliateWithdrawn || 0;
+    // Calculate total already withdrawn from affiliate earnings
+    const withdrawals = await Transaction.aggregate([
+      {
+        $match: {
+          userId: user._id,
+          type: 'affiliate_withdrawal',
+          status: 'completed'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' }
+        }
+      }
+    ]);
+    const alreadyWithdrawn = withdrawals.length > 0 ? withdrawals[0].total : 0;
     const available = totalEarned - alreadyWithdrawn;
 
     if (amount > available) {
@@ -334,10 +329,9 @@ export const withdrawAffiliateEarnings = async (req: Request, res: Response, nex
 
     // Transfer to wallet
     user.walletBalance = (user.walletBalance || 0) + amount;
-    (user as any).affiliateWithdrawn = (user.affiliateWithdrawn || 0) + amount;
     await user.save();
 
-    // Create transaction record
+    // Record withdrawal transaction
     await Transaction.create({
       userId: user._id,
       type: 'affiliate_withdrawal',
@@ -353,7 +347,6 @@ export const withdrawAffiliateEarnings = async (req: Request, res: Response, nex
       data: {
         transferred: amount,
         walletBalance: user.walletBalance,
-        affiliateWithdrawn: (user as any).affiliateWithdrawn,
         remainingAffiliateEarnings: available - amount,
       }
     });
@@ -368,19 +361,33 @@ export const withdrawAffiliateEarnings = async (req: Request, res: Response, nex
 export const getAffiliateEarningsSummary = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
 
     const links = await AffiliateLink.find({ userId: user._id });
     const totalEarned = links.reduce((acc, l) => acc + (l.totalEarned || 0), 0);
-    const totalConversions = links.reduce((acc, l) => acc + (l.conversions || 0), 0);
-    const totalClicks = links.reduce((acc, l) => acc + (l.clicks || 0), 0);
-    const alreadyWithdrawn = (user as any).affiliateWithdrawn || 0;
+
+    // Calculate withdrawn amount
+    const withdrawals = await Transaction.aggregate([
+      {
+        $match: {
+          userId: user._id,
+          type: 'affiliate_withdrawal',
+          status: 'completed'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' }
+        }
+      }
+    ]);
+    const alreadyWithdrawn = withdrawals.length > 0 ? withdrawals[0].total : 0;
     const available = totalEarned - alreadyWithdrawn;
 
-    // Group by course for breakdown
+    // Breakdown by course
     const breakdown = await Promise.all(links.map(async (l) => {
       const course = await Course.findById(l.courseId).select('title price affiliatePercent');
       return {
@@ -402,8 +409,8 @@ export const getAffiliateEarningsSummary = async (req: Request, res: Response, n
         totalEarned,
         available,
         alreadyWithdrawn,
-        totalConversions,
-        totalClicks,
+        totalConversions: links.reduce((acc, l) => acc + (l.conversions || 0), 0),
+        totalClicks: links.reduce((acc, l) => acc + (l.clicks || 0), 0),
         linksCount: links.length,
         breakdown,
       }
@@ -433,7 +440,6 @@ export const deleteAffiliateLink = async (req: Request, res: Response, next: Nex
       });
     }
 
-    // Prevent deletion if link has conversions (earnings already generated)
     if (link.conversions > 0) {
       return res.status(400).json({
         success: false,
@@ -477,7 +483,6 @@ export const getAffiliateOffers = async (req: Request, res: Response, next: Next
       approvalStatus: 'approved'
     });
 
-    // Check if user already has a link for each course (if authenticated)
     let userLinks: any[] = [];
     if (req.user) {
       const user = req.user as IUser;
