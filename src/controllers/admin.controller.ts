@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE – HYBRID UPLOAD)
+// FILE: src/controllers/admin.controller.ts (FIXED - no TS errors)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -1402,7 +1402,7 @@ export const uploadFile = async (req: Request, res: Response) => {
 
     // 2. Try to upload to Cloudinary (best effort)
     let cloudinaryUrl = null;
-    let uploadError = null;
+    let uploadError: string | null = null;
 
     try {
       const fileBuffer = fs.readFileSync(diskPath);
@@ -1414,8 +1414,13 @@ export const uploadFile = async (req: Request, res: Response) => {
       });
       cloudinaryUrl = result.secure_url;
     } catch (err) {
-      uploadError = err.message;
-      console.warn('Cloudinary upload failed, file is saved on disk:', err);
+      // ✅ Fix: handle 'unknown' type safely
+      if (err instanceof Error) {
+        uploadError = err.message;
+      } else {
+        uploadError = String(err);
+      }
+      console.warn('Cloudinary upload failed, file is saved on disk:', uploadError);
     }
 
     // 3. Respond with URL (prefer Cloudinary, fallback to disk)
@@ -1439,7 +1444,7 @@ export const uploadFile = async (req: Request, res: Response) => {
       fs.unlinkSync(req.file.path);
     }
     console.error('Upload file error:', err);
-    res.status(500).json({ success: false, message: String(err) });
+    res.status(500).json({ success: false, message: 'Upload failed' });
   }
 };
 
@@ -1459,7 +1464,7 @@ export const createBook = async (req: Request, res: Response) => {
       description: description || '',
       price: price || 0,
       coverImage: coverImage || '',
-      fileUrl,       // This will be the final URL (disk or cloudinary)
+      fileUrl,
       uploadedBy: user._id,
       isPublished: true,
     });
@@ -1493,7 +1498,6 @@ export const deleteBook = async (req: Request, res: Response) => {
     if (!book) {
       return res.status(404).json({ success: false, message: 'Book not found' });
     }
-    // Optional: delete disk file and Cloudinary file too
     res.json({ success: true, message: 'Book deleted successfully' });
   } catch (err) {
     console.error('Delete book error:', err);
