@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE – FULLY UPDATED)
+// FILE: src/controllers/admin.controller.ts (COMPLETE)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -274,13 +274,6 @@ export const approveCourse = async (req: Request, res: Response) => {
         title: 'Course Approved', 
         message: `Your course "${course.title}" is now live!`
       });
-      
-      // Ping search engines for SEO
-      try {
-        const sitemapUrl = `${process.env.BACKEND_URL || process.env.FRONTEND_URL}/seo/sitemap.xml`;
-        await fetch(`https://www.google.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
-        await fetch(`https://www.bing.com/ping?sitemap=${encodeURIComponent(sitemapUrl)}`);
-      } catch (_) {}
     }
     
     res.json({ success: true, message: 'Course approved and published', data: course });
@@ -659,7 +652,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       const course = await Course.findById(payment.metadata?.courseId || payment.courseId);
       if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
-      // Enroll user
       const existingEnrollment = await Enrollment.findOne({ userId: payment.userId, courseId: course._id });
       if (!existingEnrollment) {
         await Enrollment.create({ userId: payment.userId, courseId: course._id });
@@ -670,7 +662,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       let affiliateCommission = 0;
       let affiliateUserId = null;
 
-      // 1. Check for explicit affiliate code first
       const affiliateCode = payment.metadata?.affiliateCode;
       if (affiliateCode) {
         const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
@@ -684,7 +675,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
-      // 2. If no affiliate code but referral code exists, treat referral as affiliate
       const referralCode = payment.metadata?.referralCode;
       if (!affiliateCode && referralCode && course.hasAffiliate && course.affiliatePercent > 0) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
@@ -695,7 +685,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
-      // 3. Credit affiliate (if any)
       if (affiliateUserId && affiliateCommission > 0) {
         const affiliate = await User.findById(affiliateUserId);
         if (affiliate) {
@@ -713,7 +702,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
-      // 4. Referral bonus (only if no affiliate commission was given)
       const netAmount = (course.salePrice || course.price || 0) - affiliateCommission;
       let referralBonus = 0;
       if (!affiliateCommission && referralCode) {
@@ -734,7 +722,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
-      // 5. Instructor earnings (80% of net after affiliate commission)
       const instructorShare = netAmount * 0.8;
       if (course.instructorId) {
         const instructor = await User.findById(course.instructorId);
@@ -753,7 +740,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
-      // User purchase transaction
       await Transaction.create({
         userId: payment.userId,
         type: 'course_purchase',
@@ -781,7 +767,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         reference: payment.reference,
       });
 
-      // Referral bonus ₦500
       const referralCode = payment.metadata?.referralCode;
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
@@ -824,7 +809,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
 
-      // Referral bonus for book (10% of book price)
       const referralCode = payment.metadata?.referralCode;
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
@@ -1431,6 +1415,64 @@ export const uploadFile = async (req: Request, res: Response) => {
     res.json({ success: true, data: { url: result.secure_url } });
   } catch (err) {
     console.error('Upload file error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ==================== BOOKS (Admin CRUD) ====================
+
+export const createBook = async (req: Request, res: Response) => {
+  try {
+    const user = req.user as IUser;
+    const { title, author, description, price, coverImage, fileUrl } = req.body;
+
+    if (!title || !author || !fileUrl) {
+      return res.status(400).json({ success: false, message: 'Title, author, and file URL are required' });
+    }
+
+    const book = await Book.create({
+      title,
+      author,
+      description: description || '',
+      price: price || 0,
+      coverImage: coverImage || '',
+      fileUrl,
+      uploadedBy: user._id,
+      isPublished: true,
+    });
+
+    res.status(201).json({ success: true, data: book });
+  } catch (err) {
+    console.error('Create book error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const updateBook = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+    const book = await Book.findByIdAndUpdate(id, updateData, { new: true, runValidators: true });
+    if (!book) {
+      return res.status(404).json({ success: false, message: 'Book not found' });
+    }
+    res.json({ success: true, data: book });
+  } catch (err) {
+    console.error('Update book error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const deleteBook = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const book = await Book.findByIdAndDelete(id);
+    if (!book) {
+      return res.status(404).json({ success: false, message: 'Book not found' });
+    }
+    res.json({ success: true, message: 'Book deleted successfully' });
+  } catch (err) {
+    console.error('Delete book error:', err);
     res.status(500).json({ success: false, message: String(err) });
   }
 };
