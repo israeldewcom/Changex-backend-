@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Book.ts (ensure default export)
+// FILE: src/models/Book.ts
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -9,7 +9,9 @@ export interface IBook extends Document {
   author: string;
   description: string;
   coverImage: string;
-  fileUrl: string;
+  fileUrl: string;          // final URL (points to cloudinary or disk)
+  diskPath?: string;        // local disk path (for fallback)
+  cloudinaryUrl?: string;   // cloudinary URL (optional)
   price: number;
   downloads: number;
   views: number;
@@ -19,17 +21,22 @@ export interface IBook extends Document {
   updatedAt: Date;
 }
 
-const BookSchema = new Schema<IBook>({
-  title: { type: String, required: true },
-  author: { type: String, required: true },
-  description: String,
-  coverImage: String,
-  fileUrl: { type: String, required: true },
-  price: { type: Number, default: 0 },
-  downloads: { type: Number, default: 0 },
-  views: { type: Number, default: 0 },
-  isPublished: { type: Boolean, default: true },
-  uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true }
-}, { timestamps: true });
+const BookSchema = new Schema<IBook>(
+  {
+    title: { type: String, required: true },
+    author: { type: String, required: true },
+    description: String,
+    coverImage: String,
+    fileUrl: { type: String, required: true },
+    diskPath: { type: String, default: '' },
+    cloudinaryUrl: { type: String, default: '' },
+    price: { type: Number, default: 0 },
+    downloads: { type: Number, default: 0 },
+    views: { type: Number, default: 0 },
+    isPublished: { type: Boolean, default: true },
+    uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  },
+  { timestamps: true }
+);
 
 export default mongoose.model<IBook>('Book', BookSchema);
