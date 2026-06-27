@@ -966,6 +966,19 @@ export const getUserFullDetails = async (req: Request, res: Response) => {
   }
 };
 
+export const getUserPosts = async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const posts = await Post.find({ authorId: userId })
+      .sort('-createdAt')
+      .select('title type createdAt likes commentsCount views earnings');
+    res.json({ success: true, data: posts });
+  } catch (err) {
+    console.error('Get user posts error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
 // ==================== CHALLENGE MANAGEMENT ====================
 export const createChallenge = async (req: Request, res: Response) => {
   try {
