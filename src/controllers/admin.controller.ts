@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE)
+// FILE: src/controllers/admin.controller.ts (COMPLETE – HYBRID UPLOAD)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -25,6 +25,8 @@ import AffiliateLink from '../models/AffiliateLink.js';
 import Rating from '../models/Rating.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
+import fs from 'fs';
+import path from 'path';
 
 // ==================== DASHBOARD ====================
 export const getDashboard = async (req: Request, res: Response) => {
@@ -647,7 +649,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: `Payment already ${payment.status}` });
     }
 
-    // ─── COURSE PURCHASE ──────────────────────────────────────────────────
     if (payment.type === 'course') {
       const course = await Course.findById(payment.metadata?.courseId || payment.courseId);
       if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
@@ -751,7 +752,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       });
     }
 
-    // ─── SUBSCRIPTION ──────────────────────────────────────────────────────
     else if (payment.type === 'subscription') {
       await User.findByIdAndUpdate(payment.userId, {
         isPremium: true,
@@ -789,7 +789,6 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       }
     }
 
-    // ─── BOOK PURCHASE ──────────────────────────────────────────────────────
     else if (payment.type === 'book') {
       const bookId = payment.metadata?.bookId;
       if (!bookId) return res.status(400).json({ success: false, message: 'Book ID missing in metadata' });
@@ -1368,7 +1367,7 @@ export const triggerSocialEarnings = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== FILE UPLOAD ====================
+// ==================== FILE UPLOAD – HYBRID (DISK + CLOUDINARY) ====================
 export const uploadImage = async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -1397,30 +1396,54 @@ export const uploadFile = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
-    if (!allowedTypes.includes(req.file.mimetype) && !req.file.mimetype.startsWith('image/')) {
-      return res.status(400).json({ success: false, message: 'File type not supported. Please upload PDF or image.' });
+    // 1. Save file to disk (already done by multer)
+    const diskPath = req.file.path;
+    const relativePath = `/uploads/books/${req.file.filename}`;
+
+    // 2. Try to upload to Cloudinary (best effort)
+    let cloudinaryUrl = null;
+    let uploadError = null;
+
+    try {
+      const fileBuffer = fs.readFileSync(diskPath);
+      const result = await uploadToCloudinary(fileBuffer, 'books', {
+        resource_type: 'raw',
+        access_mode: 'public',
+        use_filename: true,
+        unique_filename: true,
+      });
+      cloudinaryUrl = result.secure_url;
+    } catch (err) {
+      uploadError = err.message;
+      console.warn('Cloudinary upload failed, file is saved on disk:', err);
     }
 
-    const isImage = req.file.mimetype.startsWith('image/');
-    const resourceType = isImage ? 'image' : 'raw';
+    // 3. Respond with URL (prefer Cloudinary, fallback to disk)
+    const finalUrl = cloudinaryUrl || `${process.env.BACKEND_URL || process.env.FRONTEND_URL}${relativePath}`;
 
-    const result = await uploadToCloudinary(req.file.buffer, 'books', {
-      resource_type: resourceType,
-      access_mode: 'public',
-      use_filename: true,
-      unique_filename: true,
+    res.json({
+      success: true,
+      data: {
+        url: finalUrl,
+        diskPath: relativePath,
+        cloudinaryUrl: cloudinaryUrl,
+        uploadError: uploadError || null,
+        message: cloudinaryUrl
+          ? 'File uploaded to disk and Cloudinary'
+          : 'File uploaded to disk only (Cloudinary unavailable)',
+      },
     });
-
-    res.json({ success: true, data: { url: result.secure_url } });
   } catch (err) {
+    // Clean up on error
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     console.error('Upload file error:', err);
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
 // ==================== BOOKS (Admin CRUD) ====================
-
 export const createBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -1436,7 +1459,7 @@ export const createBook = async (req: Request, res: Response) => {
       description: description || '',
       price: price || 0,
       coverImage: coverImage || '',
-      fileUrl,
+      fileUrl,       // This will be the final URL (disk or cloudinary)
       uploadedBy: user._id,
       isPublished: true,
     });
@@ -1470,6 +1493,7 @@ export const deleteBook = async (req: Request, res: Response) => {
     if (!book) {
       return res.status(404).json({ success: false, message: 'Book not found' });
     }
+    // Optional: delete disk file and Cloudinary file too
     res.json({ success: true, message: 'Book deleted successfully' });
   } catch (err) {
     console.error('Delete book error:', err);
