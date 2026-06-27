@@ -1,13 +1,18 @@
+// ============================================================
+// FILE: src/controllers/book.controller.ts
+// ============================================================
+
 import { Request, Response } from 'express';
 import Book from '../models/Book.js';
 import { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// ─── Admin: Create Book ──────────────────────────────────────────────
 export const createBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -30,7 +35,6 @@ export const createBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── Admin: Update Book ──────────────────────────────────────────────
 export const updateBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -45,7 +49,6 @@ export const updateBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── Admin: Delete Book ──────────────────────────────────────────────
 export const deleteBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -59,7 +62,6 @@ export const deleteBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── Admin: List All Books ──────────────────────────────────────────
 export const listAllBooks = async (req: Request, res: Response) => {
   try {
     const books = await Book.find().sort('-createdAt');
@@ -69,7 +71,6 @@ export const listAllBooks = async (req: Request, res: Response) => {
   }
 };
 
-// ─── User: List Published Books ──────────────────────────────────────
 export const listBooks = async (req: Request, res: Response) => {
   try {
     const books = await Book.find({ isPublished: true }).sort('-createdAt');
@@ -79,7 +80,6 @@ export const listBooks = async (req: Request, res: Response) => {
   }
 };
 
-// ─── User: Get Single Book – with isPurchased flag ──────────────────
 export const getBook = async (req: Request, res: Response) => {
   try {
     const book = await Book.findById(req.params.id);
@@ -106,7 +106,6 @@ export const getBook = async (req: Request, res: Response) => {
   }
 };
 
-// ─── User: Download Book – with purchase check & download count ────
 export const downloadBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -125,16 +124,39 @@ export const downloadBook = async (req: Request, res: Response) => {
       }
     }
 
+    // Increment download count
     book.downloads += 1;
     await book.save();
 
-    res.json({ success: true, data: { downloadUrl: book.fileUrl } });
+    // ─── Hybrid download: prefer Cloudinary, fallback to disk ───
+    // If the book has a Cloudinary URL in the database (or fileUrl points to Cloudinary)
+    // We'll check if fileUrl contains 'cloudinary' or is a full URL.
+    let downloadUrl = book.fileUrl;
+
+    // If fileUrl is a disk path (starts with /uploads/), construct full URL
+    if (downloadUrl && downloadUrl.startsWith('/uploads/')) {
+      const diskPath = path.join(process.cwd(), downloadUrl);
+      if (fs.existsSync(diskPath)) {
+        // Serve the file from disk
+        const fileName = `${book.title.replace(/[^a-zA-Z0-9 ]/g, ' ').trim()}.pdf`;
+        return res.download(diskPath, fileName);
+      } else {
+        return res.status(404).json({ success: false, message: 'File not found on server' });
+      }
+    }
+
+    // Otherwise, if it's a full URL (Cloudinary or any CDN), redirect
+    if (downloadUrl && downloadUrl.startsWith('http')) {
+      return res.redirect(downloadUrl);
+    }
+
+    // Fallback – if no URL, return error
+    return res.status(404).json({ success: false, message: 'No download file available' });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
 };
 
-// ─── User: Purchase Book (Paystack) ──────────────────────────────────
 export const purchaseBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
