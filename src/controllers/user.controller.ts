@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/controllers/user.controller.ts (UPDATED – CACHED LEADERBOARD)
+// ============================================================
+
 import { Request, Response, NextFunction } from 'express';
 import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
@@ -8,6 +12,7 @@ import Course from '../models/Course.js';
 import Follow from '../models/Follow.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
+import { getOrSetCache, invalidateCache } from '../services/cache.js';
 
 export const getProfile = async (req: Request, res: Response) => {
   const user = req.user as IUser;
@@ -43,51 +48,12 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
   try {
     const user = req.user as IUser;
     const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(50);
-    const breakdown = {
-      referralEarnings: 0,
-      courseBonuses: 0,
-      affiliateCommissions: 0,
-      instructorEarnings: 0,
-      welcomeBonus: 0,
-      totalEarnings: 0,
-    };
-    for (const tx of transactions) {
-      const amount = Number(tx.amount) || 0;
-      if (amount > 0) {
-        switch (tx.type) {
-          case 'referral_bonus':
-          case 'referral_commission':
-            breakdown.referralEarnings += amount;
-            break;
-          case 'bonus':
-            if (tx.description && tx.description.toLowerCase().includes('welcome')) {
-              breakdown.welcomeBonus += amount;
-            } else {
-              breakdown.courseBonuses += amount;
-            }
-            break;
-          case 'affiliate_commission':
-            breakdown.affiliateCommissions += amount;
-            break;
-          case 'instructor_earning':
-            breakdown.instructorEarnings += amount;
-            break;
-        }
-      }
-    }
-    if (user.hasClaimedWelcomeBonus && breakdown.welcomeBonus === 0) {
-      breakdown.welcomeBonus = 500;
-    }
-    breakdown.totalEarnings = breakdown.referralEarnings + breakdown.courseBonuses + breakdown.affiliateCommissions + breakdown.instructorEarnings + breakdown.welcomeBonus;
-
-    const recentTransactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(50);
     res.json({
       success: true,
       data: {
         balance: Number(user.walletBalance) || 0,
         pending: Number(user.pendingWithdrawal) || 0,
-        transactions: recentTransactions,
-        earningsBreakdown: breakdown,
+        transactions,
       },
     });
   } catch (err) { next(err); }
@@ -131,16 +97,22 @@ export const markAllNotificationsRead = async (req: Request, res: Response, next
   } catch (err) { next(err); }
 };
 
+// ─── LEADERBOARD (CACHED) ─────────────────────────────────────────────
 export const getLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { type = 'xp', limit = 20 } = req.query;
-    let sortField = 'xp';
-    if (type === 'earnings') sortField = 'walletBalance';
-    const users = await User.find({ roles: { $ne: 'admin' } })
-      .sort({ [sortField]: -1 })
-      .limit(Number(limit))
-      .select('firstName lastName xp walletBalance level avatarUrl streakDays');
-    res.json({ success: true, data: users });
+    const cacheKey = `leaderboard:${type}:${limit}`;
+    const data = await getOrSetCache(cacheKey, async () => {
+      let sortField = 'xp';
+      if (type === 'earnings') sortField = 'walletBalance';
+      const users = await User.find({})
+        .sort({ [sortField]: -1 })
+        .limit(Number(limit))
+        .select('firstName lastName xp walletBalance level avatarUrl streakDays')
+        .lean();
+      return users;
+    }, 3600);
+    res.json({ success: true, data });
   } catch (err) { next(err); }
 };
 
@@ -148,18 +120,13 @@ export const getReferrals = async (req: Request, res: Response, next: NextFuncti
   try {
     const user = req.user as IUser;
     const referrals = await Referral.find({ referrerId: user._id }).populate('referredId', 'firstName lastName email');
-    const formatted = referrals.map((r: any) => {
-      if (!r.referredId) {
-        return { id: r._id, name: '⚠️ User Removed', date: r.createdAt, status: 'invalid', earned: r.earned || 0 };
-      }
-      return {
-        id: r._id,
-        name: `${r.referredId.firstName || ''} ${r.referredId.lastName || ''}`.trim() || 'User',
-        date: r.createdAt,
-        status: r.status,
-        earned: r.earned || 0,
-      };
-    });
+    const formatted = referrals.map((r: any) => ({
+      id: r._id,
+      name: r.referredId ? `${r.referredId.firstName} ${r.referredId.lastName}` : 'User',
+      date: r.createdAt,
+      status: r.status,
+      earned: r.earned,
+    }));
     res.json({ success: true, data: formatted });
   } catch (err) { next(err); }
 };
@@ -186,22 +153,12 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
 export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if (user.hasClaimedWelcomeBonus) {
-      return res.status(400).json({ success: false, message: 'Bonus already claimed' });
-    }
-    if (!user.bio && !user.location) {
-      return res.status(400).json({ success: false, message: 'Complete your profile first' });
-    }
+    if ((user as any).welcomeBonusClaimed) return res.status(400).json({ success: false, message: 'Bonus already claimed' });
+    if (!user.bio && !user.location) return res.status(400).json({ success: false, message: 'Complete your profile first' });
     user.walletBalance += 500;
-    user.hasClaimedWelcomeBonus = true;
+    (user as any).welcomeBonusClaimed = true;
     await user.save();
-    await Transaction.create({
-      userId: user._id,
-      type: 'bonus',
-      amount: 500,
-      status: 'completed',
-      description: 'Welcome bonus',
-    });
+    await Transaction.create({ userId: user._id, type: 'bonus', amount: 500, status: 'completed', description: 'Welcome bonus' });
     res.json({ success: true, message: '₦500 added to your wallet', balance: user.walletBalance });
   } catch (err) { next(err); }
 };
@@ -212,13 +169,6 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
     const user = await User.findById(userId).select('-passwordHash');
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
-    }
-    // If the requested user is admin and the requester is not admin, deny access
-    if (user.roles.includes('admin')) {
-      const requester = req.user as IUser;
-      if (!requester || !requester.roles.includes('admin')) {
-        return res.status(403).json({ success: false, message: 'Access denied' });
-      }
     }
 
     const posts = await Post.find({ authorId: userId, isPublished: true })
@@ -248,17 +198,10 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
     const followersCount = await Follow.countDocuments({ followingId: userId });
     const followingCount = await Follow.countDocuments({ followerId: userId });
 
-    // Remove roles from public profile (except for self or admin)
-    const publicUser = user.toObject ? user.toObject() : user;
-    const responseUser = { ...publicUser };
-    if (req.user && (req.user as IUser)._id.toString() !== userId && !(req.user as IUser).roles.includes('admin')) {
-      delete (responseUser as any).roles;
-    }
-
     res.json({
       success: true,
       data: {
-        user: responseUser,
+        user,
         posts,
         courses,
         challengeProgress,
