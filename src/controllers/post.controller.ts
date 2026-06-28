@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/post.controller.ts (Already supports slugs)
+// FILE: src/controllers/post.controller.ts (UPDATED – CACHED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -13,6 +13,7 @@ import PostAnalytics from '../models/PostAnalytics.js';
 import { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
+import { getOrSetCache, invalidateCache } from '../services/cache.js';
 
 function generateSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now();
@@ -40,6 +41,9 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
       isPublished: true,
     });
 
+    // Invalidate post list cache
+    await invalidateCache('posts:*');
+
     const populatedPost = await Post.findById(post._id).populate('authorId', 'firstName lastName avatarUrl');
     getIO().emit('new_post', populatedPost);
 
@@ -58,6 +62,8 @@ export const updatePost = async (req: Request, res: Response, next: NextFunction
       return res.status(403).json({ success: false, message: 'Not authorized' });
     }
     const updated = await Post.findByIdAndUpdate(id, req.body, { new: true });
+    await invalidateCache(`post:${id}`);
+    await invalidateCache('posts:*');
     res.json({ success: true, data: updated });
   } catch (err) {
     next(err);
@@ -91,6 +97,7 @@ export const publishPost = async (req: Request, res: Response, next: NextFunctio
     const populatedPost = await Post.findById(post._id).populate('authorId', 'firstName lastName avatarUrl');
     getIO().emit('new_post', populatedPost);
 
+    await invalidateCache('posts:*');
     res.json({ success: true, data: post });
   } catch (err) {
     next(err);
@@ -112,6 +119,8 @@ export const deletePost = async (req: Request, res: Response, next: NextFunction
     await Like.deleteMany({ targetId: id, targetType: 'post' });
     await PostAnalytics.deleteOne({ postId: id });
     await Post.findByIdAndDelete(id);
+    await invalidateCache(`post:${id}`);
+    await invalidateCache('posts:*');
     getIO().emit('post_deleted', { postId: id });
     res.json({ success: true, message: 'Post deleted' });
   } catch (err) {
@@ -129,6 +138,7 @@ export const uploadPostVideo = async (req: Request, res: Response, next: NextFun
     const result = await uploadToCloudinary(req.file.buffer, `posts/${id}/videos`, { resource_type: 'video' });
     post.videoUrl = result.secure_url;
     await post.save();
+    await invalidateCache(`post:${id}`);
     res.json({ success: true, data: { videoUrl: result.secure_url } });
   } catch (err) {
     next(err);
@@ -143,32 +153,37 @@ export const getPublishedPosts = async (req: Request, res: Response, next: NextF
     if (type) filter.type = type;
     if (author) filter.authorId = author;
 
-    const posts = await Post.find(filter)
-      .populate('authorId', 'firstName lastName avatarUrl bio')
-      .sort({ createdAt: -1 })
-      .skip((Number(page) - 1) * Number(limit))
-      .limit(Number(limit))
-      .lean();
+    const cacheKey = `posts:${JSON.stringify({ page, limit, tag, type, author })}`;
+    const data = await getOrSetCache(cacheKey, async () => {
+      const posts = await Post.find(filter)
+        .populate('authorId', 'firstName lastName avatarUrl bio')
+        .sort({ createdAt: -1 })
+        .skip((Number(page) - 1) * Number(limit))
+        .limit(Number(limit))
+        .lean();
 
-    const postIds = posts.map(p => p._id);
-    const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
-    const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
+      const postIds = posts.map(p => p._id);
+      const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
+      const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
 
-    const postsWithEarnings = posts.map(p => ({
-      ...p,
-      earnings: earningsMap[p._id.toString()] || 0
-    }));
+      const postsWithEarnings = posts.map(p => ({
+        ...p,
+        earnings: earningsMap[p._id.toString()] || 0
+      }));
 
-    const total = await Post.countDocuments(filter);
+      const total = await Post.countDocuments(filter);
+      return { posts: postsWithEarnings, total };
+    }, 3600);
+
     res.json({
       success: true,
       data: {
-        posts: postsWithEarnings,
+        posts: data.posts,
         pagination: {
-          total,
+          total: data.total,
           page: Number(page),
           limit: Number(limit),
-          pages: Math.ceil(total / Number(limit))
+          pages: Math.ceil(data.total / Number(limit))
         }
       }
     });
@@ -180,16 +195,19 @@ export const getPublishedPosts = async (req: Request, res: Response, next: NextF
 export const getPostBySlug = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug } = req.params;
-    const post = await Post.findOneAndUpdate(
-      { slug, isPublished: true },
-      { $inc: { views: 1 } },
-      { new: true }
-    ).populate('authorId', 'firstName lastName avatarUrl bio socialLinks').lean();
+    const cacheKey = `post:${slug}`;
+    const post = await getOrSetCache(cacheKey, async () => {
+      const found = await Post.findOneAndUpdate(
+        { slug, isPublished: true },
+        { $inc: { views: 1 } },
+        { new: true }
+      ).populate('authorId', 'firstName lastName avatarUrl bio socialLinks').lean();
+      if (!found) return null;
+      const analytics = await PostAnalytics.findOne({ postId: found._id });
+      return { ...found, earnings: analytics?.earnings || 0 };
+    }, 3600);
 
     if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
-
-    const analytics = await PostAnalytics.findOne({ postId: post._id });
-    const earnings = analytics?.earnings || 0;
 
     let userLiked = false;
     if (req.user) {
@@ -197,7 +215,7 @@ export const getPostBySlug = async (req: Request, res: Response, next: NextFunct
       userLiked = !!like;
     }
 
-    res.json({ success: true, data: { ...post, earnings, userLiked } });
+    res.json({ success: true, data: { ...post, userLiked } });
   } catch (err) {
     next(err);
   }
@@ -216,6 +234,7 @@ export const likePost = async (req: Request, res: Response, next: NextFunction) 
         { $inc: { likes: -1, totalEngagement: -1 } },
         { upsert: true }
       );
+      await invalidateCache(`post:${id}`);
       res.json({ success: true, liked: false, likes: (await Post.findById(id))?.likes });
     } else {
       await Like.create({ userId: user._id, targetId: id, targetType: 'post' });
@@ -225,6 +244,7 @@ export const likePost = async (req: Request, res: Response, next: NextFunction) 
         { $inc: { likes: 1, totalEngagement: 1 } },
         { upsert: true }
       );
+      await invalidateCache(`post:${id}`);
       res.json({ success: true, liked: true, likes: post?.likes });
     }
   } catch (err) {
@@ -257,6 +277,7 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
       getIO().to(`user:${post.authorId}`).emit('notification', { title: 'New Comment' });
     }
 
+    await invalidateCache(`post:${id}`);
     res.status(201).json({ success: true, data: comment });
   } catch (err) {
     next(err);
@@ -311,6 +332,7 @@ export const sharePost = async (req: Request, res: Response, next: NextFunction)
       { $inc: { shares: 1, totalEngagement: 3 } },
       { upsert: true }
     );
+    await invalidateCache(`post:${id}`);
     res.json({ success: true, message: 'Share counted' });
   } catch (err) {
     next(err);
@@ -402,6 +424,7 @@ export const trackPostView = async (req: Request, res: Response, next: NextFunct
       { $inc: { views: 1, totalEngagement: 0.5 } },
       { upsert: true }
     );
+    await invalidateCache(`post:${id}`);
     res.json({ success: true });
   } catch (err) {
     next(err);
