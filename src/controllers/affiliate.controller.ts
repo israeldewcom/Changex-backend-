@@ -1,6 +1,5 @@
 // ============================================================
-// FILE: src/controllers/affiliate.controller.ts
-// FIXED – Uses Transaction for withdrawal tracking
+// FILE: src/controllers/affiliate.controller.ts (COMPLETE)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -13,7 +12,7 @@ import { v4 as uuid } from 'uuid';
 
 /**
  * Accept an affiliate offer for a course.
- * Creates a unique affiliate link for the user.
+ * Creates a unique affiliate link for the user with a clean, shareable URL.
  */
 export const acceptAffiliateOffer = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -24,6 +23,7 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
 
+    // Validate course exists and has affiliate enabled
     const course = await Course.findById(courseId);
     if (!course) {
       return res.status(404).json({ success: false, message: 'Course not found' });
@@ -32,10 +32,12 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
       return res.status(400).json({ success: false, message: 'Affiliate not available for this course' });
     }
 
+    // Check if affiliate link already exists for this user and course
     let link = await AffiliateLink.findOne({ userId: user._id, courseId });
 
     if (link) {
-      const fullLink = `${process.env.CLIENT_URL}/#courses/${courseId}?aff=${link.code}`;
+      // Return existing link with clean URL format (no hash)
+      const fullLink = `${process.env.CLIENT_URL}/courses/${courseId}?aff=${link.code}`;
       return res.json({
         success: true,
         data: {
@@ -45,7 +47,10 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
       });
     }
 
+    // Generate unique affiliate code
     const code = uuid().slice(0, 8).toUpperCase();
+
+    // Create new affiliate link
     link = await AffiliateLink.create({
       userId: user._id,
       courseId,
@@ -55,8 +60,10 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
       totalEarned: 0,
     });
 
-    const fullLink = `${process.env.CLIENT_URL}/#courses/${courseId}?aff=${code}`;
+    // ✅ Build clean, shareable URL for SPA
+    const fullLink = `${process.env.CLIENT_URL}/courses/${courseId}?aff=${code}`;
 
+    // Send notification to user
     await Notification.create({
       userId: user._id,
       title: '✅ Affiliate Link Created',
@@ -83,6 +90,7 @@ export const acceptAffiliateOffer = async (req: Request, res: Response, next: Ne
 export const getMyLinks = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
+
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
@@ -91,12 +99,13 @@ export const getMyLinks = async (req: Request, res: Response, next: NextFunction
       .populate('courseId', 'title price affiliatePercent thumbnail')
       .sort('-createdAt');
 
+    // Enrich each link with a clean full URL
     const enriched = links.map(l => {
       const course = l.courseId as any;
       const courseId = course?._id || l.courseId;
       return {
         ...l.toObject(),
-        link: `${process.env.CLIENT_URL}/#courses/${courseId}?aff=${l.code}`,
+        link: `${process.env.CLIENT_URL}/courses/${courseId}?aff=${l.code}`,
         courseTitle: course?.title || 'Course',
         coursePrice: course?.price || 0,
         affiliatePercent: course?.affiliatePercent || 15,
@@ -113,30 +122,35 @@ export const getMyLinks = async (req: Request, res: Response, next: NextFunction
 };
 
 /**
- * Track affiliate click and redirect to course page with hash-based routing.
+ * Track affiliate click and redirect to course page with clean URL.
  */
 export const trackAffiliateClick = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { code } = req.params;
+
     if (!code) {
       return res.redirect(process.env.CLIENT_URL || '/');
     }
 
+    // Find the affiliate link
     const link = await AffiliateLink.findOne({ code });
     if (!link) {
       return res.redirect(process.env.CLIENT_URL || '/');
     }
 
+    // Increment click count
     link.clicks += 1;
     await link.save();
 
+    // Set affiliate cookie for tracking purchases (30-day expiry)
     res.cookie('affiliate_code', code, {
       maxAge: 30 * 24 * 60 * 60 * 1000,
       httpOnly: true,
       path: '/',
     });
 
-    const redirectUrl = `${process.env.CLIENT_URL}/#courses/${link.courseId}?aff=${code}`;
+    // ✅ Redirect to clean URL (no hash)
+    const redirectUrl = `${process.env.CLIENT_URL}/courses/${link.courseId}?aff=${code}`;
     res.redirect(redirectUrl);
   } catch (err) {
     next(err);
@@ -149,18 +163,21 @@ export const trackAffiliateClick = async (req: Request, res: Response, next: Nex
 export const getAffiliateStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
+
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
 
     const links = await AffiliateLink.find({ userId: user._id });
+
     const totalClicks = links.reduce((acc, l) => acc + (l.clicks || 0), 0);
     const totalConversions = links.reduce((acc, l) => acc + (l.conversions || 0), 0);
     const totalEarned = links.reduce((acc, l) => acc + (l.totalEarned || 0), 0);
 
+    // Count unique signups attributed to affiliate
     const totalSignups = await User.countDocuments({
       referredBy: user._id,
-      isPremium: true
+      isPremium: true // Only count converted signups
     });
 
     res.json({
@@ -259,7 +276,7 @@ export const getCourseAffiliateStats = async (req: Request, res: Response, next:
     }
 
     const course = link.courseId as any;
-    const fullLink = `${process.env.CLIENT_URL}/#courses/${courseId}?aff=${link.code}`;
+    const fullLink = `${process.env.CLIENT_URL}/courses/${courseId}?aff=${link.code}`;
 
     res.json({
       success: true,
@@ -361,6 +378,7 @@ export const withdrawAffiliateEarnings = async (req: Request, res: Response, nex
 export const getAffiliateEarningsSummary = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
+
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
@@ -398,7 +416,7 @@ export const getAffiliateEarningsSummary = async (req: Request, res: Response, n
         clicks: l.clicks || 0,
         conversions: l.conversions || 0,
         earned: l.totalEarned || 0,
-        link: `${process.env.CLIENT_URL}/#courses/${l.courseId}?aff=${l.code}`,
+        link: `${process.env.CLIENT_URL}/courses/${l.courseId}?aff=${l.code}`,
         code: l.code,
       };
     }));
@@ -422,6 +440,7 @@ export const getAffiliateEarningsSummary = async (req: Request, res: Response, n
 
 /**
  * Delete an affiliate link (user can delete their own link).
+ * Only if it has no conversions.
  */
 export const deleteAffiliateLink = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -495,7 +514,7 @@ export const getAffiliateOffers = async (req: Request, res: Response, next: Next
         ...course.toObject(),
         affiliateLink: existingLink ? {
           code: existingLink.code,
-          link: `${process.env.CLIENT_URL}/#courses/${course._id}?aff=${existingLink.code}`
+          link: `${process.env.CLIENT_URL}/courses/${course._id}?aff=${existingLink.code}`
         } : null,
         estimatedCommission: (course.price || 0) * ((course.affiliatePercent || 15) / 100),
       };
