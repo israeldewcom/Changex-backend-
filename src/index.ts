@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FULLY UPDATED – includes all routes + currency rates)
+// FILE: src/index.ts (FULLY UPDATED – with SPA catch‑all & SEO)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -12,6 +12,8 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { connectDB } from './config/db.js';
 import { connectRedis } from './config/redis.js';
 import { initializePassport } from './config/passport.js';
@@ -55,8 +57,11 @@ import interactiveRoutes from './routes/interactive.routes.js';
 // ─── CERTIFICATES ────────────────────────────────────────────────────
 import certificateRoutes from './routes/certificate.routes.js';
 
-// ─── BOOKS (NEW) ────────────────────────────────────────────────────
+// ─── BOOKS ──────────────────────────────────────────────────────────
 import bookRoutes from './routes/book.routes.js';
+
+// ─── SEO ─────────────────────────────────────────────────────────────
+import seoRoutes from './routes/seo.routes.js';
 
 // ─── MIDDLEWARE ──────────────────────────────────────────────────────
 import { errorHandler } from './middlewares/errorHandler.js';
@@ -79,6 +84,9 @@ import redis from './config/redis.js';
 import Enrollment from './models/Enrollment.js';
 import Referral from './models/Referral.js';
 import User from './models/User.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
@@ -142,6 +150,7 @@ app.get('/debug/version', (req, res) => {
       certificateGeneration: true,
       booksLibrary: true,
       personalizedFeed: true,
+      seoFriendlyUrls: true,
     },
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
@@ -180,9 +189,8 @@ app.get('/api/v1/announcements/latest', async (req, res) => {
   }
 });
 
-// ─── CURRENCY RATES (added for frontend) ──────────────────────────
+// ─── CURRENCY RATES ──────────────────────────────────────────────────
 app.get('/api/v1/currency/rates', (req, res) => {
-  // Static rates – can be updated from an external API later
   res.json({
     success: true,
     data: {
@@ -216,36 +224,42 @@ app.use('/api/v1/ai', authenticate, aiRoutes);
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
 // ─── SOCIAL FEATURES ─────────────────────────────────────────────────
-// Posts: public GET, but write/update require auth (handled inside)
 app.use('/api/v1/posts', postRoutes);
-
-// Follows: all require auth (handled inside)
 app.use('/api/v1/follows', followRoutes);
-
-// Challenges: public GET for active/upcoming, others auth (handled inside)
 app.use('/api/v1/challenges', challengeRoutes);
-
-// Ads: public GET for placement, admin routes require auth (handled inside)
 app.use('/api/v1/ads', adRoutes);
-
-// Interactive materials: all require auth (handled inside)
 app.use('/api/v1/interactive', authenticate, interactiveRoutes);
 
 // ─── CERTIFICATES ─────────────────────────────────────────────────────
 app.use('/api/v1/certificates', authenticate, certificateRoutes);
 
 // ─── BOOKS ──────────────────────────────────────────────────────────
-// Public: list & view; download & purchase require auth (handled inside)
 app.use('/api/v1/books', bookRoutes);
 
-// ─── ERROR HANDLER & 404 ─────────────────────────────────────────────
+// ─── SEO ─────────────────────────────────────────────────────────────
+app.use('/seo', seoRoutes); // sitemap, robots.txt etc.
+
+// ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+// ─── CATCH‑ALL ROUTE (SPA) – serves index.html for all non‑API routes ──
+app.get('*', (req, res) => {
+  // Skip API routes – they should have been handled above
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ success: false, message: 'API route not found' });
+  }
+  // Serve the SPA entry point
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
+
+// ─── ERROR HANDLER ──────────────────────────────────────────────────
 app.use(errorHandler);
 
 // ─── SOCKET.IO ───────────────────────────────────────────────────────
 const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
 setupSocket(io);
 
-// ─── CATCH‑ALL 404 ──────────────────────────────────────────────────
+// ─── CATCH‑ALL 404 (should not be reached due to catch‑all above) ──
 app.use('*', (req, res) => {
   logger.warn(`[404] Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ success: false, message: 'Route not found' });
@@ -280,7 +294,7 @@ async function bootstrap() {
       logger.info(`✅ Debug: http://localhost:${PORT}/debug/version`);
       logger.info(`📍 Routes: http://localhost:${PORT}/debug/routes`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency`);
+      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO`);
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
