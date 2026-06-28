@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/course.controller.ts (FIXED – type error resolved)
+// FILE: src/controllers/course.controller.ts (UPDATED – CACHED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -17,6 +17,7 @@ import Challenge from '../models/Challenge.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
 import { getIO } from '../socket.js';
+import { getOrSetCache, invalidateCache } from '../services/cache.js';
 
 // ─── Helper: auto‑complete challenge ──────────────────────────────────
 async function completeChallengeAndReward(challengeId: string, userId: string, adminNote: string = 'Auto‑completed') {
@@ -76,7 +77,7 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
-// ==================== GET PUBLISHED COURSES ====================
+// ==================== GET PUBLISHED COURSES (CACHED) ====================
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { category, level, search, limit = 20, offset = 0 } = req.query;
@@ -84,41 +85,57 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
     if (category) filter.category = category;
     if (level) filter.level = level;
     if (search) filter.title = { $regex: search, $options: 'i' };
-    const courses = await Course.find(filter)
-      .skip(Number(offset))
-      .limit(Number(limit))
-      .populate('instructorId', 'firstName lastName');
-    const total = await Course.countDocuments(filter);
-    res.json({ success: true, data: courses, meta: { total } });
+
+    const cacheKey = `courses:${JSON.stringify({ category, level, search, limit, offset })}`;
+    const data = await getOrSetCache(cacheKey, async () => {
+      const courses = await Course.find(filter)
+        .skip(Number(offset))
+        .limit(Number(limit))
+        .select('title price thumbnail level slug instructorId totalStudents avgRating')
+        .populate('instructorId', 'firstName lastName')
+        .lean();
+      const total = await Course.countDocuments(filter);
+      return { courses, total };
+    }, 3600);
+
+    res.json({ success: true, data: data.courses, meta: { total: data.total } });
   } catch (err) {
     next(err);
   }
 };
 
-// ==================== GET SINGLE COURSE – SUPPORTS SLUG ====================
+// ==================== GET SINGLE COURSE (CACHED) ====================
 export const getCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
-    // ✅ Fix: cast id to string to satisfy TypeScript
     const identifier = String(id);
-    let course;
+    const cacheKey = `course:${identifier}`;
 
-    // Try by ObjectId if it looks like one
-    if (mongoose.Types.ObjectId.isValid(identifier)) {
-      course = await Course.findById(identifier);
-    }
+    const course = await getOrSetCache(cacheKey, async () => {
+      let found;
+      if (mongoose.Types.ObjectId.isValid(identifier)) {
+        found = await Course.findById(identifier);
+      }
+      if (!found) {
+        found = await Course.findOne({ slug: identifier });
+      }
+      if (!found) return null;
 
-    // If not found, try by slug
-    if (!course) {
-      course = await Course.findOne({ slug: identifier });
-    }
+      const lessons = await Lesson.find({ courseId: found._id }).sort('order').lean();
+      const ratings = await Rating.find({ courseId: found._id })
+        .populate('userId', 'firstName lastName')
+        .lean();
+
+      return {
+        ...found.toObject(),
+        lessons,
+        ratings,
+      };
+    }, 7200); // 2 hours
 
     if (!course) {
       return res.status(404).json({ success: false, message: 'Course not found' });
     }
-
-    const lessons = await Lesson.find({ courseId: course._id }).sort('order');
-    const ratings = await Rating.find({ courseId: course._id }).populate('userId', 'firstName lastName');
 
     let enrollment = null;
     if (req.user) {
@@ -129,9 +146,7 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
     res.json({
       success: true,
       data: {
-        ...course.toObject(),
-        lessons,
-        ratings,
+        ...course,
         enrollment: enrollment ? { progress: enrollment.progress, status: enrollment.status } : null,
       },
     });
@@ -140,7 +155,13 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
-// ==================== GET USER ENROLLMENTS ====================
+// ─── INVALIDATE CACHE ON COURSE UPDATE ──────────────────────────────
+export const invalidateCourseCache = async (courseId: string) => {
+  await invalidateCache(`course:${courseId}`);
+  await invalidateCache('courses:*');
+};
+
+// ─── Other functions (unchanged) ──────────────────────────────────────
 export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -169,7 +190,6 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
   }
 };
 
-// ==================== ENROLL IN COURSE ====================
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -191,6 +211,8 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     await Enrollment.create({ userId: user._id, courseId: course._id });
     course.totalStudents += 1;
     await course.save();
+    // Invalidate cache for this course and courses list
+    await invalidateCourseCache(course._id.toString());
     const newEnrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id })
       .populate('courseId', 'title thumbnail totalLessons price rating level');
     res.json({
@@ -211,7 +233,6 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ==================== UPDATE LESSON PROGRESS (with auto‑challenge) ====================
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -233,7 +254,6 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       progress.timeSpent += timeSpent || 0;
     }
 
-    // TIME‑SENSITIVE XP
     if (completed && !progress.completed) {
       const lesson = await Lesson.findById(lessonId);
       if (lesson) {
@@ -314,7 +334,6 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
   }
 };
 
-// ==================== RATE COURSE ====================
 export const rateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -337,6 +356,8 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
     const avg = ratings.reduce((acc, r) => acc + r.rating, 0) / ratings.length;
     course.avgRating = avg;
     await course.save();
+    // Invalidate cache for this course
+    await invalidateCourseCache(course._id.toString());
     res.json({ success: true });
   } catch (err) {
     next(err);
