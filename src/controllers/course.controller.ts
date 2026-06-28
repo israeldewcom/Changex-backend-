@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/course.controller.ts (UPDATED – supports slugs)
+// FILE: src/controllers/course.controller.ts (FIXED – type error resolved)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -95,32 +95,31 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
   }
 };
 
-// ==================== GET SINGLE COURSE – UPDATED to support slug ====================
+// ==================== GET SINGLE COURSE – SUPPORTS SLUG ====================
 export const getCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
+    // ✅ Fix: cast id to string to satisfy TypeScript
+    const identifier = String(id);
     let course;
 
-    // ✅ If the parameter looks like a MongoDB ObjectId, try by _id
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      course = await Course.findById(id);
+    // Try by ObjectId if it looks like one
+    if (mongoose.Types.ObjectId.isValid(identifier)) {
+      course = await Course.findById(identifier);
     }
 
-    // ✅ If not found, try by slug (string)
+    // If not found, try by slug
     if (!course) {
-      course = await Course.findOne({ slug: id });
+      course = await Course.findOne({ slug: identifier });
     }
 
-    // ✅ If still not found, return 404
     if (!course) {
       return res.status(404).json({ success: false, message: 'Course not found' });
     }
 
-    // Populate lessons and ratings
     const lessons = await Lesson.find({ courseId: course._id }).sort('order');
     const ratings = await Rating.find({ courseId: course._id }).populate('userId', 'firstName lastName');
 
-    // If user is authenticated, attach enrollment status
     let enrollment = null;
     if (req.user) {
       const user = req.user as IUser;
