@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/config/redis.ts (UPDATED – ensure connection)
+// ============================================================
+
 import Redis from 'ioredis';
 import logger from '../utils/logger.js';
 
