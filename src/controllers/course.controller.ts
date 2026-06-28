@@ -1,4 +1,9 @@
+// ============================================================
+// FILE: src/controllers/course.controller.ts (UPDATED – supports slugs)
+// ============================================================
+
 import { Request, Response, NextFunction } from 'express';
+import mongoose from 'mongoose';
 import Course from '../models/Course.js';
 import Enrollment from '../models/Enrollment.js';
 import LessonProgress from '../models/LessonProgress.js';
@@ -10,10 +15,10 @@ import { sanitizeHtml } from '../middlewares/sanitize.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
 import Challenge from '../models/Challenge.js';
 import Notification from '../models/Notification.js';
-import { getIO } from '../socket.js';
 import User from '../models/User.js';
+import { getIO } from '../socket.js';
 
-// Helper function to auto‑complete a challenge and award rewards
+// ─── Helper: auto‑complete challenge ──────────────────────────────────
 async function completeChallengeAndReward(challengeId: string, userId: string, adminNote: string = 'Auto‑completed') {
   const progress = await ChallengeProgress.findOne({ challengeId, userId });
   if (!progress) return;
@@ -71,6 +76,7 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
+// ==================== GET PUBLISHED COURSES ====================
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { category, level, search, limit = 20, offset = 0 } = req.query;
@@ -89,20 +95,53 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
   }
 };
 
+// ==================== GET SINGLE COURSE – UPDATED to support slug ====================
 export const getCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const course = await Course.findById(req.params.id)
-      .populate('instructorId', 'firstName lastName bio')
-      .lean();
-    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    const { id } = req.params;
+    let course;
+
+    // ✅ If the parameter looks like a MongoDB ObjectId, try by _id
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      course = await Course.findById(id);
+    }
+
+    // ✅ If not found, try by slug (string)
+    if (!course) {
+      course = await Course.findOne({ slug: id });
+    }
+
+    // ✅ If still not found, return 404
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found' });
+    }
+
+    // Populate lessons and ratings
     const lessons = await Lesson.find({ courseId: course._id }).sort('order');
     const ratings = await Rating.find({ courseId: course._id }).populate('userId', 'firstName lastName');
-    res.json({ success: true, data: { ...course, lessons, ratings } });
+
+    // If user is authenticated, attach enrollment status
+    let enrollment = null;
+    if (req.user) {
+      const user = req.user as IUser;
+      enrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...course.toObject(),
+        lessons,
+        ratings,
+        enrollment: enrollment ? { progress: enrollment.progress, status: enrollment.status } : null,
+      },
+    });
   } catch (err) {
     next(err);
   }
 };
 
+// ==================== GET USER ENROLLMENTS ====================
 export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -112,7 +151,7 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
     const enrollments = await Enrollment.find({ userId: user._id })
       .populate({
         path: 'courseId',
-        select: 'title thumbnail totalLessons price rating level instructorId'
+        select: 'title thumbnail totalLessons price rating level instructorId',
       })
       .lean();
     const formatted = enrollments.map(enrollment => ({
@@ -123,7 +162,7 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
       status: enrollment.status,
       startedAt: enrollment.startedAt,
       completedAt: enrollment.completedAt,
-      courseId: enrollment.courseId?._id || enrollment.courseId
+      courseId: enrollment.courseId?._id || enrollment.courseId,
     }));
     res.json({ success: true, data: formatted });
   } catch (err) {
@@ -131,10 +170,12 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
   }
 };
 
+// ==================== ENROLL IN COURSE ====================
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     if (!user || !user._id) {
+      console.error('[ENROLL] Unauthenticated attempt. Headers:', req.headers.authorization);
       return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
     }
     const course = await Course.findById(req.params.id);
@@ -160,8 +201,8 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
         _id: newEnrollment?._id,
         course: newEnrollment?.courseId,
         progress: 0,
-        status: 'active'
-      }
+        status: 'active',
+      },
     });
   } catch (err: any) {
     if (err.code === 11000 && err.keyPattern?.userId && err.keyPattern?.courseId) {
@@ -171,6 +212,7 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// ==================== UPDATE LESSON PROGRESS (with auto‑challenge) ====================
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -192,6 +234,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       progress.timeSpent += timeSpent || 0;
     }
 
+    // TIME‑SENSITIVE XP
     if (completed && !progress.completed) {
       const lesson = await Lesson.findById(lessonId);
       if (lesson) {
@@ -204,7 +247,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
         } else {
           return res.status(400).json({
             success: false,
-            message: `You need to spend at least ${Math.ceil(requiredMinutes)} minutes on this lesson to earn XP and mark it complete.`
+            message: `You need to spend at least ${Math.ceil(requiredMinutes)} minutes on this lesson to earn XP and mark it complete.`,
           });
         }
       }
@@ -218,22 +261,22 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
     if (enrollment.progress === 100 && enrollment.status !== 'completed') {
       enrollment.status = 'completed';
       enrollment.completedAt = new Date();
-      // ─── COMPLETION BONUS UPDATED TO ₦300 ───
-      user.walletBalance = (user.walletBalance || 0) + 300;
+      user.walletBalance = (user.walletBalance || 0) + 100;
       await user.save();
       await Transaction.create({
         userId: user._id,
         type: 'bonus',
-        amount: 300,
+        amount: 100,
         status: 'completed',
         description: 'Course completion bonus',
       });
     }
     await enrollment.save();
 
+    // Auto‑complete challenges
     const activeChallenges = await ChallengeProgress.find({
       userId: user._id,
-      status: 'enrolled'
+      status: 'enrolled',
     }).populate('challengeId');
 
     const lesson = await Lesson.findById(lessonId);
@@ -241,7 +284,6 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       for (const cp of activeChallenges) {
         const challenge = cp.challengeId as any;
         if (!challenge || !challenge.completionCriteria) continue;
-
         const progressValue = (cp as any).progressValue || 0;
 
         if (challenge.completionCriteria.type === 'lessons') {
@@ -251,7 +293,6 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
             const newValue = (cp as any).progressValue;
             cp.progress = Math.min(100, Math.round((newValue / challenge.completionCriteria.targetCount) * 100));
             await cp.save();
-
             if (newValue >= challenge.completionCriteria.targetCount) {
               await completeChallengeAndReward(challenge._id.toString(), user._id.toString(), 'Auto‑completed via lesson progress');
             }
@@ -274,6 +315,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
   }
 };
 
+// ==================== RATE COURSE ====================
 export const rateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -300,55 +342,4 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
   } catch (err) {
     next(err);
   }
-};
-
-export const submitQuiz = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const user = req.user as IUser;
-    const { courseId } = req.params;
-    const { answers } = req.body;
-
-    const course = await Course.findById(courseId);
-    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-
-    const enrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id });
-    if (!enrollment) return res.status(403).json({ success: false, message: 'Not enrolled' });
-
-    const allQuestions = course.quizzes?.flatMap(q => q.questions) || [];
-    if (!allQuestions.length) return res.status(400).json({ success: false, message: 'No quiz questions' });
-
-    let correct = 0;
-    for (const ans of answers) {
-      const q = allQuestions[ans.questionIndex];
-      if (q && q.correctAnswer === ans.selectedOption) correct++;
-    }
-    const score = Math.round((correct / allQuestions.length) * 100);
-
-    let xpEarned = 0;
-    if (score >= 80) xpEarned = 100;
-    else if (score >= 60) xpEarned = 50;
-    else if (score >= 40) xpEarned = 20;
-
-    if (xpEarned > 0) {
-      user.xp = (user.xp || 0) + xpEarned;
-      let xpNeeded = user.level * 1000;
-      while (user.xp >= xpNeeded) {
-        user.level += 1;
-        user.xp -= xpNeeded;
-        xpNeeded = user.level * 1000;
-      }
-      await user.save();
-
-      await Transaction.create({
-        userId: user._id,
-        type: 'bonus',
-        amount: 0,
-        status: 'completed',
-        description: `Quiz XP: ${xpEarned} XP`,
-        metadata: { courseId, score },
-      });
-    }
-
-    res.json({ success: true, data: { score, xpEarned, correct, total: allQuestions.length } });
-  } catch (err) { next(err); }
 };
