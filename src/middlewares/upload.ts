@@ -1,30 +1,24 @@
-// ============================================================
-// FILE: src/middlewares/upload.ts
-// ============================================================
-
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 
-const uploadDir = path.join(process.cwd(), 'uploads', 'books');
+const uploadDir = path.join(process.cwd(), 'uploads', 'receipts');
 if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
+    fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `${unique}${ext}`);
-  },
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+        const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
+        const ext = path.extname(file.originalname);
+        cb(null, `${unique}${ext}`);
+    },
 });
 
 export const upload = multer({
-  storage,
-  limits: {
-    fileSize: 1024 * 1024 * 1024, // 1GB
-  },
+    storage,
+    limits: {
+        fileSize: 100 * 1024 * 1024, // 100MB
+    },
 });
