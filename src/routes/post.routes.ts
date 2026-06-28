@@ -1,32 +1,57 @@
+// ============================================================
+// FILE: src/routes/post.routes.ts (already correct)
+// ============================================================
+
 import { Router } from 'express';
-import * as postController from '../controllers/post.controller.js';
+import {
+  createPost,
+  updatePost,
+  publishPost,
+  deletePost,
+  uploadPostVideo,
+  getPublishedPosts,
+  getPostBySlug,
+  likePost,
+  addComment,
+  getComments,
+  likeComment,
+  sharePost,
+  getUserPosts,
+  getFollowingFeed,
+  trackPostView,
+  getPostAnalytics,
+  getMySocialEarnings,
+  getMyPostTitles,
+  getPersonalizedFeed,
+} from '../controllers/post.controller.js';
 import { authenticate } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
-// ─── Public routes ──────────────────────────────────────────────────────
-router.get('/', postController.getPublishedPosts);
-router.get('/slug/:slug', postController.getPostBySlug);
-router.get('/user/:userId', postController.getUserPosts);
-router.get('/:id/analytics', postController.getPostAnalytics);
+// ─── Public routes ─────────────────────────────────────────────────────
+router.get('/', getPublishedPosts);
+router.get('/slug/:slug', getPostBySlug);   // ✅ This is what the frontend calls
+router.get('/:id/comments', getComments);
 
-// ─── Authenticated routes ──────────────────────────────────────────────
+// ─── Protected routes ──────────────────────────────────────────────────
 router.use(authenticate);
-router.get('/following', postController.getFollowingFeed);
-router.get('/personalized', postController.getPersonalizedFeed);
-router.get('/my/titles', postController.getMyPostTitles);
-router.post('/', postController.createPost);
-router.put('/:id', postController.updatePost);
-router.put('/:id/publish', postController.publishPost);
-router.delete('/:id', postController.deletePost); // admin can delete
-router.post('/:id/video', upload.single('video'), postController.uploadPostVideo);
-router.post('/:id/like', postController.likePost);
-router.post('/:id/comment', postController.addComment);
-router.get('/:id/comments', postController.getComments);
-router.post('/comment/:id/like', postController.likeComment);
-router.post('/:id/share', postController.sharePost);
-router.post('/:id/view', postController.trackPostView);
-router.get('/my/social-earnings', postController.getMySocialEarnings);
+
+router.post('/', createPost);
+router.put('/:id', updatePost);
+router.post('/:id/publish', publishPost);
+router.delete('/:id', deletePost);
+router.post('/:id/video', upload.single('video'), uploadPostVideo);
+router.post('/:id/like', likePost);
+router.post('/:id/comment', addComment);
+router.post('/:id/share', sharePost);
+router.post('/:id/view', trackPostView);
+router.get('/:id/analytics', getPostAnalytics);
+router.get('/following', getFollowingFeed);
+router.get('/my/titles', getMyPostTitles);
+router.get('/my/social-earnings', getMySocialEarnings);
+router.get('/personalized', getPersonalizedFeed);
+router.get('/user/:userId', getUserPosts);
+router.post('/comment/:id/like', likeComment);
 
 export default router;
