@@ -1,3 +1,4 @@
+// src/middlewares/auth.ts
 import { Request, Response, NextFunction } from 'express';
 import { verifyAccessToken } from '../utils/jwt.js';
 import User, { IUser } from '../models/User.js';
@@ -9,6 +10,11 @@ declare module 'express-serve-static-core' {
 }
 
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
+  // ─── ALLOW CORS PREFLIGHT ──────────────────────────────────
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
@@ -43,6 +49,11 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
 export const authorize = (...roles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
+    // ─── ALLOW CORS PREFLIGHT ──────────────────────────────────
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+
     if (!req.user) {
       return res.status(401).json({ success: false, message: 'Authentication required' });
     }
