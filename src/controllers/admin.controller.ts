@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (FIXED – added missing exports)
+// FILE: src/controllers/admin.controller.ts (COMPLETE – FULLY FIXED)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -13,6 +13,8 @@ import Announcement from '../models/Announcement.js';
 import ManualPayment from '../models/ManualPayment.js';
 import Enrollment from '../models/Enrollment.js';
 import Post from '../models/Post.js';
+import Comment from '../models/Comment.js';
+import Like from '../models/Like.js';
 import Follow from '../models/Follow.js';
 import Challenge from '../models/Challenge.js';
 import Ad from '../models/Ad.js';
@@ -1497,7 +1499,7 @@ export const deleteBook = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== ADDITIONAL ADMIN FUNCTIONS (FIX FOR BUILD ERRORS) ====================
+// ==================== ADDITIONAL ADMIN FUNCTIONS ====================
 
 export const getAdminBooks = async (req: Request, res: Response) => {
   try {
