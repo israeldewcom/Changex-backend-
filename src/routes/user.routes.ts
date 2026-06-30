@@ -6,7 +6,7 @@ import { upload } from '../middlewares/upload.js';
 const router = Router();
 
 // ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────
-router.get('/leaderboard', userController.getLeaderboard); // ✅ PUBLIC
+router.get('/leaderboard', userController.getLeaderboard);
 
 // ─── AUTHENTICATED ROUTES ─────────────────────────────────────────────
 router.use(authenticate);
@@ -24,5 +24,8 @@ router.get('/badges', userController.getUserBadges);
 router.post('/claim-welcome-bonus', userController.claimWelcomeBonus);
 router.post('/update-premium-status', userController.updatePremiumStatus);
 router.get('/:userId/profile', userController.getUserProfile);
+
+// ✅ NEW: Get user tier
+router.get('/tier', userController.getTier);
 
 export default router;
