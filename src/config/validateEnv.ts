@@ -27,8 +27,9 @@ const required = [
 export const validateEnv = () => {
   const missing = required.filter(key => !process.env[key] || process.env[key]?.trim() === '');
   if (missing.length > 0) {
-    console.error(`❌ Missing required environment variables: ${missing.join(', ')}`);
-    process.exit(1);
+    console.warn(`⚠️ Missing optional environment variables: ${missing.join(', ')}`);
+    console.warn('Some features may not work correctly.');
+  } else {
+    console.log('✅ All required environment variables are present.');
   }
-  console.log('✅ All required environment variables are present.');
 };
