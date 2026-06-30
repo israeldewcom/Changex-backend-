@@ -1,34 +1,28 @@
 import mongoose, { Schema, Document } from 'mongoose';
 
-export interface IMeeting extends Document {
-  title: string;
-  description: string;
-  hostId: mongoose.Types.ObjectId;
-  attendeeId?: mongoose.Types.ObjectId;
-  startTime: Date;
-  duration: number;
-  price: number;
-  meetingUrl: string;
-  status: 'scheduled' | 'booked' | 'completed' | 'cancelled';
+export interface IMessage extends Document {
+  conversationId: mongoose.Types.ObjectId;
+  senderId: mongoose.Types.ObjectId;
+  content: string;
+  type: 'text' | 'image' | 'file' | 'video';
+  fileUrl?: string;
+  readBy: mongoose.Types.ObjectId[];
   createdAt: Date;
   updatedAt: Date;
 }
 
-const MeetingSchema = new Schema<IMeeting>(
+const MessageSchema = new Schema<IMessage>(
   {
-    title: { type: String, required: true },
-    description: String,
-    hostId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    attendeeId: { type: Schema.Types.ObjectId, ref: 'User' },
-    startTime: { type: Date, required: true },
-    duration: { type: Number, default: 30 },
-    price: { type: Number, default: 0 },
-    meetingUrl: String,
-    status: { type: String, enum: ['scheduled', 'booked', 'completed', 'cancelled'], default: 'scheduled' },
+    conversationId: { type: Schema.Types.ObjectId, ref: 'Conversation', required: true },
+    senderId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    content: { type: String, required: true },
+    type: { type: String, enum: ['text', 'image', 'file', 'video'], default: 'text' },
+    fileUrl: String,
+    readBy: [{ type: Schema.Types.ObjectId, ref: 'User' }],
   },
   { timestamps: true }
 );
 
-MeetingSchema.index({ hostId: 1, startTime: -1 });
+MessageSchema.index({ conversationId: 1, createdAt: -1 });
 
-export default mongoose.model<IMeeting>('Meeting', MeetingSchema);
+export default mongoose.model<IMessage>('Message', MessageSchema);
