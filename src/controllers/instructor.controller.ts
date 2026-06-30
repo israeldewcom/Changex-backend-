@@ -11,8 +11,10 @@ import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import mongoose from 'mongoose';
 
+// ✅ FIXED: Slug generation with timestamp – prevents duplicate title errors
 function generateSlug(title: string): string {
-  return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const base = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return `${base}-${Date.now().toString(36)}`;
 }
 
 export const getInstructorDashboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -32,7 +34,6 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
 
-    // Additional role check (redundant, but safe)
     if (!user.roles.includes('instructor') && !user.roles.includes('admin') && !user.isApprovedInstructor) {
       return res.status(403).json({ success: false, message: 'Insufficient permissions' });
     }
@@ -113,7 +114,6 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
     const { id } = req.params;
     const { lessons, quizzes, ...courseData } = req.body;
 
-    // Additional permission check
     if (!user.roles.includes('instructor') && !user.roles.includes('admin') && !user.isApprovedInstructor) {
       return res.status(403).json({ success: false, message: 'Insufficient permissions' });
     }
@@ -146,7 +146,6 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
       await course.save();
     }
 
-    // Bulk insert/update lessons
     if (lessons && Array.isArray(lessons)) {
       await Lesson.deleteMany({ courseId: course._id });
       if (lessons.length > 0) {
