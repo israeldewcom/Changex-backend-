@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/user.controller.ts (UPDATED – CACHED LEADERBOARD)
+// FILE: src/controllers/user.controller.ts (UPDATED – CACHED LEADERBOARD + WALLET BREAKDOWN)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -11,6 +11,7 @@ import Post from '../models/Post.js';
 import Course from '../models/Course.js';
 import Follow from '../models/Follow.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
+import PostAnalytics from '../models/PostAnalytics.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { getOrSetCache, invalidateCache } from '../services/cache.js';
 
@@ -44,19 +45,84 @@ export const uploadAvatar = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
+// ✅ UPDATED: Full earnings breakdown
 export const getWallet = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(50);
+
+    // Fetch transactions (latest 50)
+    const transactions = await Transaction.find({ userId: user._id })
+      .sort('-createdAt')
+      .limit(50)
+      .lean();
+
+    // Compute breakdown by type
+    const breakdown: Record<string, number> = {
+      referralEarnings: 0,
+      courseBonuses: 0,
+      affiliateCommissions: 0,
+      instructorEarnings: 0,
+      welcomeBonus: 0,
+      totalEarnings: 0,
+    };
+
+    // Sum all completed positive transactions
+    for (const tx of transactions) {
+      if (tx.status !== 'completed') continue;
+      const amount = tx.amount || 0;
+      if (amount <= 0) continue; // ignore withdrawals
+
+      switch (tx.type) {
+        case 'referral_bonus':
+        case 'referral_commission':
+          breakdown.referralEarnings += amount;
+          break;
+        case 'bonus':
+          if (tx.description?.toLowerCase().includes('welcome')) {
+            breakdown.welcomeBonus += amount;
+          } else {
+            breakdown.courseBonuses += amount;
+          }
+          break;
+        case 'affiliate_commission':
+          breakdown.affiliateCommissions += amount;
+          break;
+        case 'instructor_earning':
+          breakdown.instructorEarnings += amount;
+          break;
+        default:
+          // ignore other types (e.g., course_purchase is cost, not earnings)
+          break;
+      }
+    }
+
+    // Total earnings
+    breakdown.totalEarnings = Object.values(breakdown).reduce((a, b) => a + b, 0);
+
+    // Social earnings from PostAnalytics
+    const posts = await Post.find({ authorId: user._id }).select('_id');
+    const postIds = posts.map(p => p._id);
+    const socialEarningsAgg = await PostAnalytics.aggregate([
+      { $match: { postId: { $in: postIds } } },
+      { $group: { _id: null, total: { $sum: '$earnings' } } }
+    ]);
+    const socialEarnings = socialEarningsAgg[0]?.total || 0;
+
     res.json({
       success: true,
       data: {
         balance: Number(user.walletBalance) || 0,
         pending: Number(user.pendingWithdrawal) || 0,
+        earningsBreakdown: {
+          ...breakdown,
+          socialEarnings,
+        },
         transactions,
-      },
+      }
     });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 export const requestWithdrawal = async (req: Request, res: Response, next: NextFunction) => {
