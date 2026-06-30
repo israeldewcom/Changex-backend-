@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (FIXED - no TS errors)
+// FILE: src/controllers/admin.controller.ts (FULL UPDATED)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -1511,6 +1511,79 @@ export const getAdminBooks = async (req: Request, res: Response) => {
     res.json({ success: true, data: books });
   } catch (err) {
     console.error('Get admin books error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ==================== PLATFORM STATS (Marketing Dashboard) ====================
+export const getPlatformStats = async (req: Request, res: Response) => {
+  try {
+    // Total earnings from completed transactions (excluding withdrawals)
+    const totalEarningsAgg = await Transaction.aggregate([
+      { $match: { status: 'completed', type: { $nin: ['withdrawal'] } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const totalEarnings = totalEarningsAgg[0]?.total || 0;
+
+    // Total referral earnings
+    const referralEarningsAgg = await Transaction.aggregate([
+      { $match: { status: 'completed', type: { $in: ['referral_bonus', 'referral_commission'] } } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const referralEarnings = referralEarningsAgg[0]?.total || 0;
+
+    // Total course revenue (course purchases)
+    const courseRevenueAgg = await Transaction.aggregate([
+      { $match: { status: 'completed', type: 'course_purchase' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const courseRevenue = courseRevenueAgg[0]?.total || 0;
+
+    // Active users (logged in within last 7 days)
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const activeUsers = await User.countDocuments({ lastActivity: { $gte: sevenDaysAgo } });
+
+    // Total students (users with at least one enrollment)
+    const totalStudents = await Enrollment.distinct('userId').countDocuments();
+
+    // Total courses published
+    const totalCourses = await Course.countDocuments({ isPublished: true, approvalStatus: 'approved' });
+
+    // Total referrals (count of referral records)
+    const totalReferrals = await Referral.countDocuments();
+
+    // Premium/Elite users count
+    const premiumUsers = await User.countDocuments({ tier: { $in: ['premium', 'elite'] } });
+
+    // Total streak days accumulated
+    const streakAgg = await User.aggregate([
+      { $group: { _id: null, totalStreak: { $sum: '$streakDays' } } }
+    ]);
+    const totalStreaks = streakAgg[0]?.totalStreak || 0;
+
+    // Total XP accumulated
+    const xpAgg = await User.aggregate([
+      { $group: { _id: null, totalXp: { $sum: '$xp' } } }
+    ]);
+    const totalXp = xpAgg[0]?.totalXp || 0;
+
+    res.json({
+      success: true,
+      data: {
+        totalEarnings,
+        referralEarnings,
+        courseRevenue,
+        activeUsers,
+        totalStudents,
+        totalCourses,
+        totalReferrals,
+        premiumUsers,
+        totalStreaks,
+        totalXp,
+      }
+    });
+  } catch (err) {
+    console.error('Platform stats error:', err);
     res.status(500).json({ success: false, message: String(err) });
   }
 };
