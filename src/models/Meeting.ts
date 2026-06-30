@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/Meeting.ts (FIXED – prevents overwrite)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IMeeting extends Document {
@@ -24,11 +28,18 @@ const MeetingSchema = new Schema<IMeeting>(
     duration: { type: Number, default: 30 },
     price: { type: Number, default: 0 },
     meetingUrl: String,
-    status: { type: String, enum: ['scheduled', 'booked', 'completed', 'cancelled'], default: 'scheduled' },
+    status: {
+      type: String,
+      enum: ['scheduled', 'booked', 'completed', 'cancelled'],
+      default: 'scheduled',
+    },
   },
   { timestamps: true }
 );
 
 MeetingSchema.index({ hostId: 1, startTime: -1 });
 
-export default mongoose.model<IMeeting>('Meeting', MeetingSchema);
+// ✅ Prevent overwrite
+const Meeting = mongoose.models.Meeting || mongoose.model<IMeeting>('Meeting', MeetingSchema);
+
+export default Meeting;
