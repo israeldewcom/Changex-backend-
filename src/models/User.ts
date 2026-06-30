@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/User.ts (UPDATED – added online, lastSeen, tier, storyHighlights)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IUser extends Document {
@@ -39,6 +43,9 @@ export interface IUser extends Document {
     website?: string;
   };
   tier: 'free' | 'premium' | 'elite';
+  online?: boolean;
+  lastSeen?: Date;
+  storyHighlights?: string[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -87,6 +94,9 @@ const UserSchema = new Schema<IUser>(
       website: String,
     },
     tier: { type: String, enum: ['free', 'premium', 'elite'], default: 'free' },
+    online: { type: Boolean, default: false },
+    lastSeen: { type: Date, default: Date.now },
+    storyHighlights: { type: [String], default: [] },
   },
   { timestamps: true }
 );
@@ -95,6 +105,8 @@ UserSchema.index({ email: 1 });
 UserSchema.index({ referralCode: 1 });
 UserSchema.index({ seoSlug: 1 });
 UserSchema.index({ tier: 1 });
+UserSchema.index({ online: 1 });
+UserSchema.index({ lastSeen: -1 });
 
 UserSchema.pre('save', function(next) {
   if (!this.seoSlug && this.firstName && this.lastName) {
