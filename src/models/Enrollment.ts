@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/Enrollment.ts (UPDATED – added cohortId, dropoutAt, lastActivityAt)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IEnrollment extends Document {
@@ -7,6 +11,9 @@ export interface IEnrollment extends Document {
   status: 'active' | 'completed' | 'dropped';
   startedAt: Date;
   completedAt?: Date;
+  cohortId?: mongoose.Types.ObjectId;
+  dropoutAt?: Date;
+  lastActivityAt?: Date;
 }
 
 const EnrollmentSchema = new Schema<IEnrollment>(
@@ -16,11 +23,16 @@ const EnrollmentSchema = new Schema<IEnrollment>(
     progress: { type: Number, default: 0 },
     status: { type: String, enum: ['active', 'completed', 'dropped'], default: 'active' },
     completedAt: Date,
+    cohortId: { type: Schema.Types.ObjectId, ref: 'Cohort' },
+    dropoutAt: Date,
+    lastActivityAt: { type: Date, default: Date.now },
   },
   { timestamps: { createdAt: 'startedAt', updatedAt: false } }
 );
 
-// ✅ Ensure compound index with non‑null values (MongoDB will reject null)
 EnrollmentSchema.index({ userId: 1, courseId: 1 }, { unique: true });
+EnrollmentSchema.index({ cohortId: 1 });
+EnrollmentSchema.index({ status: 1 });
+EnrollmentSchema.index({ lastActivityAt: -1 });
 
 export default mongoose.model<IEnrollment>('Enrollment', EnrollmentSchema);
