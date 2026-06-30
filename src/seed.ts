@@ -1,4 +1,3 @@
-// File: src/seed.ts
 import dotenv from 'dotenv';
 dotenv.config();
 import mongoose from 'mongoose';
@@ -7,13 +6,15 @@ import Course from './models/Course.js';
 import Badge from './models/Badge.js';
 import bcrypt from 'bcryptjs';
 import { generateReferralCode } from './utils/referralCode.js';
+import crypto from 'crypto';
 
 async function seed() {
   await mongoose.connect(process.env.MONGODB_URI!);
   console.log('Connected to MongoDB');
 
-  // Create admin
-  const adminHash = await bcrypt.hash('admin123', 12);
+  // Create admin – use env or random password
+  const adminPassword = process.env.ADMIN_PASSWORD || crypto.randomBytes(8).toString('hex');
+  const adminHash = await bcrypt.hash(adminPassword, 12);
   await User.create({
     email: 'admin@changex.com',
     passwordHash: adminHash,
@@ -22,7 +23,7 @@ async function seed() {
     roles: ['admin'],
     referralCode: generateReferralCode(),
   });
-  console.log('Admin created');
+  console.log(`✅ Admin created with password: ${adminPassword} (save this!)`);
 
   // Create sample instructor
   const instructor = await User.create({
