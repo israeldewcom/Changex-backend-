@@ -4,13 +4,15 @@ const storage = multer.memoryStorage();
 
 export const upload = multer({
   storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB (supports heavy courses & books)
   fileFilter: (req, file, cb) => {
-    // Accept images and PDFs
-    if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
+    // Accept images, PDFs, and videos
+    if (file.mimetype.startsWith('image/') || 
+        file.mimetype === 'application/pdf' || 
+        file.mimetype.startsWith('video/')) {
       cb(null, true);
     } else {
-      cb(new Error('Only images and PDFs are allowed'));
+      cb(new Error('Only images, PDFs, and videos are allowed'));
     }
   }
 });
