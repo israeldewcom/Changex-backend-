@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (FULL UPDATED)
+// FILE: src/controllers/admin.controller.ts (COMPLETE UPDATED)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -13,6 +13,8 @@ import Announcement from '../models/Announcement.js';
 import ManualPayment from '../models/ManualPayment.js';
 import Enrollment from '../models/Enrollment.js';
 import Post from '../models/Post.js';
+import Comment from '../models/Comment.js';
+import Like from '../models/Like.js';
 import Follow from '../models/Follow.js';
 import Challenge from '../models/Challenge.js';
 import Ad from '../models/Ad.js';
@@ -25,6 +27,7 @@ import AffiliateLink from '../models/AffiliateLink.js';
 import Rating from '../models/Rating.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
+import { invalidateCache } from '../services/cache.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -755,6 +758,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
     else if (payment.type === 'subscription') {
       await User.findByIdAndUpdate(payment.userId, {
         isPremium: true,
+        tier: payment.metadata?.plan || 'premium',
         subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
 
@@ -771,19 +775,20 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== payment.userId.toString()) {
-          referrer.walletBalance = (referrer.walletBalance || 0) + 500;
+          const bonus = payment.metadata?.plan === 'elite' ? 1000 : 500;
+          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
           await referrer.save();
           await Transaction.create({
             userId: referrer._id,
             type: 'referral_bonus',
-            amount: 500,
+            amount: bonus,
             status: 'completed',
             description: `Referral bonus for new subscriber (manual approval)`,
             reference: payment.reference,
           });
           await Referral.findOneAndUpdate(
             { referredId: payment.userId, status: 'pending' },
-            { status: 'converted', earned: 500 }
+            { status: 'converted', earned: bonus }
           );
         }
       }
@@ -1504,7 +1509,7 @@ export const deleteBook = async (req: Request, res: Response) => {
   }
 };
 
-// ✅ NEW: GET BOOKS FOR ADMIN PANEL
+// ✅ GET BOOKS FOR ADMIN PANEL
 export const getAdminBooks = async (req: Request, res: Response) => {
   try {
     const books = await Book.find().sort('-createdAt');
@@ -1584,6 +1589,46 @@ export const getPlatformStats = async (req: Request, res: Response) => {
     });
   } catch (err) {
     console.error('Platform stats error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ==================== ADMIN POST DELETION ====================
+export const deletePostByAdmin = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Find the post
+    const post = await Post.findById(id);
+    if (!post) {
+      return res.status(404).json({ success: false, message: 'Post not found' });
+    }
+
+    // Delete associated comments, likes, analytics
+    await Comment.deleteMany({ postId: id });
+    await Like.deleteMany({ targetId: id, targetType: 'post' });
+    await PostAnalytics.deleteOne({ postId: id });
+
+    // Delete the post itself
+    await post.deleteOne();
+
+    // Invalidate cache
+    await invalidateCache(`post:${id}`);
+    await invalidateCache('posts:*');
+
+    // Notify the author (optional)
+    await Notification.create({
+      userId: post.authorId,
+      title: 'Your post was removed by admin',
+      message: `Your post "${post.title}" has been removed by an administrator.`,
+      type: 'system',
+    });
+
+    getIO().emit('post_deleted', { postId: id });
+
+    res.json({ success: true, message: 'Post deleted by admin' });
+  } catch (err) {
+    console.error('Admin delete post error:', err);
     res.status(500).json({ success: false, message: String(err) });
   }
 };
