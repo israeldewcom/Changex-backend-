@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/services/cache.ts (NEW – Redis caching service)
+// FILE: src/services/cache.ts (UPDATED – scan instead of keys)
 // ============================================================
 
 import redis from '../config/redis.js';
@@ -33,9 +33,15 @@ export const getOrSetCache = async <T>(
 
 export const invalidateCache = async (pattern: string): Promise<void> => {
   try {
-    const keys = await redis.keys(pattern);
-    if (keys.length > 0) {
-      await redis.del(keys);
+    let cursor = '0';
+    const keysToDelete: string[] = [];
+    do {
+      const result = await redis.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      cursor = result[0];
+      keysToDelete.push(...result[1]);
+    } while (cursor !== '0');
+    if (keysToDelete.length > 0) {
+      await redis.unlink(keysToDelete); // non‑blocking
     }
   } catch (_) {
     // Redis error – ignore
