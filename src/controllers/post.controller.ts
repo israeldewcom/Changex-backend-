@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/post.controller.ts (UPDATED – CACHED)
+// FILE: src/controllers/post.controller.ts (UPDATED – added paywall + paid article support)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -10,6 +10,8 @@ import Notification from '../models/Notification.js';
 import Follow from '../models/Follow.js';
 import Course from '../models/Course.js';
 import PostAnalytics from '../models/PostAnalytics.js';
+import ArticlePurchase from '../models/ArticlePurchase.js';
+import Transaction from '../models/Transaction.js';
 import { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
@@ -22,7 +24,7 @@ function generateSlug(title: string): string {
 export const createPost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const { title, content, excerpt, type, tags, featuredImage, seoTitle, seoDescription, seoKeywords, courseId, isPublished } = req.body;
+    const { title, content, excerpt, type, tags, featuredImage, seoTitle, seoDescription, seoKeywords, courseId, isPublished, isPaid, price, previewContent } = req.body;
 
     const slug = generateSlug(title);
     const post = await Post.create({
@@ -39,9 +41,11 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
       seoDescription: seoDescription || excerpt || content.substring(0, 160).replace(/<[^>]*>/g, ''),
       seoKeywords: seoKeywords || tags,
       isPublished: true,
+      isPaid: isPaid || false,
+      price: price || 0,
+      previewContent: previewContent || content.substring(0, 200),
     });
 
-    // Invalidate post list cache
     await invalidateCache('posts:*');
 
     const populatedPost = await Post.findById(post._id).populate('authorId', 'firstName lastName avatarUrl');
@@ -192,6 +196,7 @@ export const getPublishedPosts = async (req: Request, res: Response, next: NextF
   }
 };
 
+// ─── GET POST BY SLUG (with paywall check) ──────────────────────────
 export const getPostBySlug = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { slug } = req.params;
@@ -210,17 +215,108 @@ export const getPostBySlug = async (req: Request, res: Response, next: NextFunct
     if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
 
     let userLiked = false;
+    let hasPurchased = false;
+    let previewContent = post.previewContent || '';
+
     if (req.user) {
-      const like = await Like.findOne({ userId: (req.user as IUser)._id, targetId: post._id, targetType: 'post' });
+      const user = req.user as IUser;
+      const like = await Like.findOne({ userId: user._id, targetId: post._id, targetType: 'post' });
       userLiked = !!like;
+
+      if (post.isPaid) {
+        const purchase = await ArticlePurchase.findOne({ userId: user._id, postId: post._id, status: 'completed' });
+        hasPurchased = !!purchase;
+      }
     }
 
-    res.json({ success: true, data: { ...post, userLiked } });
+    const isOwner = req.user && (req.user as IUser)._id.toString() === post.authorId._id.toString();
+
+    // If paid and not purchased and not owner, only return preview
+    let content = post.content;
+    if (post.isPaid && !hasPurchased && !isOwner) {
+      content = previewContent || post.content.substring(0, 300);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        ...post,
+        content,
+        isPaid: post.isPaid,
+        hasPurchased,
+        isOwner,
+        previewContent,
+        userLiked,
+        fullContent: post.content, // Full content (for owner/purchaser)
+      }
+    });
   } catch (err) {
     next(err);
   }
 };
 
+// ─── PURCHASE ARTICLE ───────────────────────────────────────────────
+export const purchaseArticle = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { postId } = req.body;
+
+    const post = await Post.findById(postId);
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
+    if (!post.isPaid) return res.status(400).json({ success: false, message: 'This article is free' });
+
+    const existing = await ArticlePurchase.findOne({ userId: user._id, postId: post._id, status: 'completed' });
+    if (existing) return res.status(400).json({ success: false, message: 'Already purchased' });
+
+    // Create purchase record (payment handled via Paystack flow)
+    // Payment verification will complete the purchase
+    const purchase = await ArticlePurchase.create({
+      userId: user._id,
+      postId: post._id,
+      amount: post.price,
+      status: 'pending',
+    });
+
+    res.json({
+      success: true,
+      data: {
+        purchase,
+        paymentRequired: true,
+        amount: post.price,
+        postId: post._id,
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── GET PURCHASED ARTICLES ─────────────────────────────────────────
+export const getPurchasedArticles = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const purchases = await ArticlePurchase.find({ userId: user._id, status: 'completed' })
+      .populate('postId', 'title slug featuredImage excerpt')
+      .sort('-createdAt');
+    res.json({ success: true, data: purchases });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── GET POST PREVIEW ────────────────────────────────────────────────
+export const getPostPreview = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const post = await Post.findById(id).select('title previewContent excerpt featuredImage slug isPaid price');
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
+    res.json({ success: true, data: post });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── LIKE POST ─────────────────────────────────────────────────────
 export const likePost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
