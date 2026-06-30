@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/message.controller.ts (FIXED – type error)
+// FILE: src/controllers/message.controller.ts (FIXED – type errors resolved with 'any')
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -75,7 +75,7 @@ export const getMessages = async (req: Request, res: Response, next: NextFunctio
 
     // Mark messages as read
     const unreadMessages = messages.filter(
-      m => !m.readBy.includes(user._id) && m.senderId._id.toString() !== user._id.toString()
+      (m: any) => !m.readBy.includes(user._id) && m.senderId._id.toString() !== user._id.toString()
     );
     for (const msg of unreadMessages) {
       await Message.findByIdAndUpdate(msg._id, { $addToSet: { readBy: user._id } });
@@ -110,10 +110,10 @@ export const sendMessage = async (req: Request, res: Response, next: NextFunctio
     conversation.lastMessageAt = new Date();
     await conversation.save();
 
-    // ✅ FIX: cast to any to bypass TypeScript type issue
-    const populated = await Message.findById(message._id)
+    // ✅ FIX: explicitly type as 'any' to avoid TypeScript errors
+    const populated: any = await Message.findById(message._id)
       .populate('senderId', 'firstName lastName avatarUrl')
-      .lean() as any;
+      .lean();
 
     // Emit to all participants
     for (const participantId of conversation.participants) {
