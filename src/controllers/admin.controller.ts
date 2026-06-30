@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE UPDATED)
+// FILE: src/controllers/admin.controller.ts (COMPLETE – FULLY UPDATED)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -13,8 +13,6 @@ import Announcement from '../models/Announcement.js';
 import ManualPayment from '../models/ManualPayment.js';
 import Enrollment from '../models/Enrollment.js';
 import Post from '../models/Post.js';
-import Comment from '../models/Comment.js';
-import Like from '../models/Like.js';
 import Follow from '../models/Follow.js';
 import Challenge from '../models/Challenge.js';
 import Ad from '../models/Ad.js';
@@ -28,8 +26,6 @@ import Rating from '../models/Rating.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { invalidateCache } from '../services/cache.js';
-import fs from 'fs';
-import path from 'path';
 
 // ==================== DASHBOARD ====================
 export const getDashboard = async (req: Request, res: Response) => {
@@ -268,6 +264,11 @@ export const approveCourse = async (req: Request, res: Response) => {
     );
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
     
+    // ─── Invalidate course list cache ──────────────────────────────────
+    await invalidateCache('courses:*');
+    await invalidateCache(`course:${course._id}`);
+    await invalidateCache(`course:${course.slug}`);
+    
     if (course.instructorId) {
       await Notification.create({ 
         userId: course.instructorId, 
@@ -296,6 +297,11 @@ export const rejectCourse = async (req: Request, res: Response) => {
       { new: true }
     );
     if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    
+    // ─── Invalidate course list cache ──────────────────────────────────
+    await invalidateCache('courses:*');
+    await invalidateCache(`course:${course._id}`);
+    await invalidateCache(`course:${course.slug}`);
     
     if (course.instructorId) {
       await Notification.create({ 
@@ -652,10 +658,12 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: `Payment already ${payment.status}` });
     }
 
+    // ─── COURSE PURCHASE ──────────────────────────────────────────────────
     if (payment.type === 'course') {
       const course = await Course.findById(payment.metadata?.courseId || payment.courseId);
       if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
+      // Enroll user
       const existingEnrollment = await Enrollment.findOne({ userId: payment.userId, courseId: course._id });
       if (!existingEnrollment) {
         await Enrollment.create({ userId: payment.userId, courseId: course._id });
@@ -666,6 +674,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       let affiliateCommission = 0;
       let affiliateUserId = null;
 
+      // 1. Check for explicit affiliate code first
       const affiliateCode = payment.metadata?.affiliateCode;
       if (affiliateCode) {
         const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
@@ -679,6 +688,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
+      // 2. If no affiliate code but referral code exists, treat referral as affiliate
       const referralCode = payment.metadata?.referralCode;
       if (!affiliateCode && referralCode && course.hasAffiliate && course.affiliatePercent > 0) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
@@ -689,6 +699,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
+      // 3. Credit affiliate (if any)
       if (affiliateUserId && affiliateCommission > 0) {
         const affiliate = await User.findById(affiliateUserId);
         if (affiliate) {
@@ -706,6 +717,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
+      // 4. Referral bonus (only if no affiliate commission was given)
       const netAmount = (course.salePrice || course.price || 0) - affiliateCommission;
       let referralBonus = 0;
       if (!affiliateCommission && referralCode) {
@@ -726,6 +738,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
+      // 5. Instructor earnings (80% of net after affiliate commission)
       const instructorShare = netAmount * 0.8;
       if (course.instructorId) {
         const instructor = await User.findById(course.instructorId);
@@ -744,6 +757,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         }
       }
 
+      // User purchase transaction
       await Transaction.create({
         userId: payment.userId,
         type: 'course_purchase',
@@ -755,10 +769,10 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       });
     }
 
+    // ─── SUBSCRIPTION ──────────────────────────────────────────────────────
     else if (payment.type === 'subscription') {
       await User.findByIdAndUpdate(payment.userId, {
         isPremium: true,
-        tier: payment.metadata?.plan || 'premium',
         subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
       });
 
@@ -771,29 +785,30 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         reference: payment.reference,
       });
 
+      // Referral bonus ₦500
       const referralCode = payment.metadata?.referralCode;
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== payment.userId.toString()) {
-          const bonus = payment.metadata?.plan === 'elite' ? 1000 : 500;
-          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
+          referrer.walletBalance = (referrer.walletBalance || 0) + 500;
           await referrer.save();
           await Transaction.create({
             userId: referrer._id,
             type: 'referral_bonus',
-            amount: bonus,
+            amount: 500,
             status: 'completed',
             description: `Referral bonus for new subscriber (manual approval)`,
             reference: payment.reference,
           });
           await Referral.findOneAndUpdate(
             { referredId: payment.userId, status: 'pending' },
-            { status: 'converted', earned: bonus }
+            { status: 'converted', earned: 500 }
           );
         }
       }
     }
 
+    // ─── BOOK PURCHASE ──────────────────────────────────────────────────────
     else if (payment.type === 'book') {
       const bookId = payment.metadata?.bookId;
       if (!bookId) return res.status(400).json({ success: false, message: 'Book ID missing in metadata' });
@@ -813,6 +828,7 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
 
+      // Referral bonus for book (10% of book price)
       const referralCode = payment.metadata?.referralCode;
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
@@ -1372,7 +1388,7 @@ export const triggerSocialEarnings = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== FILE UPLOAD – HYBRID (DISK + CLOUDINARY) ====================
+// ==================== FILE UPLOAD ====================
 export const uploadImage = async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -1401,58 +1417,30 @@ export const uploadFile = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    // 1. Save file to disk (already done by multer)
-    const diskPath = req.file.path;
-    const relativePath = `/uploads/books/${req.file.filename}`;
-
-    // 2. Try to upload to Cloudinary (best effort)
-    let cloudinaryUrl = null;
-    let uploadError: string | null = null;
-
-    try {
-      const fileBuffer = fs.readFileSync(diskPath);
-      const result = await uploadToCloudinary(fileBuffer, 'books', {
-        resource_type: 'raw',
-        access_mode: 'public',
-        use_filename: true,
-        unique_filename: true,
-      });
-      cloudinaryUrl = result.secure_url;
-    } catch (err) {
-      if (err instanceof Error) {
-        uploadError = err.message;
-      } else {
-        uploadError = String(err);
-      }
-      console.warn('Cloudinary upload failed, file is saved on disk:', uploadError);
+    const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!allowedTypes.includes(req.file.mimetype) && !req.file.mimetype.startsWith('image/')) {
+      return res.status(400).json({ success: false, message: 'File type not supported. Please upload PDF or image.' });
     }
 
-    // 3. Respond with URL (prefer Cloudinary, fallback to disk)
-    const finalUrl = cloudinaryUrl || `${process.env.BACKEND_URL || process.env.FRONTEND_URL}${relativePath}`;
+    const isImage = req.file.mimetype.startsWith('image/');
+    const resourceType = isImage ? 'image' : 'raw';
 
-    res.json({
-      success: true,
-      data: {
-        url: finalUrl,
-        diskPath: relativePath,
-        cloudinaryUrl: cloudinaryUrl,
-        uploadError: uploadError || null,
-        message: cloudinaryUrl
-          ? 'File uploaded to disk and Cloudinary'
-          : 'File uploaded to disk only (Cloudinary unavailable)',
-      },
+    const result = await uploadToCloudinary(req.file.buffer, 'books', {
+      resource_type: resourceType,
+      access_mode: 'public',
+      use_filename: true,
+      unique_filename: true,
     });
+
+    res.json({ success: true, data: { url: result.secure_url } });
   } catch (err) {
-    // Clean up on error
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
     console.error('Upload file error:', err);
-    res.status(500).json({ success: false, message: 'Upload failed' });
+    res.status(500).json({ success: false, message: String(err) });
   }
 };
 
 // ==================== BOOKS (Admin CRUD) ====================
+
 export const createBook = async (req: Request, res: Response) => {
   try {
     const user = req.user as IUser;
@@ -1505,130 +1493,6 @@ export const deleteBook = async (req: Request, res: Response) => {
     res.json({ success: true, message: 'Book deleted successfully' });
   } catch (err) {
     console.error('Delete book error:', err);
-    res.status(500).json({ success: false, message: String(err) });
-  }
-};
-
-// ✅ GET BOOKS FOR ADMIN PANEL
-export const getAdminBooks = async (req: Request, res: Response) => {
-  try {
-    const books = await Book.find().sort('-createdAt');
-    res.json({ success: true, data: books });
-  } catch (err) {
-    console.error('Get admin books error:', err);
-    res.status(500).json({ success: false, message: String(err) });
-  }
-};
-
-// ==================== PLATFORM STATS (Marketing Dashboard) ====================
-export const getPlatformStats = async (req: Request, res: Response) => {
-  try {
-    // Total earnings from completed transactions (excluding withdrawals)
-    const totalEarningsAgg = await Transaction.aggregate([
-      { $match: { status: 'completed', type: { $nin: ['withdrawal'] } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const totalEarnings = totalEarningsAgg[0]?.total || 0;
-
-    // Total referral earnings
-    const referralEarningsAgg = await Transaction.aggregate([
-      { $match: { status: 'completed', type: { $in: ['referral_bonus', 'referral_commission'] } } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const referralEarnings = referralEarningsAgg[0]?.total || 0;
-
-    // Total course revenue (course purchases)
-    const courseRevenueAgg = await Transaction.aggregate([
-      { $match: { status: 'completed', type: 'course_purchase' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const courseRevenue = courseRevenueAgg[0]?.total || 0;
-
-    // Active users (logged in within last 7 days)
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const activeUsers = await User.countDocuments({ lastActivity: { $gte: sevenDaysAgo } });
-
-    // Total students (users with at least one enrollment)
-    const totalStudents = await Enrollment.distinct('userId').countDocuments();
-
-    // Total courses published
-    const totalCourses = await Course.countDocuments({ isPublished: true, approvalStatus: 'approved' });
-
-    // Total referrals (count of referral records)
-    const totalReferrals = await Referral.countDocuments();
-
-    // Premium/Elite users count
-    const premiumUsers = await User.countDocuments({ tier: { $in: ['premium', 'elite'] } });
-
-    // Total streak days accumulated
-    const streakAgg = await User.aggregate([
-      { $group: { _id: null, totalStreak: { $sum: '$streakDays' } } }
-    ]);
-    const totalStreaks = streakAgg[0]?.totalStreak || 0;
-
-    // Total XP accumulated
-    const xpAgg = await User.aggregate([
-      { $group: { _id: null, totalXp: { $sum: '$xp' } } }
-    ]);
-    const totalXp = xpAgg[0]?.totalXp || 0;
-
-    res.json({
-      success: true,
-      data: {
-        totalEarnings,
-        referralEarnings,
-        courseRevenue,
-        activeUsers,
-        totalStudents,
-        totalCourses,
-        totalReferrals,
-        premiumUsers,
-        totalStreaks,
-        totalXp,
-      }
-    });
-  } catch (err) {
-    console.error('Platform stats error:', err);
-    res.status(500).json({ success: false, message: String(err) });
-  }
-};
-
-// ==================== ADMIN POST DELETION ====================
-export const deletePostByAdmin = async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-
-    // Find the post
-    const post = await Post.findById(id);
-    if (!post) {
-      return res.status(404).json({ success: false, message: 'Post not found' });
-    }
-
-    // Delete associated comments, likes, analytics
-    await Comment.deleteMany({ postId: id });
-    await Like.deleteMany({ targetId: id, targetType: 'post' });
-    await PostAnalytics.deleteOne({ postId: id });
-
-    // Delete the post itself
-    await post.deleteOne();
-
-    // Invalidate cache
-    await invalidateCache(`post:${id}`);
-    await invalidateCache('posts:*');
-
-    // Notify the author (optional)
-    await Notification.create({
-      userId: post.authorId,
-      title: 'Your post was removed by admin',
-      message: `Your post "${post.title}" has been removed by an administrator.`,
-      type: 'system',
-    });
-
-    getIO().emit('post_deleted', { postId: id });
-
-    res.json({ success: true, message: 'Post deleted by admin' });
-  } catch (err) {
-    console.error('Admin delete post error:', err);
     res.status(500).json({ success: false, message: String(err) });
   }
 };
