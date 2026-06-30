@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/User.ts (UPDATED – added online, lastSeen, tier, storyHighlights)
+// FILE: src/models/User.ts (UPDATED – added lastActivity index)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -101,12 +101,14 @@ const UserSchema = new Schema<IUser>(
   { timestamps: true }
 );
 
+// ─── Indexes ──────────────────────────────────────────────────────────
 UserSchema.index({ email: 1 });
 UserSchema.index({ referralCode: 1 });
 UserSchema.index({ seoSlug: 1 });
 UserSchema.index({ tier: 1 });
 UserSchema.index({ online: 1 });
 UserSchema.index({ lastSeen: -1 });
+UserSchema.index({ lastActivity: -1 }); // ✅ for streak reset cron
 
 UserSchema.pre('save', function(next) {
   if (!this.seoSlug && this.firstName && this.lastName) {
