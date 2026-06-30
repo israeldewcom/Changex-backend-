@@ -77,11 +77,14 @@ import {
     createBook,
     updateBook,
     deleteBook,
-    getAdminBooks, // ✅ ADDED
+    getAdminBooks,
 
     // File uploads
     uploadImage,
     uploadFile,
+
+    // ✅ NEW: Platform Stats
+    getPlatformStats,
 
 } from '../controllers/admin.controller.js';
 
@@ -165,10 +168,13 @@ router.post('/social-earnings/trigger', triggerSocialEarnings);
 router.post('/books', createBook);
 router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
-router.get('/books', getAdminBooks); // ✅ ADDED
+router.get('/books', getAdminBooks);
 
 // ==================== FILE UPLOADS ====================
 router.post('/upload', upload.single('image'), uploadImage);
 router.post('/upload-file', upload.single('file'), uploadFile);
+
+// ==================== PLATFORM STATS ====================
+router.get('/platform-stats', getPlatformStats); // ✅ NEW
 
 export default router;
