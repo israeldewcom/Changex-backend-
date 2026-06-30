@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE – FULLY UPDATED)
+// FILE: src/controllers/admin.controller.ts (FIXED – added missing exports)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -1493,6 +1493,63 @@ export const deleteBook = async (req: Request, res: Response) => {
     res.json({ success: true, message: 'Book deleted successfully' });
   } catch (err) {
     console.error('Delete book error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ==================== ADDITIONAL ADMIN FUNCTIONS (FIX FOR BUILD ERRORS) ====================
+
+export const getAdminBooks = async (req: Request, res: Response) => {
+  try {
+    const books = await Book.find().sort('-createdAt');
+    res.json({ success: true, data: books });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const getPlatformStats = async (req: Request, res: Response) => {
+  try {
+    const totalUsers = await User.countDocuments();
+    const totalCourses = await Course.countDocuments();
+    const totalRevenue = await Transaction.aggregate([
+      { $match: { type: { $ne: 'withdrawal' }, status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const totalPosts = await Post.countDocuments({ isPublished: true });
+    const totalBooks = await Book.countDocuments();
+    const totalEnrollments = await Enrollment.countDocuments();
+
+    res.json({
+      success: true,
+      data: {
+        totalUsers,
+        totalCourses,
+        totalRevenue: totalRevenue[0]?.total || 0,
+        totalPosts,
+        totalBooks,
+        totalEnrollments,
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const deletePostByAdmin = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const post = await Post.findById(id);
+    if (!post) return res.status(404).json({ success: false, message: 'Post not found' });
+
+    await Comment.deleteMany({ postId: id });
+    await Like.deleteMany({ targetId: id, targetType: 'post' });
+    await PostAnalytics.deleteOne({ postId: id });
+    await post.deleteOne();
+
+    res.json({ success: true, message: 'Post deleted by admin' });
+  } catch (err) {
+    console.error('Admin delete post error:', err);
     res.status(500).json({ success: false, message: String(err) });
   }
 };
