@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (FULL UPDATED)
+// FILE: src/controllers/admin.controller.ts (FIXED - no TS errors)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -19,7 +19,7 @@ import Ad from '../models/Ad.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
 import PostAnalytics from '../models/PostAnalytics.js';
 import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
-import Book from '../models/Book.js'; // ✅ Added for books
+import Book from '../models/Book.js';
 import Referral from '../models/Referral.js';
 import AffiliateLink from '../models/AffiliateLink.js';
 import Rating from '../models/Rating.js';
@@ -1367,7 +1367,7 @@ export const triggerSocialEarnings = async (req: Request, res: Response) => {
   }
 };
 
-// ==================== FILE UPLOAD ====================
+// ==================== FILE UPLOAD – HYBRID (DISK + CLOUDINARY) ====================
 export const uploadImage = async (req: Request, res: Response) => {
   try {
     if (!req.file) {
@@ -1396,9 +1396,11 @@ export const uploadFile = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
+    // 1. Save file to disk (already done by multer)
     const diskPath = req.file.path;
     const relativePath = `/uploads/books/${req.file.filename}`;
 
+    // 2. Try to upload to Cloudinary (best effort)
     let cloudinaryUrl = null;
     let uploadError: string | null = null;
 
@@ -1420,6 +1422,7 @@ export const uploadFile = async (req: Request, res: Response) => {
       console.warn('Cloudinary upload failed, file is saved on disk:', uploadError);
     }
 
+    // 3. Respond with URL (prefer Cloudinary, fallback to disk)
     const finalUrl = cloudinaryUrl || `${process.env.BACKEND_URL || process.env.FRONTEND_URL}${relativePath}`;
 
     res.json({
@@ -1435,6 +1438,7 @@ export const uploadFile = async (req: Request, res: Response) => {
       },
     });
   } catch (err) {
+    // Clean up on error
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
