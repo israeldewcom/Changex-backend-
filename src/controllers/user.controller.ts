@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/user.controller.ts (UPDATED – CACHED LEADERBOARD + WALLET BREAKDOWN)
+// FILE: src/controllers/user.controller.ts (UPDATED – CACHED LEADERBOARD + WALLET BREAKDOWN + TIER)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -45,18 +45,15 @@ export const uploadAvatar = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
-// ✅ UPDATED: Full earnings breakdown
 export const getWallet = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
 
-    // Fetch transactions (latest 50)
     const transactions = await Transaction.find({ userId: user._id })
       .sort('-createdAt')
       .limit(50)
       .lean();
 
-    // Compute breakdown by type
     const breakdown: Record<string, number> = {
       referralEarnings: 0,
       courseBonuses: 0,
@@ -66,11 +63,10 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
       totalEarnings: 0,
     };
 
-    // Sum all completed positive transactions
     for (const tx of transactions) {
       if (tx.status !== 'completed') continue;
       const amount = tx.amount || 0;
-      if (amount <= 0) continue; // ignore withdrawals
+      if (amount <= 0) continue;
 
       switch (tx.type) {
         case 'referral_bonus':
@@ -91,15 +87,12 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
           breakdown.instructorEarnings += amount;
           break;
         default:
-          // ignore other types (e.g., course_purchase is cost, not earnings)
           break;
       }
     }
 
-    // Total earnings
     breakdown.totalEarnings = Object.values(breakdown).reduce((a, b) => a + b, 0);
 
-    // Social earnings from PostAnalytics
     const posts = await Post.find({ authorId: user._id }).select('_id');
     const postIds = posts.map(p => p._id);
     const socialEarningsAgg = await PostAnalytics.aggregate([
@@ -163,7 +156,6 @@ export const markAllNotificationsRead = async (req: Request, res: Response, next
   } catch (err) { next(err); }
 };
 
-// ─── LEADERBOARD (CACHED) ─────────────────────────────────────────────
 export const getLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { type = 'xp', limit = 20 } = req.query;
@@ -174,7 +166,7 @@ export const getLeaderboard = async (req: Request, res: Response, next: NextFunc
       const users = await User.find({})
         .sort({ [sortField]: -1 })
         .limit(Number(limit))
-        .select('firstName lastName xp walletBalance level avatarUrl streakDays')
+        .select('firstName lastName xp walletBalance level avatarUrl streakDays tier')
         .lean();
       return users;
     }, 3600);
@@ -209,6 +201,7 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
     const user = req.user as IUser;
     if (isPremium === false && user.isPremium) {
       user.isPremium = false;
+      user.tier = 'free';
       user.subscriptionExpires = undefined;
       await user.save();
     }
@@ -276,6 +269,16 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
         followingCount,
       }
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ✅ NEW: Get user tier
+export const getTier = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    res.json({ success: true, data: { tier: user.tier || 'free', isPremium: user.isPremium } });
   } catch (err) {
     next(err);
   }
