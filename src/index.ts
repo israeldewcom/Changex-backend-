@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FULLY UPDATED – with SPA catch‑all & SEO)
+// FILE: src/index.ts (UPDATED – added routes for Chat, Stories, Video, Groups, Splits, Cohorts, Analytics)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -12,6 +12,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { connectDB } from './config/db.js';
@@ -47,7 +48,7 @@ import webhookRoutes from './routes/webhook.routes.js';
 import feedbackRoutes from './routes/feedback.routes.js';
 import contactRoutes from './routes/contact.routes.js';
 
-// ─── SOCIAL FEATURES ────────────────────────────────────────────────
+// ─── SOCIAL FEATURES ─────────────────────────────────────────────────
 import postRoutes from './routes/post.routes.js';
 import followRoutes from './routes/follow.routes.js';
 import challengeRoutes from './routes/challenge.routes.js';
@@ -62,6 +63,15 @@ import bookRoutes from './routes/book.routes.js';
 
 // ─── SEO ─────────────────────────────────────────────────────────────
 import seoRoutes from './routes/seo.routes.js';
+
+// ─── NEW FEATURES ────────────────────────────────────────────────────
+import videoRoutes from './routes/video.routes.js';
+import messageRoutes from './routes/message.routes.js';
+import storyRoutes from './routes/story.routes.js';
+import groupRoutes from './routes/group.routes.js';
+import splitRoutes from './routes/split.routes.js';
+import cohortRoutes from './routes/cohort.routes.js';
+import analyticsRoutes from './routes/analytics.routes.js';
 
 // ─── MIDDLEWARE ──────────────────────────────────────────────────────
 import { errorHandler } from './middlewares/errorHandler.js';
@@ -107,6 +117,12 @@ app.use(cookieParser());
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 100 });
 app.use('/api/', limiter);
 
+// ─── COMPRESSION ──────────────────────────────────────────────────────
+app.use(compression({
+  threshold: 1024,
+  level: 6,
+}));
+
 // ─── BODY PARSERS ────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -121,6 +137,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   res.json = (body: any) => {
     const duration = Date.now() - start;
     logger.info(`[REQUEST] ${req.method} ${req.url} - ${res.statusCode} (${duration}ms)`);
+    if (duration > 500) {
+      logger.warn(`⚠️ SLOW REQUEST: ${req.method} ${req.url} - ${duration}ms`);
+    }
     if (req.body && Object.keys(req.body).length) {
       const safeBody = { ...req.body };
       if (safeBody.password) safeBody.password = '***';
@@ -137,7 +156,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // ─── DEBUG ENDPOINTS ──────────────────────────────────────────────────
 app.get('/debug/version', (req, res) => {
   res.json({
-    version: 'PRODUCTION_2.1.0_BOOKS',
+    version: 'PRODUCTION_3.0.0_CHANGEX',
     features: {
       enrollmentGuard: true,
       referralCaseInsensitive: true,
@@ -151,6 +170,14 @@ app.get('/debug/version', (req, res) => {
       booksLibrary: true,
       personalizedFeed: true,
       seoFriendlyUrls: true,
+      videoCalls: true,
+      directMessaging: true,
+      stories: true,
+      studyGroups: true,
+      paidArticles: true,
+      revenueSplits: true,
+      cohorts: true,
+      analytics: true,
     },
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
@@ -237,18 +264,25 @@ app.use('/api/v1/certificates', authenticate, certificateRoutes);
 app.use('/api/v1/books', bookRoutes);
 
 // ─── SEO ─────────────────────────────────────────────────────────────
-app.use('/seo', seoRoutes); // sitemap, robots.txt etc.
+app.use('/seo', seoRoutes);
+
+// ─── NEW FEATURES ────────────────────────────────────────────────────
+app.use('/api/v1/video', authenticate, videoRoutes);
+app.use('/api/v1/messages', authenticate, messageRoutes);
+app.use('/api/v1/stories', authenticate, storyRoutes);
+app.use('/api/v1/groups', authenticate, groupRoutes);
+app.use('/api/v1/splits', authenticate, authorize('instructor', 'admin'), splitRoutes);
+app.use('/api/v1/cohorts', authenticate, authorize('instructor', 'admin'), cohortRoutes);
+app.use('/api/v1/analytics', authenticate, authorize('instructor', 'admin'), analyticsRoutes);
 
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-// ─── CATCH‑ALL ROUTE (SPA) – serves index.html for all non‑API routes ──
+// ─── CATCH‑ALL ROUTE (SPA) ──────────────────────────────────────────
 app.get('*', (req, res) => {
-  // Skip API routes – they should have been handled above
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ success: false, message: 'API route not found' });
   }
-  // Serve the SPA entry point
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
@@ -259,13 +293,13 @@ app.use(errorHandler);
 const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
 setupSocket(io);
 
-// ─── CATCH‑ALL 404 (should not be reached due to catch‑all above) ──
+// ─── CATCH‑ALL 404 ──────────────────────────────────────────────────
 app.use('*', (req, res) => {
   logger.warn(`[404] Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-// ─── DATA CLEANUP (startup) ──────────────────────────────────────────
+// ─── DATA CLEANUP ──────────────────────────────────────────────────
 async function cleanupCorruptedData() {
   try {
     const enrollResult = await Enrollment.deleteMany({ userId: null });
@@ -294,7 +328,7 @@ async function bootstrap() {
       logger.info(`✅ Debug: http://localhost:${PORT}/debug/version`);
       logger.info(`📍 Routes: http://localhost:${PORT}/debug/routes`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO`);
+      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO, Video, DMs, Stories, Groups, Splits, Cohorts, Analytics`);
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
