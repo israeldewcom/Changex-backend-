@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/course.controller.ts (UPDATED – CACHED)
+// FILE: src/controllers/course.controller.ts (FULL UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -16,6 +16,7 @@ import ChallengeProgress from '../models/ChallengeProgress.js';
 import Challenge from '../models/Challenge.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
+import Question from '../models/Question.js'; // ✅ ADDED
 import { getIO } from '../socket.js';
 import { getOrSetCache, invalidateCache } from '../services/cache.js';
 
@@ -161,7 +162,7 @@ export const invalidateCourseCache = async (courseId: string) => {
   await invalidateCache('courses:*');
 };
 
-// ─── Other functions (unchanged) ──────────────────────────────────────
+// ─── Other functions ──────────────────────────────────────────────────────
 export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -211,7 +212,6 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     await Enrollment.create({ userId: user._id, courseId: course._id });
     course.totalStudents += 1;
     await course.save();
-    // Invalidate cache for this course and courses list
     await invalidateCourseCache(course._id.toString());
     const newEnrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id })
       .populate('courseId', 'title thumbnail totalLessons price rating level');
@@ -356,9 +356,45 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
     const avg = ratings.reduce((acc, r) => acc + r.rating, 0) / ratings.length;
     course.avgRating = avg;
     await course.save();
-    // Invalidate cache for this course
     await invalidateCourseCache(course._id.toString());
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ✅ NEW: STUDENTS ASK QUESTIONS
+export const askQuestion = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id: courseId } = req.params;
+    const { question, lessonId } = req.body;
+
+    if (!question || question.trim() === '') {
+      return res.status(400).json({ success: false, message: 'Question text is required' });
+    }
+
+    // Check if course exists and is published
+    const course = await Course.findById(courseId);
+    if (!course || !course.isPublished) {
+      return res.status(404).json({ success: false, message: 'Course not found' });
+    }
+
+    // Check if user is enrolled
+    const enrollment = await Enrollment.findOne({ userId: user._id, courseId });
+    if (!enrollment) {
+      return res.status(403).json({ success: false, message: 'You must be enrolled to ask questions' });
+    }
+
+    // Create the question
+    const newQuestion = await Question.create({
+      userId: user._id,
+      courseId,
+      lessonId: lessonId || undefined,
+      question: question.trim(),
+    });
+
+    res.status(201).json({ success: true, data: newQuestion });
   } catch (err) {
     next(err);
   }
