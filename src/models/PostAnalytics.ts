@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/PostAnalytics.ts (UPDATED – added index)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IPostAnalytics extends Document {
@@ -29,7 +33,7 @@ const PostAnalyticsSchema = new Schema<IPostAnalytics>(
   { timestamps: true }
 );
 
-PostAnalyticsSchema.index({ totalEngagement: -1 });
+PostAnalyticsSchema.index({ totalEngagement: -1 }); // ✅ for social earnings
 PostAnalyticsSchema.index({ postId: 1 });
 
 export default mongoose.model<IPostAnalytics>('PostAnalytics', PostAnalyticsSchema);
