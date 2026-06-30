@@ -83,8 +83,11 @@ import {
     uploadImage,
     uploadFile,
 
-    // ✅ NEW: Platform Stats
+    // Platform Stats
     getPlatformStats,
+
+    // ✅ NEW: Admin Post Management
+    deletePostByAdmin,     // DELETE /posts/:id
 
 } from '../controllers/admin.controller.js';
 
@@ -175,6 +178,15 @@ router.post('/upload', upload.single('image'), uploadImage);
 router.post('/upload-file', upload.single('file'), uploadFile);
 
 // ==================== PLATFORM STATS ====================
-router.get('/platform-stats', getPlatformStats); // ✅ NEW
+router.get('/platform-stats', getPlatformStats);
+
+// ==================== ADMIN POST MANAGEMENT ====================
+// ✅ NEW: Admin can delete any post (bypasses ownership check)
+router.delete('/posts/:id', deletePostByAdmin);
+
+// ==================== (Optional) ADMIN COMMENT MANAGEMENT ====================
+// If needed later, add:
+// router.delete('/comments/:id', deleteCommentByAdmin);
+// router.put('/comments/:id', updateCommentByAdmin);
 
 export default router;
