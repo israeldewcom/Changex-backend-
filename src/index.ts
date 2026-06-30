@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – compression import & group routes)
+// FILE: src/index.ts (FIXED – correct import for group routes)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -68,7 +68,7 @@ import seoRoutes from './routes/seo.routes.js';
 import videoRoutes from './routes/video.routes.js';
 import messageRoutes from './routes/message.routes.js';
 import storyRoutes from './routes/story.routes.js';
-import groupRoutes from './routes/groups.routes.js'; // matches your file name
+import groupRoutes from './routes/group.routes.js';  // ✅ fixed: no 's'
 import splitRoutes from './routes/split.routes.js';
 import cohortRoutes from './routes/cohort.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
