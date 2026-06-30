@@ -8,6 +8,7 @@ const paystackApi = axios.create({
     Authorization: `Bearer ${paystackConfig.secretKey}`,
     'Content-Type': 'application/json',
   },
+  timeout: 15000, // 15 seconds
 });
 
 export const initializeTransaction = async (email: string, amount: number, metadata?: any) => {
