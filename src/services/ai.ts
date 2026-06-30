@@ -21,6 +21,7 @@ export const chatWithAI = async (prompt: string, isPremium: boolean) => {
           Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
           'Content-Type': 'application/json',
         },
+        timeout: 30000, // 30 seconds
       }
     );
     return response.data.choices[0].message.content;
