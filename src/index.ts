@@ -5,6 +5,10 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// ─── ENV VALIDATION (must come after dotenv) ──────────────────
+import { validateEnv } from './config/validateEnv.js';
+validateEnv();
+
 import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
@@ -68,7 +72,7 @@ import seoRoutes from './routes/seo.routes.js';
 import videoRoutes from './routes/video.routes.js';
 import messageRoutes from './routes/message.routes.js';
 import storyRoutes from './routes/story.routes.js';
-import groupRoutes from './routes/group.routes.js';  // ✅ fixed: no 's'
+import groupRoutes from './routes/group.routes.js';
 import splitRoutes from './routes/split.routes.js';
 import cohortRoutes from './routes/cohort.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
@@ -104,8 +108,11 @@ const server = http.createServer(app);
 // ─── SECURITY MIDDLEWARE ─────────────────────────────────────────────
 app.set('trust proxy', 1);
 app.use(helmet());
+
+// ─── CORS – RESTRICTED TO FRONTEND ─────────────────────────────────
+const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
 app.use(cors({
-  origin: (origin, cb) => cb(null, true),
+  origin: frontendUrl,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
