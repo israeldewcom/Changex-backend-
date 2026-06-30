@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/message.controller.ts (NEW)
+// FILE: src/controllers/message.controller.ts (FIXED – type error)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -110,8 +110,10 @@ export const sendMessage = async (req: Request, res: Response, next: NextFunctio
     conversation.lastMessageAt = new Date();
     await conversation.save();
 
+    // ✅ FIX: cast to any to bypass TypeScript type issue
     const populated = await Message.findById(message._id)
-      .populate('senderId', 'firstName lastName avatarUrl');
+      .populate('senderId', 'firstName lastName avatarUrl')
+      .lean() as any;
 
     // Emit to all participants
     for (const participantId of conversation.participants) {
