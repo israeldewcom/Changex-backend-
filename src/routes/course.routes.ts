@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/course.routes.ts (already correct)
+// FILE: src/routes/course.routes.ts
 // ============================================================
 
 import { Router } from 'express';
@@ -10,19 +10,21 @@ import {
   enrollCourse,
   updateLessonProgress,
   rateCourse,
+  askQuestion, // ✅ ADDED
 } from '../controllers/course.controller.js';
 import { authenticate } from '../middlewares/auth.js';
 
 const router = Router();
 
-// Public routes (some may still need auth for enrollment, etc.)
+// Public routes
 router.get('/', getPublishedCourses);
-router.get('/:id', getCourse); // ✅ This now handles both _id and slug
+router.get('/:id', getCourse);
 
 // Protected routes
 router.get('/my/enrollments', authenticate, getUserEnrollments);
 router.post('/:id/enroll', authenticate, enrollCourse);
 router.post('/:id/lessons/:lessonId/progress', authenticate, updateLessonProgress);
 router.post('/:id/rate', authenticate, rateCourse);
+router.post('/:id/questions', authenticate, askQuestion); // ✅ ADDED – Students can now ask questions
 
 export default router;
