@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/ai.controller.ts
+// FILE: src/controllers/ai.controller.ts (FIXED TYPESCRIPT)
 // Complete – With Premium Checks & Image Generation
 // ============================================================
 
@@ -8,9 +8,7 @@ import { IUser } from '../models/User.js';
 import redis from '../config/redis.js';
 
 const OPENROUTER_API = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_IMAGE_API = 'https://openrouter.ai/api/v1/chat/completions'; // For text-to-image via some models
-// Alternative: use Replicate or HuggingFace, but OpenRouter has free image models.
-
+const OPENROUTER_IMAGE_API = 'https://openrouter.ai/api/v1/chat/completions';
 const API_KEY = process.env.OPENROUTER_API_KEY || '';
 
 // Free models
@@ -19,7 +17,7 @@ const MODELS = {
   fast: 'google/gemini-2.0-flash-exp',
   balanced: 'mistralai/mistral-7b-instruct',
   open: 'meta-llama/llama-3.1-8b-instruct',
-  image: 'stabilityai/stable-diffusion-3.5-large', // Free image generation
+  image: 'stabilityai/stable-diffusion-3.5-large',
 };
 
 const SYSTEM_PROMPT = `
@@ -61,7 +59,7 @@ export const chat = async (req: Request, res: Response, next: NextFunction) => {
     if (stored) {
       try {
         history = JSON.parse(stored);
-      } catch (e) { history = []; }
+      } catch (_e) { history = []; }
     }
 
     // ── Build messages ──
@@ -106,7 +104,7 @@ export const chat = async (req: Request, res: Response, next: NextFunction) => {
       ];
       const refined = await callOpenRouterWithMessages(critiqueMessages, MODELS.fast);
       if (refined?.text) finalText = refined.text;
-    } catch (err) {
+    } catch (_err) {
       console.warn('Reflection failed, using best response.');
     }
 
@@ -212,7 +210,6 @@ export const uploadFileForAnalysis = async (req: Request, res: Response, next: N
     const user = req.user as IUser;
     const isPremium = user?.isPremium || false;
 
-    // ❌ PREMIUM REQUIRED
     if (!isPremium) {
       return res.status(403).json({
         success: false,
@@ -245,7 +242,7 @@ export const uploadFileForAnalysis = async (req: Request, res: Response, next: N
         MODELS.balanced
       );
       analysis = result.text;
-    } catch (err) {
+    } catch (_err) {
       analysis = `📄 I've received your file "${filename}". Ask me specific questions about it in the chat!`;
     }
 
@@ -269,7 +266,6 @@ export const generateImage = async (req: Request, res: Response, next: NextFunct
     const user = req.user as IUser;
     const isPremium = user?.isPremium || false;
 
-    // ❌ PREMIUM REQUIRED
     if (!isPremium) {
       return res.status(403).json({
         success: false,
@@ -282,12 +278,8 @@ export const generateImage = async (req: Request, res: Response, next: NextFunct
       return res.status(400).json({ success: false, message: 'Prompt is required' });
     }
 
-    // ── Call OpenRouter for image generation ──
-    // Note: OpenRouter's image generation is still evolving. We'll use a known free model.
-    // If it fails, we fall back to a placeholder.
     let imageUrl = '';
     try {
-      // Use a text-to-image model that returns a URL
       const response = await fetch(OPENROUTER_IMAGE_API, {
         method: 'POST',
         headers: {
@@ -301,7 +293,6 @@ export const generateImage = async (req: Request, res: Response, next: NextFunct
           prompt,
           width,
           height,
-          // Some models require specific parameters
         }),
       });
 
@@ -312,11 +303,12 @@ export const generateImage = async (req: Request, res: Response, next: NextFunct
       }
 
       const data = await response.json();
-      // Response structure depends on the model. For Stable Diffusion, it's often `data.choices[0].message.content` containing a URL.
       imageUrl = data.choices?.[0]?.message?.content || data.url || '';
     } catch (err) {
-      console.warn('Image generation fallback:', err.message);
-      // Fallback: use a placeholder service (unsplash or picsum)
+      // Type guard to safely access message
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.warn('Image generation fallback:', errorMessage);
+      // Fallback: use picsum placeholder
       imageUrl = `https://picsum.photos/seed/${encodeURIComponent(prompt)}/${width}/${height}`;
     }
 
