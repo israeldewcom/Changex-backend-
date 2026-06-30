@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/socket.ts (UPDATED – added chat, typing, video events)
+// FILE: src/socket.ts (UPDATED – added validation)
 // ============================================================
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
@@ -51,10 +51,28 @@ export const setupSocket = (server: SocketIOServer) => {
       socket.on('send_message', async (data) => {
         try {
           const { conversationId, content, type, fileUrl } = data;
+
+          // ✅ Validation
+          if (!content || content.trim().length === 0) {
+            socket.emit('error', { message: 'Message content cannot be empty' });
+            return;
+          }
+          if (content.length > 5000) {
+            socket.emit('error', { message: 'Message too long (max 5000 chars)' });
+            return;
+          }
+
+          // Verify user is in conversation
+          const conversation = await Conversation.findById(conversationId);
+          if (!conversation || !conversation.participants.includes(user._id)) {
+            socket.emit('error', { message: 'Not a participant in this conversation' });
+            return;
+          }
+
           const message = await Message.create({
             conversationId,
             senderId: user._id,
-            content,
+            content: content.trim(),
             type: type || 'text',
             fileUrl: fileUrl || '',
             readBy: [],
@@ -68,26 +86,23 @@ export const setupSocket = (server: SocketIOServer) => {
           const populatedMessage = await Message.findById(message._id)
             .populate('senderId', 'firstName lastName avatarUrl');
 
-          // Emit to all participants in the conversation
-          const conversation = await Conversation.findById(conversationId);
-          if (conversation) {
-            for (const participantId of conversation.participants) {
-              if (participantId.toString() !== user._id.toString()) {
-                io.to(`user:${participantId}`).emit('new_message', populatedMessage);
-                // Create notification for offline users
-                await Notification.create({
-                  userId: participantId,
-                  title: 'New Message',
-                  message: `${user.firstName} ${user.lastName}: ${content.substring(0, 50)}`,
-                  type: 'system',
-                  data: { conversationId, messageId: message._id },
-                });
-              }
+          // Emit to all participants
+          for (const participantId of conversation.participants) {
+            if (participantId.toString() !== user._id.toString()) {
+              io.to(`user:${participantId}`).emit('new_message', populatedMessage);
+              await Notification.create({
+                userId: participantId,
+                title: 'New Message',
+                message: `${user.firstName} ${user.lastName}: ${content.substring(0, 50)}`,
+                type: 'system',
+                data: { conversationId, messageId: message._id },
+              });
             }
-            socket.emit('message_sent', populatedMessage);
           }
+          socket.emit('message_sent', populatedMessage);
         } catch (err) {
           console.error('Send message error:', err);
+          socket.emit('error', { message: 'Failed to send message' });
         }
       });
 
@@ -114,7 +129,13 @@ export const setupSocket = (server: SocketIOServer) => {
       });
 
       // ─── Join conversation room ──────────────────────────────────
-      socket.on('join_conversation', (conversationId) => {
+      socket.on('join_conversation', async (conversationId) => {
+        // ✅ Verify user is participant
+        const conversation = await Conversation.findById(conversationId);
+        if (!conversation || !conversation.participants.includes(user._id)) {
+          socket.emit('error', { message: 'Not authorized to join this conversation' });
+          return;
+        }
         socket.join(`conversation:${conversationId}`);
       });
 
