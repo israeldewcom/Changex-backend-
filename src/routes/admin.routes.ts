@@ -77,6 +77,7 @@ import {
     createBook,
     updateBook,
     deleteBook,
+    getAdminBooks, // ✅ ADDED
 
     // File uploads
     uploadImage,
@@ -151,7 +152,7 @@ router.put('/ads/:id', updateAd);
 router.delete('/ads/:id', deleteAd);
 router.post('/ads/:id/impression', trackAdImpression);
 router.post('/ads/:id/click', trackAdClick);
-router.get('/ads/placement/:placement', getActiveAds); // public, but admin can also list
+router.get('/ads/placement/:placement', getActiveAds);
 
 // ==================== SOCIAL EARNINGS ====================
 router.get('/social-earnings/config', getSocialEarningsConfig);
@@ -164,12 +165,10 @@ router.post('/social-earnings/trigger', triggerSocialEarnings);
 router.post('/books', createBook);
 router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
+router.get('/books', getAdminBooks); // ✅ ADDED
 
 // ==================== FILE UPLOADS ====================
 router.post('/upload', upload.single('image'), uploadImage);
 router.post('/upload-file', upload.single('file'), uploadFile);
-
-// ==================== AUDIT LOGS (placeholder) ====================
-// router.get('/audit-logs', getAuditLogs);
 
 export default router;
