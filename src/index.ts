@@ -1,11 +1,11 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – correct import for group routes)
+// FILE: src/index.ts (FIXED – no global auth on public routes)
 // ============================================================
 
 import dotenv from 'dotenv';
 dotenv.config();
 
-// ─── ENV VALIDATION (must come after dotenv) ──────────────────
+// ─── OPTIONAL ENV VALIDATION (warns only) ────────────────────
 import { validateEnv } from './config/validateEnv.js';
 validateEnv();
 
@@ -108,11 +108,8 @@ const server = http.createServer(app);
 // ─── SECURITY MIDDLEWARE ─────────────────────────────────────────────
 app.set('trust proxy', 1);
 app.use(helmet());
-
-// ─── CORS – RESTRICTED TO FRONTEND ─────────────────────────────────
-const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
 app.use(cors({
-  origin: frontendUrl,
+  origin: process.env.FRONTEND_URL || '*',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
@@ -237,6 +234,7 @@ app.get('/api/v1/currency/rates', (req, res) => {
 });
 
 // ─── ROUTE REGISTRATION ──────────────────────────────────────────────
+// ⚠️  Global `authenticate` REMOVED from public routes – each router handles its own auth internally
 
 // AUTH (public)
 app.use('/api/v1/auth', authRoutes);
@@ -247,28 +245,28 @@ app.use('/api/v1/webhooks', webhookRoutes);
 // CONTACT (public)
 app.use('/api/v1/contact', contactRoutes);
 
-// ─── PROTECTED ROUTES ────────────────────────────────────────────────
-app.use('/api/v1/users', authenticate, userRoutes);
-app.use('/api/v1/courses', authenticate, courseRoutes);
+// ─── PROTECTED ROUTES (authenticate inside routers) ─────────────────
+app.use('/api/v1/users', userRoutes);                 // internal auth for profile, wallet, etc.
+app.use('/api/v1/courses', courseRoutes);             // internal auth for enroll, rate, etc.
 app.use('/api/v1/instructor', authenticate, authorize('instructor', 'admin'), instructorRoutes);
 app.use('/api/v1/admin', authenticate, authorize('admin'), adminRoutes);
-app.use('/api/v1/payments', authenticate, paymentRoutes);
-app.use('/api/v1/affiliate', authenticate, affiliateRoutes);
-app.use('/api/v1/ai', authenticate, aiRoutes);
+app.use('/api/v1/payments', paymentRoutes);           // internal auth
+app.use('/api/v1/affiliate', affiliateRoutes);        // internal auth
+app.use('/api/v1/ai', aiRoutes);                      // internal auth
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
 // ─── SOCIAL FEATURES ─────────────────────────────────────────────────
-app.use('/api/v1/posts', postRoutes);
-app.use('/api/v1/follows', followRoutes);
-app.use('/api/v1/challenges', challengeRoutes);
-app.use('/api/v1/ads', adRoutes);
+app.use('/api/v1/posts', postRoutes);                 // internal auth for protected endpoints
+app.use('/api/v1/follows', followRoutes);             // internal auth
+app.use('/api/v1/challenges', challengeRoutes);       // some public, some protected
+app.use('/api/v1/ads', adRoutes);                     // public + protected
 app.use('/api/v1/interactive', authenticate, interactiveRoutes);
 
 // ─── CERTIFICATES ─────────────────────────────────────────────────────
 app.use('/api/v1/certificates', authenticate, certificateRoutes);
 
 // ─── BOOKS ──────────────────────────────────────────────────────────
-app.use('/api/v1/books', bookRoutes);
+app.use('/api/v1/books', bookRoutes);                 // public + protected
 
 // ─── SEO ─────────────────────────────────────────────────────────────
 app.use('/seo', seoRoutes);
