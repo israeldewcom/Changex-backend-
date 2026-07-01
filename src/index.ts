@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – no global auth on public routes)
+// FILE: src/index.ts (UPDATED – added /api/auth/register and /api/register)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -25,6 +25,7 @@ import { initializePassport } from './config/passport.js';
 
 // ─── AUTH ────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth.routes.js';
+import * as authController from './controllers/auth.controller.js'; // ✅ imported for compatibility
 
 // ─── USER & PROFILE ──────────────────────────────────────────────────
 import userRoutes from './routes/user.routes.js';
@@ -234,10 +235,14 @@ app.get('/api/v1/currency/rates', (req, res) => {
 });
 
 // ─── ROUTE REGISTRATION ──────────────────────────────────────────────
-// ⚠️  Global `authenticate` REMOVED from public routes – each router handles its own auth internally
 
 // AUTH (public)
 app.use('/api/v1/auth', authRoutes);
+
+// ─── TEMPORARY BACKWARD‑COMPATIBLE REGISTRATION ROUTES ──────────────
+// Frontend may be calling /api/auth/register or /api/register
+app.post('/api/auth/register', authController.register);
+app.post('/api/register', authController.register);
 
 // WEBHOOKS (public, for Paystack)
 app.use('/api/v1/webhooks', webhookRoutes);
