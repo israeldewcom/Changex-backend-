@@ -7,6 +7,11 @@ import { authenticate } from '../middlewares/auth.js';
 
 const router = Router();
 
+// ─── GET /register – frontend pre‑check ─────────────────────────────
+router.get('/register', (req, res) => {
+  res.status(200).json({ success: true, message: 'Registration endpoint available' });
+});
+
 router.post('/register', validate(registerSchema), authController.register);
 router.post('/login', validate(loginSchema), authController.login);
 router.get('/login', authController.loginGet);
@@ -15,6 +20,7 @@ router.post('/forgot-password', authController.forgotPassword);
 router.post('/reset-password', authController.resetPassword);
 router.put('/change-password', authenticate, authController.changePassword);
 
+// ─── OAuth ────────────────────────────────────────────────────────────
 router.get('/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 router.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: '/login' }), authController.googleCallback);
 router.get('/github', passport.authenticate('github', { scope: ['user:email'] }));
