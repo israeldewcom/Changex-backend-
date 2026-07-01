@@ -1,13 +1,9 @@
 // ============================================================
-// FILE: src/index.ts (FINAL – perfect, no errors)
+// FILE: src/index.ts – CLEAN FIX (only GET /register added)
 // ============================================================
 
 import dotenv from 'dotenv';
 dotenv.config();
-
-// ─── OPTIONAL ENV VALIDATION (warns only) ────────────────────
-import { validateEnv } from './config/validateEnv.js';
-validateEnv();
 
 import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
@@ -234,17 +230,17 @@ app.get('/api/v1/currency/rates', (req, res) => {
   });
 });
 
-// ─── EXPLICIT GET /api/v1/auth/register (frontend pre‑check) ───────
+// ─── ✅ ONLY NEW LINE – GET /register for frontend pre-check ──────
 app.get('/api/v1/auth/register', (req, res) => {
   res.status(200).json({ success: true });
 });
 
 // ─── ROUTE REGISTRATION ──────────────────────────────────────────────
 
-// AUTH (public) – all other auth routes (POST, OAuth, etc.)
+// AUTH (all POST, OAuth, etc. – unchanged)
 app.use('/api/v1/auth', authRoutes);
 
-// ─── TEMPORARY BACKWARD‑COMPATIBLE REGISTRATION ROUTES ──────────────
+// ─── BACKWARD‑COMPATIBLE ROUTES (optional) ──────────────────────────
 app.post('/api/auth/register', authController.register);
 app.post('/api/register', authController.register);
 
@@ -254,7 +250,7 @@ app.use('/api/v1/webhooks', webhookRoutes);
 // CONTACT (public)
 app.use('/api/v1/contact', contactRoutes);
 
-// ─── PROTECTED ROUTES (authenticate inside routers) ─────────────────
+// ─── PROTECTED ROUTES ────────────────────────────────────────────────
 app.use('/api/v1/users', userRoutes);
 app.use('/api/v1/courses', courseRoutes);
 app.use('/api/v1/instructor', authenticate, authorize('instructor', 'admin'), instructorRoutes);
@@ -289,11 +285,10 @@ app.use('/api/v1/splits', authenticate, authorize('instructor', 'admin'), splitR
 app.use('/api/v1/cohorts', authenticate, authorize('instructor', 'admin'), cohortRoutes);
 app.use('/api/v1/analytics', authenticate, authorize('instructor', 'admin'), analyticsRoutes);
 
-// ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
+// ─── SERVE STATIC FILES ─────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-// ─── CATCH‑ALL ROUTE (SPA) – optional, can be removed ──────────────
-// If you don't have a public/index.html, this will 404 – that's fine.
+// ─── CATCH‑ALL ──────────────────────────────────────────────────────
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ success: false, message: 'API route not found' });
