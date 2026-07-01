@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts – CLEAN FIX (only GET /register added)
+// FILE: src/index.ts – FINAL CLEAN FIX
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -196,6 +196,14 @@ app.get('/debug/routes', (req, res) => {
 
 app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
+// ─── 🔥 FIX: Root route (prevents offline errors) ────────────────
+app.get('/', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'ChangeX Academy API' });
+});
+app.head('/', (req, res) => {
+  res.status(200).end();
+});
+
 // ─── PUBLIC ENDPOINTS (no auth) ─────────────────────────────────────
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
@@ -230,17 +238,17 @@ app.get('/api/v1/currency/rates', (req, res) => {
   });
 });
 
-// ─── ✅ ONLY NEW LINE – GET /register for frontend pre-check ──────
+// ─── GET /register for frontend pre‑check ──────────────────────────
 app.get('/api/v1/auth/register', (req, res) => {
   res.status(200).json({ success: true });
 });
 
 // ─── ROUTE REGISTRATION ──────────────────────────────────────────────
 
-// AUTH (all POST, OAuth, etc. – unchanged)
+// AUTH (all POST, OAuth, etc.)
 app.use('/api/v1/auth', authRoutes);
 
-// ─── BACKWARD‑COMPATIBLE ROUTES (optional) ──────────────────────────
+// ─── BACKWARD‑COMPATIBLE ROUTES ──────────────────────────────────────
 app.post('/api/auth/register', authController.register);
 app.post('/api/register', authController.register);
 
