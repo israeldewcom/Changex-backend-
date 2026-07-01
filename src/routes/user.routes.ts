@@ -1,14 +1,19 @@
+// ============================================================
+// FILE: src/routes/user.routes.ts (UPDATED)
+// ============================================================
+
 import { Router } from 'express';
 import * as userController from '../controllers/user.controller.js';
+import * as adController from '../controllers/ad.controller.js'; // import ad controller
 import { authenticate } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
-// ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────
+// ─── PUBLIC ROUTES (no auth) ──────────────────────────────────
 router.get('/leaderboard', userController.getLeaderboard);
 
-// ─── AUTHENTICATED ROUTES ─────────────────────────────────────────────
+// ─── AUTHENTICATED ROUTES ─────────────────────────────────────
 router.use(authenticate);
 
 router.get('/profile', userController.getProfile);
@@ -24,8 +29,9 @@ router.get('/badges', userController.getUserBadges);
 router.post('/claim-welcome-bonus', userController.claimWelcomeBonus);
 router.post('/update-premium-status', userController.updatePremiumStatus);
 router.get('/:userId/profile', userController.getUserProfile);
-
-// ✅ NEW: Get user tier
 router.get('/tier', userController.getTier);
+
+// ─── NEW: Ad earnings breakdown ──────────────────────────────
+router.get('/ad-earnings', adController.getUserAdEarnings);
 
 export default router;
