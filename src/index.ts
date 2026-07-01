@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (UPDATED – added /api/auth/register and /api/register)
+// FILE: src/index.ts (FIXED – explicit GET /api/v1/auth/register)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -25,7 +25,7 @@ import { initializePassport } from './config/passport.js';
 
 // ─── AUTH ────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth.routes.js';
-import * as authController from './controllers/auth.controller.js'; // ✅ imported for compatibility
+import * as authController from './controllers/auth.controller.js';
 
 // ─── USER & PROFILE ──────────────────────────────────────────────────
 import userRoutes from './routes/user.routes.js';
@@ -236,11 +236,15 @@ app.get('/api/v1/currency/rates', (req, res) => {
 
 // ─── ROUTE REGISTRATION ──────────────────────────────────────────────
 
-// AUTH (public)
+// ─── EXPLICIT GET /api/v1/auth/register (frontend pre‑check) ───────
+app.get('/api/v1/auth/register', (req, res) => {
+  res.status(200).json({ success: true, message: 'Registration endpoint available' });
+});
+
+// AUTH (public) – all other auth routes (POST, OAuth, etc.)
 app.use('/api/v1/auth', authRoutes);
 
 // ─── TEMPORARY BACKWARD‑COMPATIBLE REGISTRATION ROUTES ──────────────
-// Frontend may be calling /api/auth/register or /api/register
 app.post('/api/auth/register', authController.register);
 app.post('/api/register', authController.register);
 
@@ -251,27 +255,27 @@ app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/contact', contactRoutes);
 
 // ─── PROTECTED ROUTES (authenticate inside routers) ─────────────────
-app.use('/api/v1/users', userRoutes);                 // internal auth for profile, wallet, etc.
-app.use('/api/v1/courses', courseRoutes);             // internal auth for enroll, rate, etc.
+app.use('/api/v1/users', userRoutes);
+app.use('/api/v1/courses', courseRoutes);
 app.use('/api/v1/instructor', authenticate, authorize('instructor', 'admin'), instructorRoutes);
 app.use('/api/v1/admin', authenticate, authorize('admin'), adminRoutes);
-app.use('/api/v1/payments', paymentRoutes);           // internal auth
-app.use('/api/v1/affiliate', affiliateRoutes);        // internal auth
-app.use('/api/v1/ai', aiRoutes);                      // internal auth
+app.use('/api/v1/payments', paymentRoutes);
+app.use('/api/v1/affiliate', affiliateRoutes);
+app.use('/api/v1/ai', aiRoutes);
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
 // ─── SOCIAL FEATURES ─────────────────────────────────────────────────
-app.use('/api/v1/posts', postRoutes);                 // internal auth for protected endpoints
-app.use('/api/v1/follows', followRoutes);             // internal auth
-app.use('/api/v1/challenges', challengeRoutes);       // some public, some protected
-app.use('/api/v1/ads', adRoutes);                     // public + protected
+app.use('/api/v1/posts', postRoutes);
+app.use('/api/v1/follows', followRoutes);
+app.use('/api/v1/challenges', challengeRoutes);
+app.use('/api/v1/ads', adRoutes);
 app.use('/api/v1/interactive', authenticate, interactiveRoutes);
 
 // ─── CERTIFICATES ─────────────────────────────────────────────────────
 app.use('/api/v1/certificates', authenticate, certificateRoutes);
 
 // ─── BOOKS ──────────────────────────────────────────────────────────
-app.use('/api/v1/books', bookRoutes);                 // public + protected
+app.use('/api/v1/books', bookRoutes);
 
 // ─── SEO ─────────────────────────────────────────────────────────────
 app.use('/seo', seoRoutes);
@@ -288,7 +292,8 @@ app.use('/api/v1/analytics', authenticate, authorize('instructor', 'admin'), ana
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-// ─── CATCH‑ALL ROUTE (SPA) ──────────────────────────────────────────
+// ─── CATCH‑ALL ROUTE (SPA) – optional, can be removed ──────────────
+// If you don't have a public/index.html, this will 404 – that's fine.
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ success: false, message: 'API route not found' });
