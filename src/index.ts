@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts – FINAL CLEAN FIX
+// FILE: src/index.ts – ULTIMATE FIX (all health endpoints)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -154,6 +154,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// ─── 🔥 ALL HEALTH / PING ROUTES (prevents offline errors) ────────
+app.get('/', (req, res) => res.status(200).json({ status: 'ok' }));
+app.head('/', (req, res) => res.status(200).end());
+app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
+app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
+app.get('/api/ping', (req, res) => res.status(200).json({ status: 'ok' }));
+app.get('/api/status', (req, res) => res.status(200).json({ status: 'ok' }));
+app.get('/api/v1/auth/register', (req, res) => res.status(200).json({ success: true }));
+
 // ─── DEBUG ENDPOINTS ──────────────────────────────────────────────────
 app.get('/debug/version', (req, res) => {
   res.json({
@@ -194,16 +203,6 @@ app.get('/debug/routes', (req, res) => {
   res.json({ routes });
 });
 
-app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
-
-// ─── 🔥 FIX: Root route (prevents offline errors) ────────────────
-app.get('/', (req, res) => {
-  res.status(200).json({ status: 'ok', message: 'ChangeX Academy API' });
-});
-app.head('/', (req, res) => {
-  res.status(200).end();
-});
-
 // ─── PUBLIC ENDPOINTS (no auth) ─────────────────────────────────────
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
@@ -225,7 +224,6 @@ app.get('/api/v1/announcements/latest', async (req, res) => {
   }
 });
 
-// ─── CURRENCY RATES ──────────────────────────────────────────────────
 app.get('/api/v1/currency/rates', (req, res) => {
   res.json({
     success: true,
@@ -236,11 +234,6 @@ app.get('/api/v1/currency/rates', (req, res) => {
       GBP: 0.0005,
     },
   });
-});
-
-// ─── GET /register for frontend pre‑check ──────────────────────────
-app.get('/api/v1/auth/register', (req, res) => {
-  res.status(200).json({ success: true });
 });
 
 // ─── ROUTE REGISTRATION ──────────────────────────────────────────────
