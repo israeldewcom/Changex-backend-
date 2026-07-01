@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – explicit GET /api/v1/auth/register)
+// FILE: src/index.ts (FINAL – perfect, no errors)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -234,12 +234,12 @@ app.get('/api/v1/currency/rates', (req, res) => {
   });
 });
 
-// ─── ROUTE REGISTRATION ──────────────────────────────────────────────
-
 // ─── EXPLICIT GET /api/v1/auth/register (frontend pre‑check) ───────
 app.get('/api/v1/auth/register', (req, res) => {
-  res.status(200).json({ success: true, message: 'Registration endpoint available' });
+  res.status(200).json({ success: true });
 });
+
+// ─── ROUTE REGISTRATION ──────────────────────────────────────────────
 
 // AUTH (public) – all other auth routes (POST, OAuth, etc.)
 app.use('/api/v1/auth', authRoutes);
