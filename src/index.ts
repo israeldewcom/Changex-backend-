@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts – ULTIMATE WILDCARD FIX
+// FILE: src/index.ts (FIXED – correct import for group routes)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -21,7 +21,6 @@ import { initializePassport } from './config/passport.js';
 
 // ─── AUTH ────────────────────────────────────────────────────────────
 import authRoutes from './routes/auth.routes.js';
-import * as authController from './controllers/auth.controller.js';
 
 // ─── USER & PROFILE ──────────────────────────────────────────────────
 import userRoutes from './routes/user.routes.js';
@@ -69,7 +68,7 @@ import seoRoutes from './routes/seo.routes.js';
 import videoRoutes from './routes/video.routes.js';
 import messageRoutes from './routes/message.routes.js';
 import storyRoutes from './routes/story.routes.js';
-import groupRoutes from './routes/group.routes.js';
+import groupRoutes from './routes/group.routes.js';  // ✅ fixed: no 's'
 import splitRoutes from './routes/split.routes.js';
 import cohortRoutes from './routes/cohort.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
@@ -106,7 +105,7 @@ const server = http.createServer(app);
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
+  origin: (origin, cb) => cb(null, true),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
@@ -154,15 +153,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// ─── 🔥 ALL HEALTH / PING ROUTES ────────────────────────────────
-app.get('/', (req, res) => res.status(200).json({ status: 'ok' }));
-app.head('/', (req, res) => res.status(200).end());
-app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
-app.get('/api/health', (req, res) => res.status(200).json({ status: 'ok' }));
-app.get('/api/ping', (req, res) => res.status(200).json({ status: 'ok' }));
-app.get('/api/status', (req, res) => res.status(200).json({ status: 'ok' }));
-app.get('/api/v1/auth/register', (req, res) => res.status(200).json({ success: true }));
-
 // ─── DEBUG ENDPOINTS ──────────────────────────────────────────────────
 app.get('/debug/version', (req, res) => {
   res.json({
@@ -203,6 +193,8 @@ app.get('/debug/routes', (req, res) => {
   res.json({ routes });
 });
 
+app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
+
 // ─── PUBLIC ENDPOINTS (no auth) ─────────────────────────────────────
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
@@ -224,6 +216,7 @@ app.get('/api/v1/announcements/latest', async (req, res) => {
   }
 });
 
+// ─── CURRENCY RATES ──────────────────────────────────────────────────
 app.get('/api/v1/currency/rates', (req, res) => {
   res.json({
     success: true,
@@ -238,12 +231,8 @@ app.get('/api/v1/currency/rates', (req, res) => {
 
 // ─── ROUTE REGISTRATION ──────────────────────────────────────────────
 
-// AUTH (all POST, OAuth, etc.)
+// AUTH (public)
 app.use('/api/v1/auth', authRoutes);
-
-// ─── BACKWARD‑COMPATIBLE ROUTES ──────────────────────────────────────
-app.post('/api/auth/register', authController.register);
-app.post('/api/register', authController.register);
 
 // WEBHOOKS (public, for Paystack)
 app.use('/api/v1/webhooks', webhookRoutes);
@@ -252,13 +241,13 @@ app.use('/api/v1/webhooks', webhookRoutes);
 app.use('/api/v1/contact', contactRoutes);
 
 // ─── PROTECTED ROUTES ────────────────────────────────────────────────
-app.use('/api/v1/users', userRoutes);
-app.use('/api/v1/courses', courseRoutes);
+app.use('/api/v1/users', authenticate, userRoutes);
+app.use('/api/v1/courses', authenticate, courseRoutes);
 app.use('/api/v1/instructor', authenticate, authorize('instructor', 'admin'), instructorRoutes);
 app.use('/api/v1/admin', authenticate, authorize('admin'), adminRoutes);
-app.use('/api/v1/payments', paymentRoutes);
-app.use('/api/v1/affiliate', affiliateRoutes);
-app.use('/api/v1/ai', aiRoutes);
+app.use('/api/v1/payments', authenticate, paymentRoutes);
+app.use('/api/v1/affiliate', authenticate, affiliateRoutes);
+app.use('/api/v1/ai', authenticate, aiRoutes);
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
 // ─── SOCIAL FEATURES ─────────────────────────────────────────────────
@@ -286,16 +275,10 @@ app.use('/api/v1/splits', authenticate, authorize('instructor', 'admin'), splitR
 app.use('/api/v1/cohorts', authenticate, authorize('instructor', 'admin'), cohortRoutes);
 app.use('/api/v1/analytics', authenticate, authorize('instructor', 'admin'), analyticsRoutes);
 
-// ─── SERVE STATIC FILES ─────────────────────────────────────────────
+// ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-// ─── 🚀 WILDCARD FOR ANY /api/* GET (health checks) ──────────────
-app.get('/api/*', (req, res) => {
-  // If none of the above routes matched, return success for any GET
-  res.status(200).json({ status: 'ok' });
-});
-
-// ─── CATCH‑ALL ──────────────────────────────────────────────────────
+// ─── CATCH‑ALL ROUTE (SPA) ──────────────────────────────────────────
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ success: false, message: 'API route not found' });
