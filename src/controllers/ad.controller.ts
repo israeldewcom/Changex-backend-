@@ -1,15 +1,13 @@
 // ============================================================
-// FILE: src/controllers/ad.controller.ts
-// COMPLETE – Full Ad Controller with Hybrid Ad Tracking
+// FILE: src/controllers/ad.controller.ts (FIXED – TypeScript errors resolved)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
 import Ad from '../models/Ad.js';
-import Post from '../models/Post.js';
-import User from '../models/User.js';
+import Post, { IPost } from '../models/Post.js';
+import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import AdConfig from '../models/AdConfig.js';
-import { IUser } from '../models/User.js';
 
 // ─── GET ACTIVE ADS BY PLACEMENT ──────────────────────────────
 export const getActiveAds = async (req: Request, res: Response, next: NextFunction) => {
@@ -98,18 +96,21 @@ export const deleteAd = async (req: Request, res: Response, next: NextFunction) 
 // ─── NEW: TRACK AD EVENT (Impression / Click with 50% share) ───
 export const trackAdEvent = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { adId, type, postId, network } = req.body; // type: 'impression' | 'click'
+    const { adId, type, postId, network } = req.body;
     const viewer = req.user as IUser | undefined;
 
     if (!adId || !type || !postId) {
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    // 1. Find post and author
+    // 1. Find post and populate author (correct typing)
     const post = await Post.findById(postId).populate('authorId');
     if (!post || !post.authorId) {
       return res.status(404).json({ success: false, message: 'Post not found' });
     }
+
+    // Safe cast: post.authorId is now the populated user document
+    const author = post.authorId as unknown as IUser;
 
     // 2. Get ad config (CPM, CPC, share%)
     const config = await AdConfig.getConfig();
@@ -129,8 +130,6 @@ export const trackAdEvent = async (req: Request, res: Response, next: NextFuncti
 
     // 5. Credit author (if > 0)
     if (creatorEarnings > 0) {
-      const author = post.authorId as IUser;
-
       await User.findByIdAndUpdate(author._id, {
         $inc: {
           walletBalance: creatorEarnings,
@@ -228,4 +227,4 @@ export const getUserAdEarnings = async (req: Request, res: Response, next: NextF
   } catch (error) {
     next(error);
   }
-};
+};a
