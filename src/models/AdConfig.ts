@@ -1,20 +1,25 @@
 // ============================================================
-// FILE: src/models/AdConfig.ts (NEW)
+// FILE: src/models/AdConfig.ts (UPDATED – with static method typing)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
 import User from './User.js';
 
 export interface IAdConfig extends Document {
-  cpm: number;          // $ per 1000 impressions
-  cpc: number;          // $ per click
-  sharePercent: number; // percentage to creator (default 50)
+  cpm: number;
+  cpc: number;
+  sharePercent: number;
   updatedBy: mongoose.Types.ObjectId;
   updatedAt: Date;
   createdAt: Date;
 }
 
-const AdConfigSchema = new Schema<IAdConfig>(
+// ─── Define the static method interface ──────────────────────
+interface IAdConfigModel extends mongoose.Model<IAdConfig> {
+  getConfig(): Promise<IAdConfig>;
+}
+
+const AdConfigSchema = new Schema<IAdConfig, IAdConfigModel>(
   {
     cpm: { type: Number, default: 1.00 },
     cpc: { type: Number, default: 0.02 },
@@ -25,8 +30,8 @@ const AdConfigSchema = new Schema<IAdConfig>(
   { timestamps: { createdAt: true, updatedAt: false } }
 );
 
-// ─── Singleton helper ──────────────────────────────────────────
-AdConfigSchema.statics.getConfig = async function(): Promise<IAdConfig> {
+// ─── Static method ────────────────────────────────────────────
+AdConfigSchema.statics.getConfig = async function (): Promise<IAdConfig> {
   let config = await this.findOne();
   if (!config) {
     const admin = await User.findOne({ roles: 'admin' });
@@ -41,4 +46,4 @@ AdConfigSchema.statics.getConfig = async function(): Promise<IAdConfig> {
   return config;
 };
 
-export default mongoose.model<IAdConfig>('AdConfig', AdConfigSchema);
+export default mongoose.model<IAdConfig, IAdConfigModel>('AdConfig', AdConfigSchema);
