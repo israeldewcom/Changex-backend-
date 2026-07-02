@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/User.ts (UPDATED – added lastActivity index)
+// FILE: src/models/User.ts (UPDATED – added adEarnings)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -46,6 +46,8 @@ export interface IUser extends Document {
   online?: boolean;
   lastSeen?: Date;
   storyHighlights?: string[];
+  // ─── NEW AD FIELD ──────────────────────────────────────────────
+  adEarnings: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -97,20 +99,22 @@ const UserSchema = new Schema<IUser>(
     online: { type: Boolean, default: false },
     lastSeen: { type: Date, default: Date.now },
     storyHighlights: { type: [String], default: [] },
+    // ─── AD EARNINGS ──────────────────────────────────────────────
+    adEarnings: { type: Number, default: 0 },
   },
   { timestamps: true }
 );
 
-// ─── Indexes ──────────────────────────────────────────────────────────
+// ─── Indexes ────────────────────────────────────────────────────
 UserSchema.index({ email: 1 });
 UserSchema.index({ referralCode: 1 });
 UserSchema.index({ seoSlug: 1 });
 UserSchema.index({ tier: 1 });
 UserSchema.index({ online: 1 });
 UserSchema.index({ lastSeen: -1 });
-UserSchema.index({ lastActivity: -1 }); // ✅ for streak reset cron
+UserSchema.index({ lastActivity: -1 });
 
-UserSchema.pre('save', function(next) {
+UserSchema.pre('save', function (next) {
   if (!this.seoSlug && this.firstName && this.lastName) {
     this.seoSlug = `${this.firstName.toLowerCase()}-${this.lastName.toLowerCase()}-${this._id.toString().slice(-6)}`;
   }
