@@ -1,10 +1,10 @@
 // ============================================================
-// FILE: src/controllers/ad.controller.ts (FIXED – TypeScript errors resolved)
+// FILE: src/controllers/ad.controller.ts (CLEAN – no stray characters)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
 import Ad from '../models/Ad.js';
-import Post, { IPost } from '../models/Post.js';
+import Post from '../models/Post.js';
 import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import AdConfig from '../models/AdConfig.js';
@@ -103,7 +103,7 @@ export const trackAdEvent = async (req: Request, res: Response, next: NextFuncti
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    // 1. Find post and populate author (correct typing)
+    // 1. Find post and populate author
     const post = await Post.findById(postId).populate('authorId');
     if (!post || !post.authorId) {
       return res.status(404).json({ success: false, message: 'Post not found' });
@@ -227,4 +227,4 @@ export const getUserAdEarnings = async (req: Request, res: Response, next: NextF
   } catch (error) {
     next(error);
   }
-};a
+};
