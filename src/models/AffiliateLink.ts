@@ -1,9 +1,9 @@
-// File: src/models/AffiliateLink.ts
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IAffiliateLink extends Document {
   userId: mongoose.Types.ObjectId;
-  courseId: mongoose.Types.ObjectId;
+  courseId?: mongoose.Types.ObjectId;
+  bookId?: mongoose.Types.ObjectId;   // NEW
   code: string;
   clicks: number;
   conversions: number;
@@ -14,7 +14,8 @@ export interface IAffiliateLink extends Document {
 const AffiliateLinkSchema = new Schema<IAffiliateLink>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    courseId: { type: Schema.Types.ObjectId, ref: 'Course', required: true },
+    courseId: { type: Schema.Types.ObjectId, ref: 'Course' },
+    bookId: { type: Schema.Types.ObjectId, ref: 'Book' },
     code: { type: String, unique: true, required: true },
     clicks: { type: Number, default: 0 },
     conversions: { type: Number, default: 0 },
