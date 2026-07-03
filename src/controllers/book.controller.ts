@@ -9,6 +9,8 @@ import Transaction from '../models/Transaction.js';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import User from '../models/User.js';
+import Notification from '../models/Notification.js';
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
@@ -185,5 +187,53 @@ export const purchaseBook = async (req: Request, res: Response) => {
     });
   } catch (err: any) {
     res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ============================================================
+// NEW: Premium user uploads a book (pending admin approval)
+// ============================================================
+export const createBookByUser = async (req: Request, res: Response) => {
+  try {
+    const user = req.user as IUser;
+    if (!user.isPremium && !user.roles?.includes('admin')) {
+      return res.status(403).json({ success: false, message: 'Only premium users can upload books' });
+    }
+
+    const { title, author, description, price, coverImage, fileUrl, affiliatePercent } = req.body;
+
+    if (!title || !author || !fileUrl) {
+      return res.status(400).json({ success: false, message: 'Title, author, and file URL are required' });
+    }
+
+    const book = await Book.create({
+      title,
+      author,
+      description: description || '',
+      price: price || 0,
+      coverImage: coverImage || '',
+      fileUrl,
+      uploadedBy: user._id,
+      authorId: user._id,
+      status: 'pending',
+      affiliatePercent: affiliatePercent || 0,
+      isPublished: false,
+    });
+
+    // Notify all admins
+    const admins = await User.find({ roles: 'admin' }).select('_id');
+    for (const admin of admins) {
+      await Notification.create({
+        userId: admin._id,
+        title: '📚 New Book Pending Approval',
+        message: `${user.firstName} ${user.lastName} uploaded a new book: "${title}"`,
+        type: 'system',
+        data: { bookId: book._id, type: 'book_approval' },
+      });
+    }
+
+    res.status(201).json({ success: true, data: book });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
   }
 };
