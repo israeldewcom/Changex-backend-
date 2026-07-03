@@ -89,6 +89,11 @@ import {
     // ✅ NEW: Admin Post Management
     deletePostByAdmin,     // DELETE /posts/:id
 
+    // ✅ NEW: Book Approval
+    getPendingBooks,       // GET /books/pending
+    approveBook,           // POST /books/:id/approve
+    rejectBook,            // POST /books/:id/reject
+
 } from '../controllers/admin.controller.js';
 
 import { authenticate, authorize } from '../middlewares/auth.js';
@@ -172,6 +177,11 @@ router.post('/books', createBook);
 router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
 router.get('/books', getAdminBooks);
+
+// ==================== BOOK APPROVALS (NEW) ====================
+router.get('/books/pending', getPendingBooks);
+router.post('/books/:id/approve', approveBook);
+router.post('/books/:id/reject', rejectBook);
 
 // ==================== FILE UPLOADS ====================
 router.post('/upload', upload.single('image'), uploadImage);
