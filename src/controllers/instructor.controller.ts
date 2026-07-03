@@ -10,6 +10,8 @@ import cloudinary from '../config/cloudinary.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import mongoose from 'mongoose';
+import Rating from '../models/Rating.js';
+import Transaction from '../models/Transaction.js';
 
 // ✅ FIXED: Slug generation with timestamp – prevents duplicate title errors
 function generateSlug(title: string): string {
@@ -22,10 +24,33 @@ export const getInstructorDashboard = async (req: Request, res: Response, next: 
     const user = req.user as IUser;
     const courses = await Course.find({ instructorId: user._id }).lean();
     const courseIds = courses.map(c => c._id);
+
+    // Total students
     const totalStudents = await Enrollment.countDocuments({ courseId: { $in: courseIds } });
-    const totalRevenue = courses.reduce((acc, c) => acc + (c.price || 0) * (c.totalStudents || 0), 0);
+
+    // Total revenue
+    const revenueAgg = await Transaction.aggregate([
+      { $match: { 'metadata.courseId': { $in: courseIds }, type: 'course_purchase', status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const totalRevenue = revenueAgg[0]?.total || 0;
+
+    // Pending questions
     const pendingQuestions = await Question.countDocuments({ courseId: { $in: courseIds }, answer: null });
-    res.json({ success: true, data: { courses, totalStudents, totalRevenue, pendingQuestions } });
+
+    // Average rating per course
+    const ratingAgg = await Rating.aggregate([
+      { $match: { courseId: { $in: courseIds } } },
+      { $group: { _id: '$courseId', avg: { $avg: '$rating' } } }
+    ]);
+    const ratingsMap = ratingAgg.reduce((acc, r) => { acc[r._id.toString()] = r.avg; return acc; }, {});
+
+    const coursesWithRating = courses.map(c => ({
+      ...c,
+      avgRating: ratingsMap[c._id.toString()] || 0,
+    }));
+
+    res.json({ success: true, data: { courses: coursesWithRating, totalStudents, totalRevenue, pendingQuestions } });
   } catch (err) { next(err); }
 };
 
