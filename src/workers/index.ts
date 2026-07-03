@@ -146,6 +146,7 @@ cron.schedule('0 0 * * *', async () => {
       subscriptionExpires: { $gt: now, $lte: threeDaysFromNow },
     });
     for (const user of expiringSoon) {
+      if (!user.subscriptionExpires) continue; // safety check
       const daysLeft = Math.ceil((user.subscriptionExpires.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
       await Notification.create({
         userId: user._id,
