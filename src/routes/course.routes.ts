@@ -1,4 +1,7 @@
-// src/routes/course.routes.ts
+// ============================================================
+// FILE: src/routes/course.routes.ts
+// ============================================================
+
 import { Router } from 'express';
 import {
   getPublishedCourses,
@@ -9,7 +12,7 @@ import {
   rateCourse,
   askQuestion,
 } from '../controllers/course.controller.js';
-import * as certificateController from '../controllers/certificate.controller.js'; // ADD THIS
+import * as certificateController from '../controllers/certificate.controller.js'; // ✅ imported
 import { authenticate } from '../middlewares/auth.js';
 
 const router = Router();
@@ -25,7 +28,7 @@ router.post('/:id/lessons/:lessonId/progress', authenticate, updateLessonProgres
 router.post('/:id/rate', authenticate, rateCourse);
 router.post('/:id/questions', authenticate, askQuestion);
 
-// ✅ NEW: Backward‑compatible certificate download (frontend uses this URL)
-router.get('/:id/certificate/download', authenticate, certificateController.downloadCertificate);
+// ✅ FIXED: Certificate download – parameter name matches controller
+router.get('/:courseId/certificate/download', authenticate, certificateController.downloadCertificate);
 
 export default router;
