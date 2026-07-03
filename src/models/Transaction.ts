@@ -24,7 +24,9 @@ const TransactionSchema = new Schema<ITransaction>(
         'withdrawal',
         'bonus',
         'subscription',
-        'book_purchase'  // ✅ NEW
+        'book_purchase',
+        'book_author_earning',   // NEW
+        'platform_fee',          // NEW
       ],
       required: true
     },
