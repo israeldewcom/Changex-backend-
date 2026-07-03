@@ -76,6 +76,7 @@ import analyticsRoutes from './routes/analytics.routes.js';
 // ─── MIDDLEWARE ──────────────────────────────────────────────────────
 import { errorHandler } from './middlewares/errorHandler.js';
 import { authenticate, authorize } from './middlewares/auth.js';
+import { checkPremiumExpiry } from './middlewares/checkPremiumExpiry.js'; // ✅ NEW
 
 // ─── SOCKET ──────────────────────────────────────────────────────────
 import { setupSocket } from './socket.js';
@@ -129,6 +130,10 @@ app.use(express.urlencoded({ extended: true }));
 
 // ─── PASSPORT ────────────────────────────────────────────────────────
 initializePassport(app);
+
+// ─── CHECK PREMIUM EXPIRY ON EVERY REQUEST ──────────────────────────
+// This will run for all requests; it only acts if req.user is present.
+app.use(checkPremiumExpiry);
 
 // ─── REQUEST LOGGING MIDDLEWARE ──────────────────────────────────────
 app.use((req: Request, res: Response, next: NextFunction) => {
