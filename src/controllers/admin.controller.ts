@@ -817,6 +817,86 @@ export const approveManualPayment = async (req: Request, res: Response) => {
       const book = await Book.findById(bookId);
       if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
+      // --- Revenue Split ---
+      const price = book.price || 0;
+      let affiliateCommission = 0;
+      let affiliateUserId = null;
+
+      // 1. Check affiliate code
+      const affiliateCode = payment.metadata?.affiliateCode;
+      if (affiliateCode) {
+        const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
+        if (affiliateLink) {
+          const targetId = affiliateLink.bookId || affiliateLink.courseId;
+          if (targetId && targetId.toString() === book._id.toString()) {
+            const percent = book.affiliatePercent || 0;
+            affiliateCommission = price * (percent / 100);
+            affiliateLink.conversions += 1;
+            affiliateLink.totalEarned = (affiliateLink.totalEarned || 0) + affiliateCommission;
+            await affiliateLink.save();
+            affiliateUserId = affiliateLink.userId;
+          }
+        }
+      }
+
+      // 2. Admin share (20% of remaining after affiliate)
+      const remainingAfterAffiliate = price - affiliateCommission;
+      const adminShare = remainingAfterAffiliate * 0.20;
+      const authorShare = remainingAfterAffiliate - adminShare;
+
+      // 3. Credit author
+      if (authorShare > 0) {
+        const author = await User.findById(book.authorId);
+        if (author) {
+          author.walletBalance = (author.walletBalance || 0) + authorShare;
+          await author.save();
+          await Transaction.create({
+            userId: author._id,
+            type: 'book_author_earning',
+            amount: authorShare,
+            status: 'completed',
+            description: `Earnings from book: ${book.title} (manual)`,
+            reference: payment.reference,
+            metadata: { bookId: book._id },
+          });
+        }
+      }
+
+      // 4. Credit affiliate
+      if (affiliateUserId && affiliateCommission > 0) {
+        const affiliate = await User.findById(affiliateUserId);
+        if (affiliate) {
+          affiliate.walletBalance = (affiliate.walletBalance || 0) + affiliateCommission;
+          await affiliate.save();
+          await Transaction.create({
+            userId: affiliate._id,
+            type: 'affiliate_commission',
+            amount: affiliateCommission,
+            status: 'completed',
+            description: `Affiliate commission for book: ${book.title} (manual)`,
+            reference: payment.reference,
+            metadata: { bookId: book._id },
+          });
+        }
+      }
+
+      // 5. Credit admin/platform (20%)
+      const adminUser = await User.findOne({ roles: 'admin' });
+      if (adminUser && adminShare > 0) {
+        adminUser.walletBalance = (adminUser.walletBalance || 0) + adminShare;
+        await adminUser.save();
+        await Transaction.create({
+          userId: adminUser._id,
+          type: 'platform_fee',
+          amount: adminShare,
+          status: 'completed',
+          description: `Platform fee (20%) for book: ${book.title} (manual)`,
+          reference: payment.reference,
+          metadata: { bookId: book._id },
+        });
+      }
+
+      // 6. Record user purchase
       await Transaction.create({
         userId: payment.userId,
         type: 'book_purchase',
@@ -827,28 +907,16 @@ export const approveManualPayment = async (req: Request, res: Response) => {
         metadata: { bookId: book._id },
       });
 
+      // 7. Increment downloads
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
 
-      // Referral bonus for book (10% of book price)
-      const referralCode = payment.metadata?.referralCode;
-      if (referralCode) {
-        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
-        if (referrer && referrer._id.toString() !== payment.userId.toString()) {
-          const bonus = (book.price || 0) * 0.1;
-          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
-          await referrer.save();
-          await Transaction.create({
-            userId: referrer._id,
-            type: 'referral_commission',
-            amount: bonus,
-            status: 'completed',
-            description: `Referral commission for book: ${book.title} (manual)`,
-            reference: payment.reference,
-            metadata: { bookId: book._id },
-          });
-        }
-      }
+      // 8. Mark purchase record for future downloads
+      await ArticlePurchase.findOneAndUpdate(
+        { userId: payment.userId, postId: book._id },
+        { status: 'completed', completedAt: new Date() },
+        { upsert: true }
+      );
     }
 
     payment.status = 'approved';
@@ -1552,6 +1620,86 @@ export const deletePostByAdmin = async (req: Request, res: Response) => {
     res.json({ success: true, message: 'Post deleted by admin' });
   } catch (err) {
     console.error('Admin delete post error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ============================================================
+// NEW: BOOK APPROVAL FUNCTIONS (Admin)
+// ============================================================
+
+export const getPendingBooks = async (req: Request, res: Response) => {
+  try {
+    const books = await Book.find({ status: 'pending' }).populate('authorId', 'firstName lastName email');
+    res.json({ success: true, data: books });
+  } catch (err) {
+    console.error('Get pending books error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const approveBook = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const admin = req.user as IUser;
+
+    const book = await Book.findById(id);
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+
+    if (book.status !== 'pending') {
+      return res.status(400).json({ success: false, message: `Book is already ${book.status}` });
+    }
+
+    book.status = 'approved';
+    book.approvedBy = admin._id;
+    book.approvedAt = new Date();
+    book.isPublished = true;
+    await book.save();
+
+    // Notify author
+    await Notification.create({
+      userId: book.authorId,
+      title: '✅ Book Approved',
+      message: `Your book "${book.title}" has been approved and is now available!`,
+      type: 'system',
+      data: { bookId: book._id },
+    });
+
+    res.json({ success: true, message: 'Book approved', data: book });
+  } catch (err) {
+    console.error('Approve book error:', err);
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const rejectBook = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const admin = req.user as IUser;
+
+    const book = await Book.findById(id);
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+
+    if (book.status !== 'pending') {
+      return res.status(400).json({ success: false, message: `Book is already ${book.status}` });
+    }
+
+    book.status = 'rejected';
+    book.approvedBy = admin._id;
+    book.approvedAt = new Date();
+    await book.save();
+
+    await Notification.create({
+      userId: book.authorId,
+      title: '❌ Book Rejected',
+      message: `Your book "${book.title}" was rejected. Reason: ${reason || 'Not specified'}.`,
+      type: 'system',
+    });
+
+    res.json({ success: true, message: 'Book rejected', data: book });
+  } catch (err) {
+    console.error('Reject book error:', err);
     res.status(500).json({ success: false, message: String(err) });
   }
 };
