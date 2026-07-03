@@ -1,7 +1,4 @@
-// ============================================================
-// FILE: src/routes/course.routes.ts
-// ============================================================
-
+// src/routes/course.routes.ts
 import { Router } from 'express';
 import {
   getPublishedCourses,
@@ -10,8 +7,9 @@ import {
   enrollCourse,
   updateLessonProgress,
   rateCourse,
-  askQuestion, // ✅ ADDED
+  askQuestion,
 } from '../controllers/course.controller.js';
+import * as certificateController from '../controllers/certificate.controller.js'; // ADD THIS
 import { authenticate } from '../middlewares/auth.js';
 
 const router = Router();
@@ -25,6 +23,9 @@ router.get('/my/enrollments', authenticate, getUserEnrollments);
 router.post('/:id/enroll', authenticate, enrollCourse);
 router.post('/:id/lessons/:lessonId/progress', authenticate, updateLessonProgress);
 router.post('/:id/rate', authenticate, rateCourse);
-router.post('/:id/questions', authenticate, askQuestion); // ✅ ADDED – Students can now ask questions
+router.post('/:id/questions', authenticate, askQuestion);
+
+// ✅ NEW: Backward‑compatible certificate download (frontend uses this URL)
+router.get('/:id/certificate/download', authenticate, certificateController.downloadCertificate);
 
 export default router;
