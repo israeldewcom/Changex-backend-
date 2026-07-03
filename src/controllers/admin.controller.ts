@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE – FULLY FIXED)
+// FILE: src/controllers/admin.controller.ts (FULLY FIXED)
 // ============================================================
 
 import { Request, Response } from 'express';
@@ -25,6 +25,7 @@ import Book from '../models/Book.js';
 import Referral from '../models/Referral.js';
 import AffiliateLink from '../models/AffiliateLink.js';
 import Rating from '../models/Rating.js';
+import ArticlePurchase from '../models/ArticlePurchase.js'; // ✅ ADDED – fixes TS2304
 import { getIO } from '../socket.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { invalidateCache } from '../services/cache.js';
