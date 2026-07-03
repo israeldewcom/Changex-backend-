@@ -353,7 +353,18 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
     const user = req.user as IUser;
     const { id } = req.params;
     const { content, parentId } = req.body;
-    const comment = await Comment.create({ postId: id, userId: user._id, content, parentId });
+
+    if (!content) {
+      return res.status(400).json({ success: false, message: 'Comment content is required' });
+    }
+
+    const comment = await Comment.create({
+      postId: id,
+      userId: user._id,
+      content,
+      parentId: parentId || null,
+    });
+
     await Post.findByIdAndUpdate(id, { $inc: { commentsCount: 1 } });
     await PostAnalytics.findOneAndUpdate(
       { postId: id },
@@ -361,6 +372,7 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
       { upsert: true }
     );
 
+    // Notify post author
     const post = await Post.findById(id);
     if (post && post.authorId.toString() !== user._id.toString()) {
       await Notification.create({
@@ -371,6 +383,21 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
         data: { postId: id, commentId: comment._id }
       });
       getIO().to(`user:${post.authorId}`).emit('notification', { title: 'New Comment' });
+    }
+
+    // If reply, notify parent comment author
+    if (parentId) {
+      const parentComment = await Comment.findById(parentId).populate('userId', '_id');
+      if (parentComment && parentComment.userId && parentComment.userId.toString() !== user._id.toString()) {
+        await Notification.create({
+          userId: parentComment.userId,
+          title: 'Reply to your comment',
+          message: `${user.firstName} replied to your comment: ${content.substring(0, 100)}`,
+          type: 'system',
+          data: { postId: id, commentId: comment._id }
+        });
+        getIO().to(`user:${parentComment.userId}`).emit('notification', { title: 'Reply to comment' });
+      }
     }
 
     await invalidateCache(`post:${id}`);
