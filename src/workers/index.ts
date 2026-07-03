@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/workers/index.ts (updated with manual trigger comment)
+// FILE: src/workers/index.ts (updated with premium expiry cron)
 // ============================================================
 
 import cron from 'node-cron';
@@ -10,6 +10,7 @@ import PostAnalytics from '../models/PostAnalytics.js';
 import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
 import Transaction from '../models/Transaction.js';
 import mongoose from 'mongoose';
+import Notification from '../models/Notification.js';
 
 // ===== STREAK RESET =====
 cron.schedule('0 0 * * *', async () => {
@@ -129,6 +130,53 @@ cron.schedule('0 1 * * *', async () => {
     logger.error('Social earnings distribution failed:', err);
   } finally {
     session.endSession();
+  }
+});
+
+// ===== PREMIUM EXPIRY WARNINGS & DOWNGRADE =====
+cron.schedule('0 0 * * *', async () => {
+  try {
+    const now = new Date();
+    const threeDaysFromNow = new Date();
+    threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+
+    // 1. Warn users expiring in 3 days
+    const expiringSoon = await User.find({
+      isPremium: true,
+      subscriptionExpires: { $gt: now, $lte: threeDaysFromNow },
+    });
+    for (const user of expiringSoon) {
+      const daysLeft = Math.ceil((user.subscriptionExpires.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+      await Notification.create({
+        userId: user._id,
+        title: '⚠️ Premium Expiring Soon',
+        message: `Your Premium subscription expires in ${daysLeft} days. Renew now to keep your benefits.`,
+        type: 'system',
+      });
+      logger.info(`Premium warning sent to user ${user._id} (expires in ${daysLeft} days)`);
+    }
+
+    // 2. Downgrade expired users
+    const expired = await User.find({
+      isPremium: true,
+      subscriptionExpires: { $lte: now },
+    });
+    for (const user of expired) {
+      user.isPremium = false;
+      user.tier = 'free';
+      user.subscriptionExpires = undefined;
+      await user.save();
+
+      await Notification.create({
+        userId: user._id,
+        title: '🔓 Premium Expired',
+        message: 'Your Premium subscription has expired. You have been reverted to free plan. Subscribe again to regain premium features.',
+        type: 'system',
+      });
+      logger.info(`User ${user._id} downgraded from premium to free`);
+    }
+  } catch (err) {
+    logger.error('Premium expiry job failed:', err);
   }
 });
 
