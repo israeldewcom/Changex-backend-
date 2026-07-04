@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/user.routes.ts (COMPLETE – with push & notification prefs)
+// FILE: src/routes/user.routes.ts (FIXED)
 // ============================================================
 
 import { Router } from 'express';
@@ -11,52 +11,52 @@ import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
-// ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────
+// ─── PUBLIC ROUTES ──────────────────────────────────────────────
 router.get('/leaderboard', userController.getLeaderboard);
 
-// ─── AUTHENTICATED ROUTES ─────────────────────────────────────────────
+// ─── AUTHENTICATED ROUTES ──────────────────────────────────────
 router.use(authenticate);
 
-// ─── Profile ──────────────────────────────────────────────────────────
+// ─── Profile ──────────────────────────────────────────────────
 router.get('/profile', userController.getProfile);
 router.put('/profile', userController.updateProfile);
 router.post('/avatar', upload.single('avatar'), userController.uploadAvatar);
 
-// ─── Wallet ───────────────────────────────────────────────────────────
+// ─── Wallet ──────────────────────────────────────────────────
 router.get('/wallet', userController.getWallet);
 router.post('/withdraw', userController.requestWithdrawal);
 
-// ─── Ad Earnings ──────────────────────────────────────────────────────
+// ─── Ad Earnings ──────────────────────────────────────────────
 router.get('/ad-earnings', adController.getUserAdEarnings);
 
-// ─── Notifications ────────────────────────────────────────────────────
+// ─── Notifications ──────────────────────────────────────────────
 router.get('/notifications', userController.getNotifications);
 router.put('/notifications/:id/read', userController.markNotificationRead);
 router.put('/notifications/read-all', userController.markAllNotificationsRead);
 
-// ─── Push Subscription ────────────────────────────────────────────────
+// ─── Push Subscription ────────────────────────────────────────────
 router.post('/push-subscription', notificationController.registerPushSubscription);
 
-// ─── Notification Preferences ────────────────────────────────────────
+// ─── Notification Preferences ──────────────────────────────────
 router.put('/notification-preferences', notificationController.updateNotificationPreferences);
 router.get('/notification-preferences', notificationController.getNotificationPreferences);
 
-// ─── Referrals ────────────────────────────────────────────────────────
+// ─── Referrals ──────────────────────────────────────────────────
 router.get('/referrals', userController.getReferrals);
 
-// ─── Badges ───────────────────────────────────────────────────────────
+// ─── Badges ──────────────────────────────────────────────────
 router.get('/badges', userController.getUserBadges);
 
-// ─── Welcome Bonus ────────────────────────────────────────────────────
+// ─── Welcome Bonus ──────────────────────────────────────────────
 router.post('/claim-welcome-bonus', userController.claimWelcomeBonus);
 
-// ─── Premium Status ──────────────────────────────────────────────────
+// ─── Premium Status ──────────────────────────────────────────────
 router.post('/update-premium-status', userController.updatePremiumStatus);
 
-// ─── Tier ────────────────────────────────────────────────────────────
+// ─── Tier ──────────────────────────────────────────────────
 router.get('/tier', userController.getTier);
 
-// ─── Public Profile ──────────────────────────────────────────────────
+// ─── Public Profile ──────────────────────────────────────────────
 router.get('/:userId/profile', userController.getUserProfile);
 
 export default router;
