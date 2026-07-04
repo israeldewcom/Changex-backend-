@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/services/notification.service.ts (NEW)
+// FILE: src/services/notification.service.ts (FIXED)
 // ============================================================
 
 import User, { IUser } from '../models/User.js';
