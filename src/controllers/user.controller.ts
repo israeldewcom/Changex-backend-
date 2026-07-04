@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/user.controller.ts (UPDATED – CACHED LEADERBOARD + WALLET BREAKDOWN + TIER)
+// FILE: src/controllers/user.controller.ts (COMPLETE UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -20,6 +20,7 @@ export const getProfile = async (req: Request, res: Response) => {
   res.json({ success: true, data: user });
 };
 
+// ==================== UPDATE PROFILE (FIXED – auto‑credits welcome bonus) ====================
 export const updateProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -27,6 +28,21 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
     for (const key of allowedUpdates) {
       if (req.body[key] !== undefined) (user as any)[key] = req.body[key];
     }
+
+    // ─── Check if profile is now complete ──────────────────────────
+    const profileComplete = !!(user.bio && user.location);
+    if (profileComplete && !(user as any).welcomeBonusClaimed) {
+      user.walletBalance = (user.walletBalance || 0) + 500;
+      (user as any).welcomeBonusClaimed = true;
+      await Transaction.create({
+        userId: user._id,
+        type: 'bonus',
+        amount: 500,
+        status: 'completed',
+        description: 'Welcome bonus for completing profile',
+      });
+    }
+
     await user.save();
     res.json({ success: true, data: user });
   } catch (err) { next(err); }
@@ -274,7 +290,6 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ✅ NEW: Get user tier
 export const getTier = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
