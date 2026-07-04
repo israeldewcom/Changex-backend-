@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/Notification.ts (UPDATED)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface INotification extends Document {
@@ -7,6 +11,14 @@ export interface INotification extends Document {
   type: 'system' | 'affiliate' | 'course' | 'payment';
   read: boolean;
   data?: any;
+  // ─── NEW: Channels to send through ─────────────────────────
+  channels: ('email' | 'sms' | 'push')[];
+  // ─── NEW: Delivery status per channel ─────────────────────
+  sent: {
+    email: boolean;
+    sms: boolean;
+    push: boolean;
+  };
   createdAt: Date;
 }
 
@@ -18,6 +30,13 @@ const NotificationSchema = new Schema<INotification>(
     type: { type: String, enum: ['system', 'affiliate', 'course', 'payment'], default: 'system' },
     read: { type: Boolean, default: false },
     data: { type: Schema.Types.Mixed },
+    // ─── NEW ──────────────────────────────────────────────────
+    channels: { type: [String], enum: ['email', 'sms', 'push'], default: ['email'] },
+    sent: {
+      email: { type: Boolean, default: false },
+      sms: { type: Boolean, default: false },
+      push: { type: Boolean, default: false },
+    },
   },
   { timestamps: { createdAt: true, updatedAt: false } }
 );
