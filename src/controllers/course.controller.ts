@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/course.controller.ts (FULL UPDATED)
+// FILE: src/controllers/course.controller.ts (COMPLETE UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -16,7 +16,7 @@ import ChallengeProgress from '../models/ChallengeProgress.js';
 import Challenge from '../models/Challenge.js';
 import Notification from '../models/Notification.js';
 import User from '../models/User.js';
-import Question from '../models/Question.js'; // ✅ ADDED
+import Question from '../models/Question.js';
 import { getIO } from '../socket.js';
 import { getOrSetCache, invalidateCache } from '../services/cache.js';
 
@@ -233,6 +233,7 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// ==================== UPDATE LESSON PROGRESS (FIXED) ====================
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -254,32 +255,33 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       progress.timeSpent += timeSpent || 0;
     }
 
-    if (completed && !progress.completed) {
+    // ─── XP & completion logic (relaxed time check) ──────────────
+    if (completed && progress.completed) {
       const lesson = await Lesson.findById(lessonId);
       if (lesson) {
         const durationMinutes = lesson.duration || 0;
         const requiredMinutes = durationMinutes * 0.8;
         const timeSpentMinutes = (progress.timeSpent || 0) / 60;
-        if (timeSpentMinutes >= requiredMinutes) {
+
+        // Always mark complete; award XP only if time requirement met
+        progress.completed = true;
+        if (durationMinutes === 0 || timeSpentMinutes >= requiredMinutes) {
           user.xp = (user.xp || 0) + (lesson.xpReward || 50);
           await user.save();
-        } else {
-          return res.status(400).json({
-            success: false,
-            message: `You need to spend at least ${Math.ceil(requiredMinutes)} minutes on this lesson to earn XP and mark it complete.`,
-          });
         }
       }
     }
 
     await progress.save();
 
+    // ─── Recalculate enrollment progress ────────────────────
     const totalLessons = await Lesson.countDocuments({ courseId: enrollment.courseId });
     const completedLessons = await LessonProgress.countDocuments({ enrollmentId: enrollment._id, completed: true });
     enrollment.progress = Math.round((completedLessons / totalLessons) * 100);
     if (enrollment.progress === 100 && enrollment.status !== 'completed') {
       enrollment.status = 'completed';
       enrollment.completedAt = new Date();
+      // ₦100 course completion bonus
       user.walletBalance = (user.walletBalance || 0) + 100;
       await user.save();
       await Transaction.create({
@@ -363,7 +365,6 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-// ✅ NEW: STUDENTS ASK QUESTIONS
 export const askQuestion = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -374,19 +375,16 @@ export const askQuestion = async (req: Request, res: Response, next: NextFunctio
       return res.status(400).json({ success: false, message: 'Question text is required' });
     }
 
-    // Check if course exists and is published
     const course = await Course.findById(courseId);
     if (!course || !course.isPublished) {
       return res.status(404).json({ success: false, message: 'Course not found' });
     }
 
-    // Check if user is enrolled
     const enrollment = await Enrollment.findOne({ userId: user._id, courseId });
     if (!enrollment) {
       return res.status(403).json({ success: false, message: 'You must be enrolled to ask questions' });
     }
 
-    // Create the question
     const newQuestion = await Question.create({
       userId: user._id,
       courseId,
