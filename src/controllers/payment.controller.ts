@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/payment.controller.ts (UPDATED – article + meeting payments)
+// FILE: src/controllers/payment.controller.ts (UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -52,7 +52,7 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 2. VERIFY PAYSTACK TRANSACTION – FULL LOGIC
+// 2. VERIFY PAYSTACK TRANSACTION – FULL LOGIC (fixed book fields)
 // ──────────────────────────────────────────────────────────────────────
 export const verifyTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -180,7 +180,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       });
     }
 
-    // ─── SUBSCRIPTION (Premium / Elite) ──────────────────────────────────
+    // ─── SUBSCRIPTION ──────────────────────────────────────────────────
     else if (type === 'subscription') {
       const plan = meta.plan || 'premium';
       const days = plan === 'elite' ? 30 : 30;
@@ -223,97 +223,13 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       }
     }
 
-    // ─── BOOK PURCHASE ──────────────────────────────────────────────────────
+    // ─── BOOK PURCHASE – FIXED ──────────────────────────────────────────
     else if (type === 'book_purchase' && bookIdFromMeta) {
       const book = await Book.findById(bookIdFromMeta);
       if (!book) {
         return res.status(404).json({ success: false, message: 'Book not found' });
       }
 
-      const price = book.price || 0;
-      if (price <= 0) {
-        return res.status(400).json({ success: false, message: 'Book is free' });
-      }
-
-      // --- Revenue Split ---
-      let affiliateCommission = 0;
-      let affiliateUserId = null;
-
-      // 1. Check affiliate code
-      const affiliateCode = meta.affiliateCode;
-      if (affiliateCode) {
-        const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
-        if (affiliateLink) {
-          const targetId = affiliateLink.bookId || affiliateLink.courseId;
-          if (targetId && targetId.toString() === book._id.toString()) {
-            const percent = book.affiliatePercent || 0;
-            affiliateCommission = price * (percent / 100);
-            affiliateLink.conversions += 1;
-            affiliateLink.totalEarned = (affiliateLink.totalEarned || 0) + affiliateCommission;
-            await affiliateLink.save();
-            affiliateUserId = affiliateLink.userId;
-          }
-        }
-      }
-
-      // 2. Admin share (20% of remaining after affiliate)
-      const remainingAfterAffiliate = price - affiliateCommission;
-      const adminShare = remainingAfterAffiliate * 0.20;
-      const authorShare = remainingAfterAffiliate - adminShare;
-
-      // 3. Credit author
-      if (authorShare > 0) {
-        const author = await User.findById(book.authorId);
-        if (author) {
-          author.walletBalance = (author.walletBalance || 0) + authorShare;
-          await author.save();
-          await Transaction.create({
-            userId: author._id,
-            type: 'book_author_earning',
-            amount: authorShare,
-            status: 'completed',
-            reference,
-            description: `Earnings from book: ${book.title}`,
-            metadata: { bookId: book._id },
-          });
-        }
-      }
-
-      // 4. Credit affiliate
-      if (affiliateUserId && affiliateCommission > 0) {
-        const affiliate = await User.findById(affiliateUserId);
-        if (affiliate) {
-          affiliate.walletBalance = (affiliate.walletBalance || 0) + affiliateCommission;
-          await affiliate.save();
-          await Transaction.create({
-            userId: affiliate._id,
-            type: 'affiliate_commission',
-            amount: affiliateCommission,
-            status: 'completed',
-            reference,
-            description: `Affiliate commission for book: ${book.title}`,
-            metadata: { bookId: book._id },
-          });
-        }
-      }
-
-      // 5. Credit admin/platform (20%)
-      const adminUser = await User.findOne({ roles: 'admin' });
-      if (adminUser && adminShare > 0) {
-        adminUser.walletBalance = (adminUser.walletBalance || 0) + adminShare;
-        await adminUser.save();
-        await Transaction.create({
-          userId: adminUser._id,
-          type: 'platform_fee',
-          amount: adminShare,
-          status: 'completed',
-          reference,
-          description: `Platform fee (20%) for book: ${book.title}`,
-          metadata: { bookId: book._id },
-        });
-      }
-
-      // 6. Record user purchase
       await Transaction.create({
         userId: user._id,
         type: 'book_purchase',
@@ -324,16 +240,27 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         metadata: { bookId: book._id },
       });
 
-      // 7. Increment downloads
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
 
-      // 8. Mark purchase record for future downloads
-      await ArticlePurchase.findOneAndUpdate(
-        { userId: user._id, postId: book._id },
-        { status: 'completed', completedAt: new Date() },
-        { upsert: true }
-      );
+      const referralCode = meta.referralCode;
+      if (referralCode) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== user._id.toString()) {
+          const bonus = (book.price || 0) * 0.1;
+          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_commission',
+            amount: bonus,
+            status: 'completed',
+            description: `Referral commission for book: ${book.title}`,
+            reference,
+            metadata: { bookId: book._id },
+          });
+        }
+      }
     }
 
     // ─── ARTICLE PURCHASE ──────────────────────────────────────────────────
@@ -399,12 +326,12 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ─── SUBSCRIBE (Premium / Elite) ──────────────────────────────────────
+// ─── SUBSCRIBE ──────────────────────────────────────────────────────
 export const subscribe = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'User not authenticated' });
-    
+
     const { plan = 'premium', referralCode } = req.body;
     let price: number;
     if (plan === 'elite') {
