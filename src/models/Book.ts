@@ -9,17 +9,17 @@ export interface IBook extends Document {
   author: string;
   description: string;
   coverImage: string;
-  fileUrl: string;          // final URL (points to cloudinary or disk)
-  diskPath?: string;        // local disk path (for fallback)
-  cloudinaryUrl?: string;   // cloudinary URL (optional)
+  fileUrl: string;
+  diskPath?: string;
+  cloudinaryUrl?: string;
   price: number;
   downloads: number;
   views: number;
   isPublished: boolean;
-  isPremium: boolean;       // NEW: only premium users can view/download
-  approvalStatus: 'pending' | 'approved' | 'rejected';  // NEW: admin approval workflow
-  rejectionReason?: string; // NEW: reason if rejected
-  uploadedBy: mongoose.Types.ObjectId;  // admin who uploaded the book
+  isPremium: boolean;
+  approvalStatus: 'pending' | 'approved' | 'rejected';
+  rejectionReason?: string;
+  uploadedBy: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -98,7 +98,6 @@ const BookSchema = new Schema<IBook>(
   { timestamps: true }
 );
 
-// ─── Indexes ──────────────────────────────────────────────────────────
 BookSchema.index({ title: 'text', author: 'text' });
 BookSchema.index({ isPublished: 1, approvalStatus: 1 });
 BookSchema.index({ uploadedBy: 1, createdAt: -1 });
@@ -108,7 +107,6 @@ BookSchema.index({ price: 1 });
 BookSchema.index({ views: -1 });
 BookSchema.index({ downloads: -1 });
 
-// ─── Virtuals ─────────────────────────────────────────────────────────
 BookSchema.virtual('isFree').get(function (this: IBook) {
   return this.price === 0;
 });
@@ -125,7 +123,6 @@ BookSchema.virtual('isRejected').get(function (this: IBook) {
   return this.approvalStatus === 'rejected';
 });
 
-// ─── Methods ──────────────────────────────────────────────────────────
 BookSchema.methods.incrementViews = async function (this: IBook) {
   this.views += 1;
   return this.save();
@@ -142,7 +139,6 @@ BookSchema.methods.isAccessibleToUser = function (this: IBook, user: any) {
   return true;
 };
 
-// ─── Static Methods ──────────────────────────────────────────────────
 BookSchema.statics.getPublishedBooks = async function (limit = 50) {
   return this.find({
     isPublished: true,
@@ -172,7 +168,6 @@ BookSchema.statics.getPremiumBooks = async function (limit = 50) {
     .lean();
 };
 
-// ─── Ensure virtuals are included in JSON output ──────────────────
 BookSchema.set('toJSON', { virtuals: true });
 BookSchema.set('toObject', { virtuals: true });
 
