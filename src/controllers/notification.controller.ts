@@ -1,12 +1,12 @@
 // ============================================================
-// FILE: src/controllers/notification.controller.ts (UPDATED)
+// FILE: src/controllers/notification.controller.ts (COMPLETE)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
 import User, { IUser } from '../models/User.js';
 import Notification from '../models/Notification.js';
 
-// ─── Get notifications (unchanged) ───────────────────────────
+// ─── Get notifications ──────────────────────────────────────────
 export const getNotifications = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -19,7 +19,7 @@ export const getNotifications = async (req: Request, res: Response, next: NextFu
   }
 };
 
-// ─── Mark as read (unchanged) ──────────────────────────────
+// ─── Mark as read ──────────────────────────────────────────────
 export const markNotificationRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await Notification.findByIdAndUpdate(req.params.id, { read: true });
@@ -29,7 +29,7 @@ export const markNotificationRead = async (req: Request, res: Response, next: Ne
   }
 };
 
-// ─── Mark all read (unchanged) ─────────────────────────────
+// ─── Mark all read ─────────────────────────────────────────────
 export const markAllNotificationsRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -40,11 +40,11 @@ export const markAllNotificationsRead = async (req: Request, res: Response, next
   }
 };
 
-// ─── NEW: Register push subscription ──────────────────────────
+// ─── Register push subscription ──────────────────────────────
 export const registerPushSubscription = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const { subscription } = req.body; // { endpoint, keys: { p256dh, auth } }
+    const { subscription } = req.body;
 
     if (!subscription || !subscription.endpoint) {
       return res.status(400).json({ success: false, message: 'Invalid subscription' });
@@ -57,7 +57,7 @@ export const registerPushSubscription = async (req: Request, res: Response, next
   }
 };
 
-// ─── NEW: Update notification preferences ──────────────────────
+// ─── Update notification preferences ────────────────────────────
 export const updateNotificationPreferences = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -65,6 +65,17 @@ export const updateNotificationPreferences = async (req: Request, res: Response,
 
     const prefs = { email, sms, push };
     await User.findByIdAndUpdate(user._id, { notificationPreferences: prefs });
+    res.json({ success: true, data: prefs });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── Get notification preferences ──────────────────────────────
+export const getNotificationPreferences = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const prefs = user.notificationPreferences || { email: true, sms: false, push: true };
     res.json({ success: true, data: prefs });
   } catch (err) {
     next(err);
