@@ -1,6 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts
-// COMPLETE – with notification service, book approval, etc.
+// FILE: src/controllers/admin.controller.ts (UPDATED – fixed imports)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -14,6 +13,8 @@ import Announcement from '../models/Announcement.js';
 import ManualPayment from '../models/ManualPayment.js';
 import Enrollment from '../models/Enrollment.js';
 import Post from '../models/Post.js';
+import Comment from '../models/Comment.js';
+import Like from '../models/Like.js';
 import Follow from '../models/Follow.js';
 import Challenge from '../models/Challenge.js';
 import Ad from '../models/Ad.js';
@@ -484,7 +485,6 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
       isPublished: false,
     });
 
-    // Notify all admins that a new book needs approval
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const adminUser of admins) {
       await sendNotification({
@@ -619,7 +619,6 @@ export const createAnnouncement = async (req: Request, res: Response, next: Next
     if (sendSms) channels.push('sms');
     if (sendPush) channels.push('push');
 
-    // Send to each user using the notification service
     for (const user of users) {
       await sendNotification({
         userId: user._id.toString(),
