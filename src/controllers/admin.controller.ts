@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (UPDATED – fixed imports)
+// FILE: src/controllers/admin.controller.ts (COMPLETE)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -539,6 +539,17 @@ export const deleteBook = async (req: Request, res: Response, next: NextFunction
 export const getAdminBooks = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const books = await Book.find().sort('-createdAt');
+    res.json({ success: true, data: books });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const getPendingBooks = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const books = await Book.find({ approvalStatus: 'pending' })
+      .populate('uploadedBy', 'firstName lastName email')
+      .sort('-createdAt');
     res.json({ success: true, data: books });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
