@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/User.ts (UPDATED – added adEarnings)
+// FILE: src/models/User.ts (UPDATED – notification preferences)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -46,8 +46,21 @@ export interface IUser extends Document {
   online?: boolean;
   lastSeen?: Date;
   storyHighlights?: string[];
-  // ─── NEW AD FIELD ──────────────────────────────────────────────
   adEarnings: number;
+  // ─── NEW: Notification preferences ──────────────────────────
+  notificationPreferences: {
+    email: boolean;
+    sms: boolean;
+    push: boolean;
+  };
+  // ─── NEW: Push subscription for web push ────────────────────
+  pushSubscription?: {
+    endpoint: string;
+    keys: {
+      p256dh: string;
+      auth: string;
+    };
+  };
   createdAt: Date;
   updatedAt: Date;
 }
@@ -99,13 +112,24 @@ const UserSchema = new Schema<IUser>(
     online: { type: Boolean, default: false },
     lastSeen: { type: Date, default: Date.now },
     storyHighlights: { type: [String], default: [] },
-    // ─── AD EARNINGS ──────────────────────────────────────────────
     adEarnings: { type: Number, default: 0 },
+    // ─── Notification preferences ──────────────────────────────
+    notificationPreferences: {
+      email: { type: Boolean, default: true },
+      sms: { type: Boolean, default: false },
+      push: { type: Boolean, default: true },
+    },
+    pushSubscription: {
+      endpoint: String,
+      keys: {
+        p256dh: String,
+        auth: String,
+      },
+    },
   },
   { timestamps: true }
 );
 
-// ─── Indexes ────────────────────────────────────────────────────
 UserSchema.index({ email: 1 });
 UserSchema.index({ referralCode: 1 });
 UserSchema.index({ seoSlug: 1 });
