@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/course.controller.ts (COMPLETE UPDATED)
+// FILE: src/controllers/course.controller.ts (COMPLETE UPDATED – bonus ₦300)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -233,7 +233,7 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ==================== UPDATE LESSON PROGRESS (FIXED) ====================
+// ==================== UPDATE LESSON PROGRESS (FIXED – ₦300 bonus) ====================
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -281,13 +281,13 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
     if (enrollment.progress === 100 && enrollment.status !== 'completed') {
       enrollment.status = 'completed';
       enrollment.completedAt = new Date();
-      // ₦100 course completion bonus
-      user.walletBalance = (user.walletBalance || 0) + 100;
+      // ₦300 course completion bonus
+      user.walletBalance = (user.walletBalance || 0) + 300;
       await user.save();
       await Transaction.create({
         userId: user._id,
         type: 'bonus',
-        amount: 100,
+        amount: 300,
         status: 'completed',
         description: 'Course completion bonus',
       });
