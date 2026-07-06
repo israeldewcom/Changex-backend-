@@ -13,7 +13,7 @@ export interface ISocialEarningsConfig extends Document {
 }
 
 const SocialEarningsConfigSchema = new Schema<ISocialEarningsConfig>({
-  dailyPoolAmount: { type: Number, default: 800 },
+  dailyPoolAmount: { type: Number, default: 5000 },
   engagementWeights: {
     like: { type: Number, default: 1 },
     comment: { type: Number, default: 2 },
