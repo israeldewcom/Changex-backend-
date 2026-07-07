@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/ad.controller.ts (UPDATED – validate placement)
+// FILE: src/controllers/ad.controller.ts (FIXED TYPE ERROR)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -21,12 +21,12 @@ const VALID_PLACEMENTS = [
   'challenge-sponsor',
   'book-sponsor',
   'explore-sponsor'
-];
+] as const;
 
 export const getActiveAds = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { placement } = req.params;
-    if (!VALID_PLACEMENTS.includes(placement)) {
+    const placement = req.params.placement as string;
+    if (!VALID_PLACEMENTS.includes(placement as any)) {
       return res.status(400).json({ success: false, message: 'Invalid placement' });
     }
     const now = new Date();
