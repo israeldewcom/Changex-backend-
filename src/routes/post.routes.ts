@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/post.routes.ts (already correct)
+// FILE: src/routes/post.routes.ts (FULLY UPDATED)
 // ============================================================
 
 import { Router } from 'express';
@@ -23,6 +23,9 @@ import {
   getMySocialEarnings,
   getMyPostTitles,
   getPersonalizedFeed,
+  getPurchasedArticles,        // ✅ ADDED
+  purchaseArticle,             // ✅ For paywall
+  getPostPreview,              // ✅ For paywall
 } from '../controllers/post.controller.js';
 import { authenticate } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
@@ -31,7 +34,7 @@ const router = Router();
 
 // ─── Public routes ─────────────────────────────────────────────────────
 router.get('/', getPublishedPosts);
-router.get('/slug/:slug', getPostBySlug);   // ✅ This is what the frontend calls
+router.get('/slug/:slug', getPostBySlug);
 router.get('/:id/comments', getComments);
 
 // ─── Protected routes ──────────────────────────────────────────────────
@@ -53,5 +56,10 @@ router.get('/my/social-earnings', getMySocialEarnings);
 router.get('/personalized', getPersonalizedFeed);
 router.get('/user/:userId', getUserPosts);
 router.post('/comment/:id/like', likeComment);
+
+// ─── NEW ROUTES FOR PAID ARTICLES ─────────────────────────────────────
+router.get('/purchased', getPurchasedArticles);       // ✅ ADDED
+router.post('/:id/purchase', purchaseArticle);        // ✅ For purchase initiation
+router.get('/:id/preview', getPostPreview);           // ✅ Preview for paywall
 
 export default router;
