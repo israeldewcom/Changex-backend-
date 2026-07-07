@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/controllers/certificate.controller.ts (UPDATED)
+// ============================================================
+
 import { Request, Response, NextFunction } from 'express';
 import { IUser } from '../models/User.js';
 import Enrollment from '../models/Enrollment.js';
@@ -16,10 +20,9 @@ export const downloadCertificate = async (req: Request, res: Response, next: Nex
     }
 
     if (!courseId) {
-      return res.status(400). json({ success: false, message: 'Course ID is required' });
+      return res.status(400).json({ success: false, message: 'Course ID is required' });
     }
 
-    // Find the enrollment with proper course population
     const enrollment = await Enrollment.findOne({
       userId: user._id,
       courseId: courseId
@@ -32,17 +35,14 @@ export const downloadCertificate = async (req: Request, res: Response, next: Nex
       });
     }
 
-    // Check if course is completed (either status 'completed' OR progress 100)
     const isCompleted = enrollment.status === 'completed' || enrollment.progress >= 100;
 
     if (!isCompleted) {
-      // Double-check by counting completed lessons vs total lessons
       const totalLessons = await Lesson.countDocuments({ courseId: courseId });
       const completedLessons = await LessonProgress.countDocuments({
         enrollmentId: enrollment._id,
         completed: true
       });
-
       const actualProgress = totalLessons > 0 ? Math.round((completedLessons / totalLessons) * 100) : 0;
 
       if (actualProgress < 100) {
@@ -52,7 +52,6 @@ export const downloadCertificate = async (req: Request, res: Response, next: Nex
         });
       }
 
-      // Update enrollment to completed
       enrollment.status = 'completed';
       enrollment.completedAt = new Date();
       enrollment.progress = 100;
@@ -73,17 +72,27 @@ export const downloadCertificate = async (req: Request, res: Response, next: Nex
       }
     }
 
-    // Generate certificate PDF
-    const pdfBuffer = await generateCertificatePDF(
-      `${user.firstName} ${user.lastName}`,
-      course.title,
-      enrollment.completedAt || new Date(),
-      course.certificateTemplate,
-      instructorName,
-      user.email
-    );
+    // Extract additional details for the certificate
+    const topics = course.topics || course.outcomes || [];
+    const programType = 'Online Course';
+    const duration = `${course.totalLessons || 0} lessons • ${course.level || 'Self‑Paced'}`;
+    const level = course.level || 'Intermediate';
+    const issuer = 'ChangeX Academy';
 
-    // Send PDF as downloadable file
+    // Generate certificate with enhanced design
+    const pdfBuffer = await generateCertificatePDF({
+      userName: `${user.firstName} ${user.lastName}`,
+      programTitle: course.title,
+      topics: Array.isArray(topics) ? topics : [],
+      programType,
+      duration,
+      level,
+      issuer,
+      completionDate: enrollment.completedAt || new Date(),
+      instructorName,
+      userEmail: user.email,
+    });
+
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="Certificate_${course.title.replace(/[^a-z0-9]/gi, '_')}.pdf"`);
     res.setHeader('Content-Length', pdfBuffer.length);
@@ -124,7 +133,6 @@ export const checkCertificateAvailability = async (req: Request, res: Response, 
       return res.json({ success: true, data: { available: true, message: 'Certificate available' } });
     }
 
-    // Calculate exact progress
     const totalLessons = await Lesson.countDocuments({ courseId: courseId });
     const completedLessons = await LessonProgress.countDocuments({
       enrollmentId: enrollment._id,
