@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/post.controller.ts (UPDATED – added paywall + paid article support)
+// FILE: src/controllers/post.controller.ts (FULLY UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -10,7 +10,7 @@ import Notification from '../models/Notification.js';
 import Follow from '../models/Follow.js';
 import Course from '../models/Course.js';
 import PostAnalytics from '../models/PostAnalytics.js';
-import ArticlePurchase from '../models/ArticlePurchase.js';
+import ArticlePurchase from '../models/ArticlePurchase.js';   // ✅ For purchased articles
 import Transaction from '../models/Transaction.js';
 import { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
@@ -21,6 +21,7 @@ function generateSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-' + Date.now();
 }
 
+// ─── CREATE POST ──────────────────────────────────────────────────────
 export const createPost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -57,6 +58,7 @@ export const createPost = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+// ─── UPDATE POST ──────────────────────────────────────────────────────
 export const updatePost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -74,6 +76,7 @@ export const updatePost = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+// ─── PUBLISH POST ─────────────────────────────────────────────────────
 export const publishPost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -108,6 +111,7 @@ export const publishPost = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// ─── DELETE POST ──────────────────────────────────────────────────────
 export const deletePost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -132,6 +136,7 @@ export const deletePost = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+// ─── UPLOAD POST VIDEO ──────────────────────────────────────────────
 export const uploadPostVideo = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -149,6 +154,7 @@ export const uploadPostVideo = async (req: Request, res: Response, next: NextFun
   }
 };
 
+// ─── GET PUBLISHED POSTS (CACHED) ────────────────────────────────────
 export const getPublishedPosts = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { page = 1, limit = 10, tag, type, author } = req.query;
@@ -247,7 +253,7 @@ export const getPostBySlug = async (req: Request, res: Response, next: NextFunct
         isOwner,
         previewContent,
         userLiked,
-        fullContent: post.content, // Full content (for owner/purchaser)
+        fullContent: post.content,
       }
     });
   } catch (err) {
@@ -269,7 +275,6 @@ export const purchaseArticle = async (req: Request, res: Response, next: NextFun
     if (existing) return res.status(400).json({ success: false, message: 'Already purchased' });
 
     // Create purchase record (payment handled via Paystack flow)
-    // Payment verification will complete the purchase
     const purchase = await ArticlePurchase.create({
       userId: user._id,
       postId: post._id,
@@ -291,7 +296,7 @@ export const purchaseArticle = async (req: Request, res: Response, next: NextFun
   }
 };
 
-// ─── GET PURCHASED ARTICLES ─────────────────────────────────────────
+// ─── GET PURCHASED ARTICLES ──────────────────────────────────────────
 export const getPurchasedArticles = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -331,7 +336,9 @@ export const likePost = async (req: Request, res: Response, next: NextFunction) 
         { upsert: true }
       );
       await invalidateCache(`post:${id}`);
-      res.json({ success: true, liked: false, likes: (await Post.findById(id))?.likes });
+      const post = await Post.findById(id);
+      getIO().emit('post_liked', { postId: id, likes: post?.likes || 0, userId: user._id, liked: false });
+      res.json({ success: true, liked: false, likes: post?.likes });
     } else {
       await Like.create({ userId: user._id, targetId: id, targetType: 'post' });
       const post = await Post.findByIdAndUpdate(id, { $inc: { likes: 1 } }, { new: true });
@@ -341,6 +348,7 @@ export const likePost = async (req: Request, res: Response, next: NextFunction) 
         { upsert: true }
       );
       await invalidateCache(`post:${id}`);
+      getIO().emit('post_liked', { postId: id, likes: post?.likes || 0, userId: user._id, liked: true });
       res.json({ success: true, liked: true, likes: post?.likes });
     }
   } catch (err) {
@@ -348,23 +356,13 @@ export const likePost = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
+// ─── ADD COMMENT ──────────────────────────────────────────────────────
 export const addComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const { id } = req.params;
     const { content, parentId } = req.body;
-
-    if (!content) {
-      return res.status(400).json({ success: false, message: 'Comment content is required' });
-    }
-
-    const comment = await Comment.create({
-      postId: id,
-      userId: user._id,
-      content,
-      parentId: parentId || null,
-    });
-
+    const comment = await Comment.create({ postId: id, userId: user._id, content, parentId });
     await Post.findByIdAndUpdate(id, { $inc: { commentsCount: 1 } });
     await PostAnalytics.findOneAndUpdate(
       { postId: id },
@@ -372,7 +370,6 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
       { upsert: true }
     );
 
-    // Notify post author
     const post = await Post.findById(id);
     if (post && post.authorId.toString() !== user._id.toString()) {
       await Notification.create({
@@ -385,21 +382,6 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
       getIO().to(`user:${post.authorId}`).emit('notification', { title: 'New Comment' });
     }
 
-    // If reply, notify parent comment author
-    if (parentId) {
-      const parentComment = await Comment.findById(parentId).populate('userId', '_id');
-      if (parentComment && parentComment.userId && parentComment.userId.toString() !== user._id.toString()) {
-        await Notification.create({
-          userId: parentComment.userId,
-          title: 'Reply to your comment',
-          message: `${user.firstName} replied to your comment: ${content.substring(0, 100)}`,
-          type: 'system',
-          data: { postId: id, commentId: comment._id }
-        });
-        getIO().to(`user:${parentComment.userId}`).emit('notification', { title: 'Reply to comment' });
-      }
-    }
-
     await invalidateCache(`post:${id}`);
     res.status(201).json({ success: true, data: comment });
   } catch (err) {
@@ -407,6 +389,7 @@ export const addComment = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+// ─── GET COMMENTS ──────────────────────────────────────────────────────
 export const getComments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -427,6 +410,7 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// ─── LIKE COMMENT ──────────────────────────────────────────────────────
 export const likeComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -446,6 +430,7 @@ export const likeComment = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// ─── SHARE POST ──────────────────────────────────────────────────────
 export const sharePost = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -462,6 +447,7 @@ export const sharePost = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
+// ─── GET USER POSTS ──────────────────────────────────────────────────
 export const getUserPosts = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params;
@@ -479,6 +465,7 @@ export const getUserPosts = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// ─── FOLLOWING FEED ──────────────────────────────────────────────────
 export const getFollowingFeed = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -538,6 +525,7 @@ export const getFollowingFeed = async (req: Request, res: Response, next: NextFu
   }
 };
 
+// ─── TRACK POST VIEW ──────────────────────────────────────────────────
 export const trackPostView = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -554,6 +542,7 @@ export const trackPostView = async (req: Request, res: Response, next: NextFunct
   }
 };
 
+// ─── GET POST ANALYTICS ──────────────────────────────────────────────
 export const getPostAnalytics = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -567,6 +556,7 @@ export const getPostAnalytics = async (req: Request, res: Response, next: NextFu
   }
 };
 
+// ─── MY SOCIAL EARNINGS ─────────────────────────────────────────────
 export const getMySocialEarnings = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -574,12 +564,17 @@ export const getMySocialEarnings = async (req: Request, res: Response, next: Nex
     const postIds = posts.map(p => p._id);
     const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
     const totalEarnings = analytics.reduce((sum, a) => sum + (a.earnings || 0), 0);
-    res.json({ success: true, data: { totalEarnings, posts: analytics } });
+    const postsWithEarnings = await Promise.all(analytics.map(async (a) => {
+      const post = await Post.findById(a.postId).select('title');
+      return { ...a.toObject(), title: post?.title || 'Untitled' };
+    }));
+    res.json({ success: true, data: { totalEarnings, posts: postsWithEarnings } });
   } catch (err) {
     next(err);
   }
 };
 
+// ─── MY POST TITLES ──────────────────────────────────────────────────
 export const getMyPostTitles = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -591,6 +586,7 @@ export const getMyPostTitles = async (req: Request, res: Response, next: NextFun
   }
 };
 
+// ─── PERSONALIZED FEED ──────────────────────────────────────────────
 export const getPersonalizedFeed = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
