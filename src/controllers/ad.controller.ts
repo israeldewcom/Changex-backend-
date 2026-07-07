@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/ad.controller.ts (CLEAN – no stray characters)
+// FILE: src/controllers/ad.controller.ts (UPDATED – validate placement)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -9,10 +9,26 @@ import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import AdConfig from '../models/AdConfig.js';
 
-// ─── GET ACTIVE ADS BY PLACEMENT ──────────────────────────────
+const VALID_PLACEMENTS = [
+  'sidebar',
+  'banner',
+  'in-feed',
+  'popup',
+  'book-page',
+  'video-pre',
+  'video-mid',
+  'lesson-inline',
+  'challenge-sponsor',
+  'book-sponsor',
+  'explore-sponsor'
+];
+
 export const getActiveAds = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { placement } = req.params;
+    if (!VALID_PLACEMENTS.includes(placement)) {
+      return res.status(400).json({ success: false, message: 'Invalid placement' });
+    }
     const now = new Date();
     const ads = await Ad.find({
       placement,
@@ -26,7 +42,6 @@ export const getActiveAds = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── TRACK AD IMPRESSION (legacy) ────────────────────────────
 export const trackAdImpression = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -37,7 +52,6 @@ export const trackAdImpression = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ─── TRACK AD CLICK (legacy) ──────────────────────────────────
 export const trackAdClick = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -49,10 +63,13 @@ export const trackAdClick = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── CREATE AD (Admin only) ──────────────────────────────────
 export const createAd = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const admin = req.user as IUser;
+    const { placement } = req.body;
+    if (!VALID_PLACEMENTS.includes(placement)) {
+      return res.status(400).json({ success: false, message: 'Invalid placement' });
+    }
     const ad = await Ad.create({ ...req.body, createdBy: admin._id });
     res.status(201).json({ success: true, data: ad });
   } catch (error) {
@@ -60,7 +77,6 @@ export const createAd = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
-// ─── GET ALL ADS (Admin only) ────────────────────────────────
 export const getAds = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const ads = await Ad.find().sort('-createdAt').populate('createdBy', 'firstName lastName');
@@ -70,10 +86,13 @@ export const getAds = async (req: Request, res: Response, next: NextFunction) =>
   }
 };
 
-// ─── UPDATE AD (Admin only) ──────────────────────────────────
 export const updateAd = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
+    const { placement } = req.body;
+    if (placement && !VALID_PLACEMENTS.includes(placement)) {
+      return res.status(400).json({ success: false, message: 'Invalid placement' });
+    }
     const ad = await Ad.findByIdAndUpdate(id, req.body, { new: true });
     if (!ad) return res.status(404).json({ success: false, message: 'Ad not found' });
     res.json({ success: true, data: ad });
@@ -82,7 +101,6 @@ export const updateAd = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
-// ─── DELETE AD (Admin only) ──────────────────────────────────
 export const deleteAd = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -93,7 +111,6 @@ export const deleteAd = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
-// ─── NEW: TRACK AD EVENT (Impression / Click with 50% share) ───
 export const trackAdEvent = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { adId, type, postId, network } = req.body;
@@ -103,32 +120,25 @@ export const trackAdEvent = async (req: Request, res: Response, next: NextFuncti
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    // 1. Find post and populate author
     const post = await Post.findById(postId).populate('authorId');
     if (!post || !post.authorId) {
       return res.status(404).json({ success: false, message: 'Post not found' });
     }
 
-    // Safe cast: post.authorId is now the populated user document
     const author = post.authorId as unknown as IUser;
-
-    // 2. Get ad config (CPM, CPC, share%)
     const config = await AdConfig.getConfig();
 
-    // 3. Calculate estimated revenue per event
     let revenue = 0;
     if (type === 'impression') {
-      revenue = (config.cpm / 1000) * 1; // $ per impression
+      revenue = (config.cpm / 1000) * 1;
     } else if (type === 'click') {
       revenue = config.cpc * 1;
     } else {
       return res.status(400).json({ success: false, message: 'Invalid event type' });
     }
 
-    // 4. Creator's share
     const creatorEarnings = revenue * (config.sharePercent / 100);
 
-    // 5. Credit author (if > 0)
     if (creatorEarnings > 0) {
       await User.findByIdAndUpdate(author._id, {
         $inc: {
@@ -155,7 +165,6 @@ export const trackAdEvent = async (req: Request, res: Response, next: NextFuncti
       });
     }
 
-    // 6. Update Ad stats
     await Ad.findByIdAndUpdate(adId, {
       $inc: { [type === 'impression' ? 'impressions' : 'clicks']: 1 },
     });
@@ -167,7 +176,6 @@ export const trackAdEvent = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── GET AD CONFIG ──────────────────────────────────────────────
 export const getAdConfig = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const config = await AdConfig.getConfig();
@@ -177,7 +185,6 @@ export const getAdConfig = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-// ─── UPDATE AD CONFIG (Admin only) ────────────────────────────
 export const updateAdConfig = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { cpm, cpc, sharePercent } = req.body;
@@ -200,7 +207,6 @@ export const updateAdConfig = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ─── GET USER AD EARNINGS BREAKDOWN ────────────────────────────
 export const getUserAdEarnings = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
