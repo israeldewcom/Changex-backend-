@@ -1,7 +1,3 @@
-// ============================================================
-// FILE: src/models/CampaignAnalytics.ts
-// ============================================================
-
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ICampaignAnalytics extends Document {
