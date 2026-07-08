@@ -1,7 +1,3 @@
-// ============================================================
-// FILE: src/routes/campaign.routes.ts (COMPLETE)
-// ============================================================
-
 import { Router } from 'express';
 import * as campaignController from '../controllers/campaign.controller.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
