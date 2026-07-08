@@ -1,7 +1,3 @@
-// ============================================================
-// FILE: src/models/Sponsorship.ts
-// ============================================================
-
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ISponsorship extends Document {
