@@ -1,7 +1,3 @@
-// ============================================================
-// FILE: src/controllers/campaign.controller.ts (COMPLETE)
-// ============================================================
-
 import { Request, Response, NextFunction } from 'express';
 import Campaign from '../models/Campaign.js';
 import CampaignAnalytics from '../models/CampaignAnalytics.js';
@@ -12,7 +8,6 @@ import { getIO } from '../socket.js';
 import axios from 'axios';
 import { paystackConfig } from '../config/paystack.js';
 
-// ─── Helper: Initialize Paystack Transaction ─────────────────────────
 async function initializePaystackTransaction(email: string, amount: number, metadata: any) {
   const response = await axios.post(
     `${paystackConfig.baseUrl}/transaction/initialize`,
@@ -33,7 +28,6 @@ async function initializePaystackTransaction(email: string, amount: number, meta
   return response.data.data;
 }
 
-// ─── USER SUBMITS CAMPAIGN ─────────────────────────────────────────────
 export const submitCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -95,7 +89,6 @@ export const submitCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ─── GET USER'S CAMPAIGNS ─────────────────────────────────────────────
 export const getMyCampaigns = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -106,7 +99,6 @@ export const getMyCampaigns = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ─── GET CAMPAIGN STATS ──────────────────────────────────────────────
 export const getCampaignStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -152,7 +144,6 @@ export const getCampaignStats = async (req: Request, res: Response, next: NextFu
   }
 };
 
-// ─── TOGGLE CAMPAIGN (PAUSE/RESUME) ────────────────────────────────
 export const toggleCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -178,7 +169,6 @@ export const toggleCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ─── DELETE CAMPAIGN ──────────────────────────────────────────────────
 export const deleteCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -201,7 +191,6 @@ export const deleteCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ─── INITIALIZE CAMPAIGN PAYMENT ─────────────────────────────────────
 export const initializeCampaignPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -245,7 +234,6 @@ export const initializeCampaignPayment = async (req: Request, res: Response, nex
   }
 };
 
-// ─── TOP UP CAMPAIGN BUDGET ──────────────────────────────────────────
 export const topUpCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -285,7 +273,6 @@ export const topUpCampaign = async (req: Request, res: Response, next: NextFunct
   }
 };
 
-// ─── ADMIN: GET ALL CAMPAIGNS ────────────────────────────────────────
 export const adminGetCampaigns = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, limit = 50 } = req.query;
@@ -316,7 +303,6 @@ export const adminGetCampaigns = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ─── ADMIN: APPROVE CAMPAIGN ──────────────────────────────────────────
 export const approveCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -347,7 +333,6 @@ export const approveCampaign = async (req: Request, res: Response, next: NextFun
   }
 };
 
-// ─── ADMIN: REJECT CAMPAIGN ───────────────────────────────────────────
 export const rejectCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -379,7 +364,6 @@ export const rejectCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ─── ADMIN: REFUND CAMPAIGN ───────────────────────────────────────────
 export const refundCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -425,7 +409,6 @@ export const refundCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ─── ADMIN: GET CAMPAIGN DETAILS ──────────────────────────────────────
 export const adminGetCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -445,7 +428,6 @@ export const adminGetCampaign = async (req: Request, res: Response, next: NextFu
   }
 };
 
-// ─── ADMIN: MARK MANUAL PAYMENT VERIFIED ─────────────────────────────
 export const verifyManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
