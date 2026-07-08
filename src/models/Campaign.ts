@@ -1,7 +1,3 @@
-// ============================================================
-// FILE: src/models/Campaign.ts (UPDATED WITH PAYMENT & ESCROW)
-// ============================================================
-
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ICampaign extends Document {
@@ -10,19 +6,7 @@ export interface ICampaign extends Document {
   description: string;
   imageUrl: string;
   linkUrl: string;
-  placement:
-    | 'sidebar'
-    | 'banner'
-    | 'in-feed'
-    | 'popup'
-    | 'book-page'
-    | 'explore'
-    | 'video-pre'
-    | 'video-mid'
-    | 'lesson-inline'
-    | 'challenge-sponsor'
-    | 'book-sponsor'
-    | 'explore-sponsor';
+  placement: string;
   budget: number;
   spent: number;
   escrowBalance: number;
@@ -67,24 +51,7 @@ const CampaignSchema = new Schema<ICampaign>(
     description: { type: String, required: true },
     imageUrl: { type: String, required: true },
     linkUrl: { type: String, required: true },
-    placement: {
-      type: String,
-      enum: [
-        'sidebar',
-        'banner',
-        'in-feed',
-        'popup',
-        'book-page',
-        'explore',
-        'video-pre',
-        'video-mid',
-        'lesson-inline',
-        'challenge-sponsor',
-        'book-sponsor',
-        'explore-sponsor',
-      ],
-      required: true,
-    },
+    placement: { type: String, required: true },
     budget: { type: Number, required: true, min: 1000 },
     spent: { type: Number, default: 0 },
     escrowBalance: { type: Number, default: 0 },
