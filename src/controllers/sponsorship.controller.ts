@@ -1,14 +1,9 @@
-// ============================================================
-// FILE: src/controllers/sponsorship.controller.ts (COMPLETE)
-// ============================================================
-
 import { Request, Response, NextFunction } from 'express';
 import Sponsorship from '../models/Sponsorship.js';
 import Transaction from '../models/Transaction.js';
 import User, { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
 
-// ─── SUBMIT SPONSORSHIP ──────────────────────────────────────────────
 export const submitSponsorship = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -49,7 +44,6 @@ export const submitSponsorship = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ─── GET MY SPONSORSHIPS ─────────────────────────────────────────────
 export const getMySponsorships = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -60,7 +54,6 @@ export const getMySponsorships = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ─── ADMIN: GET ALL SPONSORSHIPS ─────────────────────────────────────
 export const adminGetSponsorships = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, limit = 50 } = req.query;
@@ -90,7 +83,6 @@ export const adminGetSponsorships = async (req: Request, res: Response, next: Ne
   }
 };
 
-// ─── ADMIN: APPROVE SPONSORSHIP ──────────────────────────────────────
 export const approveSponsorship = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -137,7 +129,6 @@ export const approveSponsorship = async (req: Request, res: Response, next: Next
   }
 };
 
-// ─── ADMIN: REJECT SPONSORSHIP ───────────────────────────────────────
 export const rejectSponsorship = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
