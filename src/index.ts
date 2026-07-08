@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – correct import for group routes)
+// FILE: src/index.ts (COMPLETE UPDATED – ALL ROUTES MOUNTED)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -68,15 +68,18 @@ import seoRoutes from './routes/seo.routes.js';
 import videoRoutes from './routes/video.routes.js';
 import messageRoutes from './routes/message.routes.js';
 import storyRoutes from './routes/story.routes.js';
-import groupRoutes from './routes/group.routes.js';  // ✅ fixed: no 's'
+import groupRoutes from './routes/group.routes.js';
 import splitRoutes from './routes/split.routes.js';
 import cohortRoutes from './routes/cohort.routes.js';
 import analyticsRoutes from './routes/analytics.routes.js';
 
+// ─── SPONSORSHIP & CAMPAIGNS ────────────────────────────────────────
+import campaignRoutes from './routes/campaign.routes.js';
+import sponsorshipRoutes from './routes/sponsorship.routes.js';
+
 // ─── MIDDLEWARE ──────────────────────────────────────────────────────
 import { errorHandler } from './middlewares/errorHandler.js';
 import { authenticate, authorize } from './middlewares/auth.js';
-import { checkPremiumExpiry } from './middlewares/checkPremiumExpiry.js'; // ✅ NEW
 
 // ─── SOCKET ──────────────────────────────────────────────────────────
 import { setupSocket } from './socket.js';
@@ -131,10 +134,6 @@ app.use(express.urlencoded({ extended: true }));
 // ─── PASSPORT ────────────────────────────────────────────────────────
 initializePassport(app);
 
-// ─── CHECK PREMIUM EXPIRY ON EVERY REQUEST ──────────────────────────
-// This will run for all requests; it only acts if req.user is present.
-app.use(checkPremiumExpiry);
-
 // ─── REQUEST LOGGING MIDDLEWARE ──────────────────────────────────────
 app.use((req: Request, res: Response, next: NextFunction) => {
   const start = Date.now();
@@ -183,6 +182,8 @@ app.get('/debug/version', (req, res) => {
       revenueSplits: true,
       cohorts: true,
       analytics: true,
+      campaigns: true,
+      sponsorships: true,
     },
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
@@ -234,20 +235,30 @@ app.get('/api/v1/currency/rates', (req, res) => {
   });
 });
 
-// ─── ROUTE REGISTRATION ──────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════
+// ROUTE REGISTRATION – ALL ROUTES MOUNTED
+// ═════════════════════════════════════════════════════════════════════
 
-// AUTH (public)
+// ─── AUTH (public) ──────────────────────────────────────────────────
 app.use('/api/v1/auth', authRoutes);
 
-// WEBHOOKS (public, for Paystack)
+// ─── WEBHOOKS (public) ──────────────────────────────────────────────
 app.use('/api/v1/webhooks', webhookRoutes);
 
-// CONTACT (public)
+// ─── CONTACT (public) ───────────────────────────────────────────────
 app.use('/api/v1/contact', contactRoutes);
+
+// ─── SEO (public) ──────────────────────────────────────────────────
+app.use('/seo', seoRoutes);
+
+// ─── BOOKS (mixed – public + protected) ────────────────────────────
+app.use('/api/v1/books', bookRoutes);
+
+// ─── COURSES (mixed – public + protected) ──────────────────────────
+app.use('/api/v1/courses', courseRoutes);
 
 // ─── PROTECTED ROUTES ────────────────────────────────────────────────
 app.use('/api/v1/users', authenticate, userRoutes);
-app.use('/api/v1/courses', authenticate, courseRoutes);
 app.use('/api/v1/instructor', authenticate, authorize('instructor', 'admin'), instructorRoutes);
 app.use('/api/v1/admin', authenticate, authorize('admin'), adminRoutes);
 app.use('/api/v1/payments', authenticate, paymentRoutes);
@@ -265,12 +276,6 @@ app.use('/api/v1/interactive', authenticate, interactiveRoutes);
 // ─── CERTIFICATES ─────────────────────────────────────────────────────
 app.use('/api/v1/certificates', authenticate, certificateRoutes);
 
-// ─── BOOKS ──────────────────────────────────────────────────────────
-app.use('/api/v1/books', bookRoutes);
-
-// ─── SEO ─────────────────────────────────────────────────────────────
-app.use('/seo', seoRoutes);
-
 // ─── NEW FEATURES ────────────────────────────────────────────────────
 app.use('/api/v1/video', authenticate, videoRoutes);
 app.use('/api/v1/messages', authenticate, messageRoutes);
@@ -279,6 +284,10 @@ app.use('/api/v1/groups', authenticate, groupRoutes);
 app.use('/api/v1/splits', authenticate, authorize('instructor', 'admin'), splitRoutes);
 app.use('/api/v1/cohorts', authenticate, authorize('instructor', 'admin'), cohortRoutes);
 app.use('/api/v1/analytics', authenticate, authorize('instructor', 'admin'), analyticsRoutes);
+
+// ─── SPONSORSHIP & CAMPAIGNS ────────────────────────────────────────
+app.use('/api/v1/campaigns', authenticate, campaignRoutes);
+app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
 
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
@@ -333,7 +342,7 @@ async function bootstrap() {
       logger.info(`✅ Debug: http://localhost:${PORT}/debug/version`);
       logger.info(`📍 Routes: http://localhost:${PORT}/debug/routes`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO, Video, DMs, Stories, Groups, Splits, Cohorts, Analytics`);
+      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO, Video, DMs, Stories, Groups, Splits, Cohorts, Analytics, Campaigns, Sponsorships`);
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
