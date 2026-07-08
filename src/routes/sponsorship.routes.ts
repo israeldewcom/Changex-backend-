@@ -1,7 +1,3 @@
-// ============================================================
-// FILE: src/routes/sponsorship.routes.ts (COMPLETE)
-// ============================================================
-
 import { Router } from 'express';
 import * as sponsorshipController from '../controllers/sponsorship.controller.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
