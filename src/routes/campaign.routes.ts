@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/campaign.routes.ts
+// FILE: src/routes/campaign.routes.ts (COMPLETE)
 // ============================================================
 
 import { Router } from 'express';
