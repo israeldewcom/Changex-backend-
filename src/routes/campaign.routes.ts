@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/routes/campaign.routes.ts (UPDATED – added manual-pay route)
+// ============================================================
+
 import { Router } from 'express';
 import * as campaignController from '../controllers/campaign.controller.js';
 import { authenticate, authorize } from '../middlewares/auth.js';
@@ -17,6 +21,9 @@ router.delete('/:id', campaignController.deleteCampaign);
 // ─── Payment routes ──────────────────────────────────────────────────
 router.post('/pay', campaignController.initializeCampaignPayment);
 router.post('/:id/topup', campaignController.topUpCampaign);
+
+// ─── NEW: Manual payment submission (user uploads receipt) ────────────
+router.post('/manual-pay', upload.single('receipt'), campaignController.submitManualPayment);
 
 // ─── Admin routes ─────────────────────────────────────────────────────
 router.use(authorize('admin'));
