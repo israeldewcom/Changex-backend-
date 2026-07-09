@@ -1,5 +1,6 @@
 // ============================================================
 // FILE: src/controllers/payment.controller.ts (UPDATED)
+// Minimum withdrawal changed from ₦2,000 to ₦5,000
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -52,7 +53,7 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 2. VERIFY PAYSTACK TRANSACTION – FULL LOGIC (fixed book fields)
+// 2. VERIFY PAYSTACK TRANSACTION – FULL LOGIC
 // ──────────────────────────────────────────────────────────────────────
 export const verifyTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -180,7 +181,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       });
     }
 
-    // ─── SUBSCRIPTION ──────────────────────────────────────────────────
+    // ─── SUBSCRIPTION (Premium / Elite) ──────────────────────────────────
     else if (type === 'subscription') {
       const plan = meta.plan || 'premium';
       const days = plan === 'elite' ? 30 : 30;
@@ -223,7 +224,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       }
     }
 
-    // ─── BOOK PURCHASE – FIXED ──────────────────────────────────────────
+    // ─── BOOK PURCHASE ──────────────────────────────────────────────────────
     else if (type === 'book_purchase' && bookIdFromMeta) {
       const book = await Book.findById(bookIdFromMeta);
       if (!book) {
@@ -308,7 +309,6 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
 
     // ─── MEETING BOOKING ──────────────────────────────────────────────────
     else if (type === 'meeting_booking' && meetingIdFromMeta) {
-      // Handle meeting payment – update meeting status
       await Transaction.create({
         userId: user._id,
         type: 'meeting_booking',
@@ -326,7 +326,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ─── SUBSCRIBE ──────────────────────────────────────────────────────
+// ─── SUBSCRIBE (Premium / Elite) ──────────────────────────────────────
 export const subscribe = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -369,12 +369,19 @@ export const getTransactions = async (req: Request, res: Response, next: NextFun
 };
 
 // ─── WITHDRAW ──────────────────────────────────────────────────────
+// ✅ UPDATED: Minimum withdrawal changed from ₦2,000 to ₦5,000
 export const withdraw = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const { amount } = req.body;
-    if (amount < 2000) return res.status(400).json({ success: false, message: 'Minimum withdrawal is ₦2,000' });
-    if (amount > user.walletBalance) return res.status(400).json({ success: false, message: 'Insufficient balance' });
+
+    // ✅ MINIMUM WITHDRAWAL IS NOW ₦5,000
+    if (amount < 5000) {
+      return res.status(400).json({ success: false, message: 'Minimum withdrawal is ₦5,000' });
+    }
+    if (amount > user.walletBalance) {
+      return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    }
 
     const feeRate = 0.1;
     const fee = amount * feeRate;
@@ -394,7 +401,9 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
     });
 
     res.json({ success: true, message: 'Withdrawal request submitted', fee, netAmount });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 // ─── GET PAYMENT METHODS ─────────────────────────────────────────────
