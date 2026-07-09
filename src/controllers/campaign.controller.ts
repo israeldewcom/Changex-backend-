@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/controllers/campaign.controller.ts (UPDATED – added manual payment submission)
+// ============================================================
+
 import { Request, Response, NextFunction } from 'express';
 import Campaign from '../models/Campaign.js';
 import CampaignAnalytics from '../models/CampaignAnalytics.js';
@@ -273,6 +277,65 @@ export const topUpCampaign = async (req: Request, res: Response, next: NextFunct
   }
 };
 
+// ─── NEW: SUBMIT MANUAL PAYMENT FOR CAMPAIGN ──────────────────────────
+export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { campaignId, reference } = req.body;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ success: false, message: 'Receipt file is required' });
+    }
+
+    const campaign = await Campaign.findOne({ _id: campaignId, userId: user._id });
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    if (campaign.status !== 'approved') {
+      return res.status(400).json({ success: false, message: 'Campaign must be approved before manual payment' });
+    }
+
+    if (campaign.manualPaymentVerified) {
+      return res.status(400).json({ success: false, message: 'Manual payment already verified' });
+    }
+
+    // Upload receipt
+    const uploadResult = await uploadToCloudinary(file.buffer, 'campaign_manual_payments', {
+      transformation: [{ width: 800, crop: 'limit', quality: 'auto' }],
+    });
+    const receiptUrl = uploadResult.secure_url;
+
+    campaign.manualPaymentReference = reference || '';
+    campaign.manualPaymentReceipt = receiptUrl;
+    campaign.manualPaymentVerified = false; // pending admin approval
+    campaign.status = 'pending_payment';
+    await campaign.save();
+
+    // Notify admins
+    const admins = await User.find({ roles: 'admin' }).select('_id');
+    for (const admin of admins) {
+      getIO().to(`user:${admin._id}`).emit('campaign_manual_payment', {
+        campaignId: campaign._id,
+        userId: user._id,
+        userName: `${user.firstName} ${user.lastName}`,
+        amount: campaign.budget,
+        reference: campaign.manualPaymentReference,
+        receiptUrl,
+      });
+      // Also create notification in DB if needed
+    }
+
+    res.json({
+      success: true,
+      message: 'Manual payment submitted for admin review. Your campaign will be activated after verification.',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const adminGetCampaigns = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, limit = 50 } = req.query;
@@ -291,6 +354,7 @@ export const adminGetCampaigns = async (req: Request, res: Response, next: NextF
       active: await Campaign.countDocuments({ status: 'active' }),
       completed: await Campaign.countDocuments({ status: 'completed' }),
       rejected: await Campaign.countDocuments({ status: 'rejected' }),
+      pending_payment: await Campaign.countDocuments({ status: 'pending_payment' }),
       totalBudget: await Campaign.aggregate([
         { $match: { paymentStatus: 'paid' } },
         { $group: { _id: null, total: { $sum: '$budget' } } },
@@ -439,8 +503,8 @@ export const verifyManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(404).json({ success: false, message: 'Campaign not found' });
     }
 
-    if (campaign.status !== 'approved') {
-      return res.status(400).json({ success: false, message: 'Campaign must be approved before payment' });
+    if (campaign.status !== 'pending_payment') {
+      return res.status(400).json({ success: false, message: 'Campaign is not pending manual payment verification' });
     }
 
     if (campaign.manualPaymentVerified) {
@@ -448,8 +512,8 @@ export const verifyManualPayment = async (req: Request, res: Response, next: Nex
     }
 
     campaign.manualPaymentVerified = true;
-    campaign.manualPaymentReference = reference || '';
-    campaign.manualPaymentReceipt = receiptUrl || '';
+    if (reference) campaign.manualPaymentReference = reference;
+    if (receiptUrl) campaign.manualPaymentReceipt = receiptUrl;
     campaign.paymentStatus = 'paid';
     campaign.escrowBalance = campaign.budget;
     campaign.status = 'active';
