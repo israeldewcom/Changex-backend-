@@ -16,9 +16,10 @@ import { getIO } from '../socket.js';
 
 const router = Router();
 
-// ─── Main Paystack Webhook (handles all charge.success events) ──────
+// ─── Main Paystack Webhook ────────────────────────────────────────────
 router.post('/paystack', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // ─── Verify webhook signature ──────────────────────────────────────
     const hash = crypto
       .createHmac('sha512', paystackConfig.webhookSecret)
       .update(JSON.stringify(req.body))
@@ -39,10 +40,13 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
     const amount = event.data.amount / 100;
     const userEmail = event.data.customer?.email || '';
 
-    // ─── Determine transaction type from metadata ──────────────────
+    console.log(`[WEBHOOK] Processing ${meta.type} | Reference: ${reference} | Amount: ₦${amount}`);
+
     const type = meta.type || 'unknown';
 
-    // ─── CAMPAIGN PAYMENT ───────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════
+    // 1. CAMPAIGN PAYMENT (Initial or Top-up)
+    // ═══════════════════════════════════════════════════════════════════
     if (type === 'campaign_payment' || type === 'campaign_topup') {
       const campaign = await Campaign.findOne({ paymentReference: reference });
       if (!campaign) {
@@ -68,6 +72,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           reference,
           metadata: { campaignId: campaign._id },
         });
+        console.log(`[WEBHOOK] Campaign top-up: +₦${amount} to ${campaign.title}`);
       } else {
         // Initial payment
         campaign.paymentStatus = 'paid';
@@ -84,6 +89,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           reference,
           metadata: { campaignId: campaign._id },
         });
+        console.log(`[WEBHOOK] Campaign activated: ${campaign.title} | Budget: ₦${amount}`);
       }
 
       await campaign.save();
@@ -92,6 +98,8 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
       getIO().to(`user:${campaign.userId}`).emit('campaign_active', {
         campaignId: campaign._id,
         title: campaign.title,
+        amount: amount,
+        type: type === 'campaign_topup' ? 'topup' : 'activation',
       });
 
       // Notify admins
@@ -102,20 +110,26 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           userId: user._id,
           userName: `${user.firstName} ${user.lastName}`,
           title: campaign.title,
+          amount: amount,
+          type: type === 'campaign_topup' ? 'topup' : 'initial',
         });
       }
 
       return res.sendStatus(200);
     }
 
-    // ─── COURSE PURCHASE ─────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════
+    // 2. COURSE PURCHASE
+    // ═══════════════════════════════════════════════════════════════════
     if (type === 'course_purchase') {
       const userId = meta.userId;
       const courseId = meta.courseId;
       const referralCode = meta.referralCode ? String(meta.referralCode).trim().toUpperCase() : null;
       const affiliateCode = meta.affiliateCode ? String(meta.affiliateCode).trim() : null;
 
-      // Create enrollment if not exists
+      console.log(`[WEBHOOK] Course purchase: User ${userId} | Course ${courseId}`);
+
+      // Create or update enrollment
       await Enrollment.findOneAndUpdate(
         { userId, courseId },
         {},
@@ -143,6 +157,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
             status: 'completed',
             description: `Course sale: ${course.title}`,
           });
+          console.log(`[WEBHOOK] Instructor ${instructor._id} earned ₦${instructorShare}`);
         }
       }
 
@@ -159,6 +174,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
           affiliateLink.totalEarned += affiliateCommission;
           await affiliateLink.save();
           affiliateUserId = affiliateLink.userId;
+          console.log(`[WEBHOOK] Affiliate commission: ₦${affiliateCommission} | Link: ${affiliateCode}`);
         }
       }
       if (affiliateUserId && affiliateCommission > 0) {
@@ -191,6 +207,7 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
             status: 'completed',
             description: `Referral commission for course: ${course?.title}`,
           });
+          console.log(`[WEBHOOK] Referral commission: ₦${referrerShare} | Referrer: ${referrer._id}`);
         }
       }
 
@@ -205,14 +222,19 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
         metadata: { courseId },
       });
 
+      console.log(`[WEBHOOK] Course purchase completed for user ${userId}`);
       return res.sendStatus(200);
     }
 
-    // ─── SUBSCRIPTION ───────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════
+    // 3. SUBSCRIPTION
+    // ═══════════════════════════════════════════════════════════════════
     if (type === 'subscription') {
       const userId = meta.userId;
       const plan = meta.plan || 'premium';
       const days = plan === 'elite' ? 30 : 30;
+
+      console.log(`[WEBHOOK] Subscription: User ${userId} | Plan ${plan}`);
 
       const user = await User.findById(userId);
       if (user) {
@@ -250,17 +272,165 @@ router.post('/paystack', async (req: Request, res: Response, next: NextFunction)
               { referredId: user._id, status: 'pending' },
               { status: 'converted', earned: bonus }
             );
+            console.log(`[WEBHOOK] Referral bonus: ₦${bonus} | Referrer: ${referrer._id}`);
           }
         }
+
+        // Emit socket event
+        getIO().to(`user:${user._id}`).emit('subscription_activated', {
+          plan,
+          expiresAt: user.subscriptionExpires,
+        });
+
+        console.log(`[WEBHOOK] Subscription activated for user ${userId}`);
       }
       return res.sendStatus(200);
     }
 
-    // ─── UNKNOWN TYPE ──────────────────────────────────────────────
-    console.warn('[WEBHOOK] Unknown transaction type:', type);
+    // ═══════════════════════════════════════════════════════════════════
+    // 4. BOOK PURCHASE
+    // ═══════════════════════════════════════════════════════════════════
+    if (type === 'book_purchase') {
+      const userId = meta.userId;
+      const bookId = meta.bookId;
+      const referralCode = meta.referralCode ? String(meta.referralCode).trim().toUpperCase() : null;
+
+      console.log(`[WEBHOOK] Book purchase: User ${userId} | Book ${bookId}`);
+
+      const Book = (await import('../models/Book.js')).default;
+      const book = await Book.findById(bookId);
+      if (book) {
+        book.downloads = (book.downloads || 0) + 1;
+        await book.save();
+      }
+
+      await Transaction.create({
+        userId,
+        type: 'book_purchase',
+        amount: amount,
+        status: 'completed',
+        reference,
+        description: `Purchase of book: ${book?.title || 'Book'}`,
+        metadata: { bookId },
+      });
+
+      // Referral commission for book
+      if (referralCode) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== userId && book) {
+          const bonus = (book.price || 0) * 0.1;
+          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_commission',
+            amount: bonus,
+            status: 'completed',
+            description: `Referral commission for book: ${book.title}`,
+            reference,
+            metadata: { bookId },
+          });
+          console.log(`[WEBHOOK] Referral commission (book): ₦${bonus}`);
+        }
+      }
+
+      console.log(`[WEBHOOK] Book purchase completed for user ${userId}`);
+      return res.sendStatus(200);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 5. ARTICLE PURCHASE
+    // ═══════════════════════════════════════════════════════════════════
+    if (type === 'article_purchase') {
+      const userId = meta.userId;
+      const articleId = meta.articleId;
+      const referralCode = meta.referralCode ? String(meta.referralCode).trim().toUpperCase() : null;
+
+      console.log(`[WEBHOOK] Article purchase: User ${userId} | Article ${articleId}`);
+
+      const ArticlePurchase = (await import('../models/ArticlePurchase.js')).default;
+      const Post = (await import('../models/Post.js')).default;
+
+      await ArticlePurchase.findOneAndUpdate(
+        { userId, postId: articleId },
+        { status: 'completed', completedAt: new Date() },
+        { upsert: true }
+      );
+
+      const post = await Post.findById(articleId);
+      await Transaction.create({
+        userId,
+        type: 'article_purchase',
+        amount: amount,
+        status: 'completed',
+        reference,
+        description: `Purchase of article: ${post?.title || 'Article'}`,
+        metadata: { postId: articleId },
+      });
+
+      if (referralCode && post) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== userId) {
+          const bonus = (post.price || 0) * 0.1;
+          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_commission',
+            amount: bonus,
+            status: 'completed',
+            description: `Referral commission for article: ${post.title}`,
+            reference,
+            metadata: { postId: articleId },
+          });
+          console.log(`[WEBHOOK] Referral commission (article): ₦${bonus}`);
+        }
+      }
+
+      console.log(`[WEBHOOK] Article purchase completed for user ${userId}`);
+      return res.sendStatus(200);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 6. MEETING BOOKING
+    // ═══════════════════════════════════════════════════════════════════
+    if (type === 'meeting_booking') {
+      const userId = meta.userId;
+      const meetingId = meta.meetingId;
+
+      console.log(`[WEBHOOK] Meeting booking: User ${userId} | Meeting ${meetingId}`);
+
+      await Transaction.create({
+        userId,
+        type: 'meeting_booking',
+        amount: amount,
+        status: 'completed',
+        reference,
+        description: 'Meeting booking payment',
+        metadata: { meetingId },
+      });
+
+      // Optionally update meeting status
+      const Meeting = (await import('../models/Meeting.js')).default;
+      const meeting = await Meeting.findById(meetingId);
+      if (meeting) {
+        meeting.status = 'booked';
+        meeting.attendeeId = userId;
+        await meeting.save();
+        console.log(`[WEBHOOK] Meeting ${meetingId} booked by user ${userId}`);
+      }
+
+      return res.sendStatus(200);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 7. UNKNOWN TYPE
+    // ═══════════════════════════════════════════════════════════════════
+    console.warn(`[WEBHOOK] Unknown transaction type: ${type}`);
     return res.sendStatus(200);
+
   } catch (error) {
-    console.error('Webhook error:', error);
+    console.error('[WEBHOOK] Error processing webhook:', error);
     next(error);
   }
 });
