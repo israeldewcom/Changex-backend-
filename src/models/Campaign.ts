@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/Campaign.ts (UPDATED – added pending_payment status & manual payment fields)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ICampaign extends Document {
@@ -13,7 +17,7 @@ export interface ICampaign extends Document {
   totalDeducted: number;
   startDate: Date;
   endDate: Date;
-  status: 'pending' | 'approved' | 'rejected' | 'active' | 'completed' | 'paused';
+  status: 'pending' | 'approved' | 'rejected' | 'active' | 'completed' | 'paused' | 'pending_payment';
   rejectionReason?: string;
   targetImpressions: number;
   targetClicks: number;
@@ -60,7 +64,7 @@ const CampaignSchema = new Schema<ICampaign>(
     endDate: { type: Date, required: true },
     status: {
       type: String,
-      enum: ['pending', 'approved', 'rejected', 'active', 'completed', 'paused'],
+      enum: ['pending', 'approved', 'rejected', 'active', 'completed', 'paused', 'pending_payment'],
       default: 'pending',
     },
     rejectionReason: String,
