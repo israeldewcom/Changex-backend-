@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/campaign.controller.ts (UPDATED – added manual payment submission)
+// FILE: src/controllers/campaign.controller.ts (UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -12,6 +12,7 @@ import { getIO } from '../socket.js';
 import axios from 'axios';
 import { paystackConfig } from '../config/paystack.js';
 
+// ─── Helper: Initialize Paystack Transaction ─────────────────────────
 async function initializePaystackTransaction(email: string, amount: number, metadata: any) {
   const response = await axios.post(
     `${paystackConfig.baseUrl}/transaction/initialize`,
@@ -32,6 +33,7 @@ async function initializePaystackTransaction(email: string, amount: number, meta
   return response.data.data;
 }
 
+// ─── USER SUBMITS CAMPAIGN ─────────────────────────────────────────────
 export const submitCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -75,6 +77,8 @@ export const submitCampaign = async (req: Request, res: Response, next: NextFunc
       isActive: false,
       escrowBalance: 0,
       totalDeducted: 0,
+      paymentStatus: 'pending',
+      paymentMethod: 'paystack',
     });
 
     const admins = await User.find({ roles: 'admin' }).select('_id');
@@ -93,6 +97,7 @@ export const submitCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+// ─── GET USER'S CAMPAIGNS ─────────────────────────────────────────────
 export const getMyCampaigns = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -103,6 +108,7 @@ export const getMyCampaigns = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+// ─── GET CAMPAIGN STATS ──────────────────────────────────────────────
 export const getCampaignStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -133,6 +139,8 @@ export const getCampaignStats = async (req: Request, res: Response, next: NextFu
       invalidImpressions: campaign.invalidImpressions || 0,
       invalidClicks: campaign.invalidClicks || 0,
       status: campaign.status,
+      paymentMethod: campaign.paymentMethod,
+      paymentStatus: campaign.paymentStatus,
     };
 
     res.json({
@@ -148,6 +156,7 @@ export const getCampaignStats = async (req: Request, res: Response, next: NextFu
   }
 };
 
+// ─── TOGGLE CAMPAIGN (PAUSE/RESUME) ────────────────────────────────
 export const toggleCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -173,6 +182,7 @@ export const toggleCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+// ─── DELETE CAMPAIGN ──────────────────────────────────────────────────
 export const deleteCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -195,10 +205,11 @@ export const deleteCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+// ─── INITIALIZE CAMPAIGN PAYMENT (Unified – same as course) ──────────
 export const initializeCampaignPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const { campaignId } = req.body;
+    const { campaignId, paymentMethod = 'paystack' } = req.body;
 
     const campaign = await Campaign.findOne({ _id: campaignId, userId: user._id });
     if (!campaign) {
@@ -214,70 +225,75 @@ export const initializeCampaignPayment = async (req: Request, res: Response, nex
     }
 
     const amount = campaign.budget;
-    const metadata = {
-      campaignId: campaign._id,
-      userId: user._id,
-      type: 'campaign_payment',
-    };
 
-    const paymentIntent = await initializePaystackTransaction(user.email, amount, metadata);
+    // ─── Paystack Payment ──────────────────────────────────────────────
+    if (paymentMethod === 'paystack') {
+      const metadata = {
+        campaignId: campaign._id,
+        userId: user._id,
+        type: 'campaign_payment',
+        paymentMethod: 'paystack',
+      };
 
-    campaign.paymentReference = paymentIntent.reference;
-    await campaign.save();
+      const paymentIntent = await initializePaystackTransaction(user.email, amount, metadata);
 
-    res.json({
-      success: true,
-      data: {
-        paymentUrl: paymentIntent.authorization_url,
-        reference: paymentIntent.reference,
-        amount,
-      },
-    });
+      campaign.paymentReference = paymentIntent.reference;
+      campaign.paymentMethod = 'paystack';
+      await campaign.save();
+
+      res.json({
+        success: true,
+        data: {
+          paymentUrl: paymentIntent.authorization_url,
+          reference: paymentIntent.reference,
+          amount,
+          paymentMethod: 'paystack',
+        },
+      });
+      return;
+    }
+
+    // ─── Manual Payment (returns bank details for transfer) ──────────
+    if (paymentMethod === 'manual') {
+      campaign.paymentMethod = 'manual';
+      campaign.status = 'pending_payment';
+      await campaign.save();
+
+      // Bank details from your platform
+      const bankDetails = {
+        bankName: 'Lead Bank',
+        accountName: 'Ijigai John Thomas',
+        accountNumber: '215799076919',
+        routing: '101019644',
+        note: 'For international/wire transfers',
+        alternative: {
+          bankName: 'Taj Bank',
+          accountName: 'Ijigai John Thomas',
+          accountNumber: '0009624235',
+          note: 'For local Nigerian transfers (Naira)',
+        },
+      };
+
+      res.json({
+        success: true,
+        data: {
+          paymentMethod: 'manual',
+          amount,
+          bankDetails,
+          reference: `CAMPAIGN-${campaign._id.toString().slice(-6)}`,
+          instructions: 'Transfer the exact amount to any of the bank accounts above. Then upload your receipt for verification.',
+        },
+      });
+      return;
+    }
+
+    res.status(400).json({ success: false, message: 'Invalid payment method' });
   } catch (error) {
     next(error);
   }
 };
 
-export const topUpCampaign = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const user = req.user as IUser;
-    const { id } = req.params;
-    const { amount } = req.body;
-
-    const campaign = await Campaign.findOne({ _id: id, userId: user._id });
-    if (!campaign) {
-      return res.status(404).json({ success: false, message: 'Campaign not found' });
-    }
-
-    if (campaign.status !== 'active' && campaign.status !== 'paused') {
-      return res.status(400).json({ success: false, message: 'Campaign cannot be topped up' });
-    }
-
-    const metadata = {
-      campaignId: campaign._id,
-      userId: user._id,
-      type: 'campaign_topup',
-    };
-
-    const paymentIntent = await initializePaystackTransaction(user.email, amount, metadata);
-
-    campaign.paymentReference = paymentIntent.reference;
-    await campaign.save();
-
-    res.json({
-      success: true,
-      data: {
-        paymentUrl: paymentIntent.authorization_url,
-        reference: paymentIntent.reference,
-        amount,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// ─── NEW: SUBMIT MANUAL PAYMENT FOR CAMPAIGN ──────────────────────────
+// ─── SUBMIT MANUAL PAYMENT (with receipt upload) ────────────────────
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -293,7 +309,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(404).json({ success: false, message: 'Campaign not found' });
     }
 
-    if (campaign.status !== 'approved') {
+    if (campaign.status !== 'approved' && campaign.status !== 'pending_payment') {
       return res.status(400).json({ success: false, message: 'Campaign must be approved before manual payment' });
     }
 
@@ -301,7 +317,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(400).json({ success: false, message: 'Manual payment already verified' });
     }
 
-    // Upload receipt
+    // Upload receipt to Cloudinary
     const uploadResult = await uploadToCloudinary(file.buffer, 'campaign_manual_payments', {
       transformation: [{ width: 800, crop: 'limit', quality: 'auto' }],
     });
@@ -309,8 +325,9 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
 
     campaign.manualPaymentReference = reference || '';
     campaign.manualPaymentReceipt = receiptUrl;
-    campaign.manualPaymentVerified = false; // pending admin approval
+    campaign.manualPaymentVerified = false;
     campaign.status = 'pending_payment';
+    campaign.paymentMethod = 'manual';
     await campaign.save();
 
     // Notify admins
@@ -324,7 +341,6 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
         reference: campaign.manualPaymentReference,
         receiptUrl,
       });
-      // Also create notification in DB if needed
     }
 
     res.json({
@@ -336,6 +352,67 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
   }
 };
 
+// ─── TOP UP CAMPAIGN (Unified – same as course) ────────────────────
+export const topUpCampaign = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { id } = req.params;
+    const { amount, paymentMethod = 'paystack' } = req.body;
+
+    const campaign = await Campaign.findOne({ _id: id, userId: user._id });
+    if (!campaign) {
+      return res.status(404).json({ success: false, message: 'Campaign not found' });
+    }
+
+    if (campaign.status !== 'active' && campaign.status !== 'paused') {
+      return res.status(400).json({ success: false, message: 'Campaign cannot be topped up' });
+    }
+
+    if (paymentMethod === 'paystack') {
+      const metadata = {
+        campaignId: campaign._id,
+        userId: user._id,
+        type: 'campaign_topup',
+        paymentMethod: 'paystack',
+      };
+
+      const paymentIntent = await initializePaystackTransaction(user.email, amount, metadata);
+
+      campaign.paymentReference = paymentIntent.reference;
+      await campaign.save();
+
+      res.json({
+        success: true,
+        data: {
+          paymentUrl: paymentIntent.authorization_url,
+          reference: paymentIntent.reference,
+          amount,
+          paymentMethod: 'paystack',
+        },
+      });
+      return;
+    }
+
+    if (paymentMethod === 'manual') {
+      // For manual top-up, we need a separate flow – or use the same manual payment submission
+      res.json({
+        success: true,
+        data: {
+          paymentMethod: 'manual',
+          amount,
+          instructions: 'Please contact support for manual top-up or use the manual payment submission form.',
+        },
+      });
+      return;
+    }
+
+    res.status(400).json({ success: false, message: 'Invalid payment method' });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ─── ADMIN: GET ALL CAMPAIGNS ────────────────────────────────────────
 export const adminGetCampaigns = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, limit = 50 } = req.query;
@@ -367,6 +444,7 @@ export const adminGetCampaigns = async (req: Request, res: Response, next: NextF
   }
 };
 
+// ─── ADMIN: APPROVE CAMPAIGN ──────────────────────────────────────────
 export const approveCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -397,6 +475,7 @@ export const approveCampaign = async (req: Request, res: Response, next: NextFun
   }
 };
 
+// ─── ADMIN: REJECT CAMPAIGN ───────────────────────────────────────────
 export const rejectCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -428,6 +507,7 @@ export const rejectCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+// ─── ADMIN: REFUND CAMPAIGN ───────────────────────────────────────────
 export const refundCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -473,6 +553,7 @@ export const refundCampaign = async (req: Request, res: Response, next: NextFunc
   }
 };
 
+// ─── ADMIN: GET CAMPAIGN DETAILS ──────────────────────────────────────
 export const adminGetCampaign = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -492,6 +573,7 @@ export const adminGetCampaign = async (req: Request, res: Response, next: NextFu
   }
 };
 
+// ─── ADMIN: VERIFY MANUAL PAYMENT ─────────────────────────────────────
 export const verifyManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -518,6 +600,7 @@ export const verifyManualPayment = async (req: Request, res: Response, next: Nex
     campaign.escrowBalance = campaign.budget;
     campaign.status = 'active';
     campaign.isActive = true;
+    campaign.paymentMethod = 'manual';
     await campaign.save();
 
     await Transaction.create({
@@ -532,6 +615,7 @@ export const verifyManualPayment = async (req: Request, res: Response, next: Nex
     getIO().to(`user:${campaign.userId}`).emit('campaign_active', {
       campaignId: campaign._id,
       title: campaign.title,
+      paymentMethod: 'manual',
     });
 
     res.json({ success: true, data: campaign });
