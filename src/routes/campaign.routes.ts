@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/campaign.routes.ts (UPDATED – added manual-pay route)
+// FILE: src/routes/campaign.routes.ts (UPDATED)
 // ============================================================
 
 import { Router } from 'express';
@@ -18,12 +18,10 @@ router.get('/:id/stats', campaignController.getCampaignStats);
 router.put('/:id/toggle', campaignController.toggleCampaign);
 router.delete('/:id', campaignController.deleteCampaign);
 
-// ─── Payment routes ──────────────────────────────────────────────────
+// ─── Payment routes (Unified – same as course) ──────────────────────
 router.post('/pay', campaignController.initializeCampaignPayment);
-router.post('/:id/topup', campaignController.topUpCampaign);
-
-// ─── NEW: Manual payment submission (user uploads receipt) ────────────
 router.post('/manual-pay', upload.single('receipt'), campaignController.submitManualPayment);
+router.post('/:id/topup', campaignController.topUpCampaign);
 
 // ─── Admin routes ─────────────────────────────────────────────────────
 router.use(authorize('admin'));
