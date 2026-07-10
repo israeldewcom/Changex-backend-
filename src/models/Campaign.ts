@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Campaign.ts (UPDATED – added pending_payment status & manual payment fields)
+// FILE: src/models/Campaign.ts (UPDATED – added paymentMethod)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -32,6 +32,7 @@ export interface ICampaign extends Document {
   cpc: number;
   cpm: number;
   paymentStatus: 'pending' | 'paid' | 'failed' | 'refunded';
+  paymentMethod: 'paystack' | 'manual';
   paymentReference: string;
   manualPaymentVerified: boolean;
   manualPaymentReference: string;
@@ -84,6 +85,11 @@ const CampaignSchema = new Schema<ICampaign>(
       type: String,
       enum: ['pending', 'paid', 'failed', 'refunded'],
       default: 'pending',
+    },
+    paymentMethod: {
+      type: String,
+      enum: ['paystack', 'manual'],
+      default: 'paystack',
     },
     paymentReference: { type: String, default: '' },
     manualPaymentVerified: { type: Boolean, default: false },
