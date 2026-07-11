@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/routes/payment.routes.ts (UPDATED)
+// ============================================================
+
 import { Router } from 'express';
 import * as paymentController from '../controllers/payment.controller.js';
 import { authenticate } from '../middlewares/auth.js';
@@ -5,19 +9,29 @@ import { upload } from '../middlewares/upload.js';
 
 const router = Router();
 
-router.post('/initialize-paystack', authenticate, paymentController.initializeTransaction);
-router.post('/verify-paystack', authenticate, paymentController.verifyTransaction);
-router.post('/subscribe', authenticate, paymentController.subscribe);
-router.get('/transactions', authenticate, paymentController.getTransactions);
-router.post('/withdraw', authenticate, paymentController.withdraw);
-router.get('/methods', authenticate, paymentController.getPaymentMethods);
+// ─── All payment routes require authentication ────────────────────
+router.use(authenticate);
 
-// Manual payment routes
-router.post('/manual', authenticate, upload.single('receipt'), paymentController.submitManualPayment);
-router.get('/manual/:paymentId', authenticate, paymentController.getManualPaymentStatus);
-router.get('/manual/user/all', authenticate, paymentController.getUserManualPayments);
+// ─── Paystack ──────────────────────────────────────────────────────
+router.post('/initialize-paystack', paymentController.initializeTransaction);
+router.post('/verify-paystack', paymentController.verifyTransaction);
 
-// Book purchase via Paystack
-router.post('/purchase-book', authenticate, paymentController.purchaseBook);
+// ─── Subscriptions ─────────────────────────────────────────────────
+router.post('/subscribe', paymentController.subscribe);
+router.post('/cancel-subscription', paymentController.cancelSubscription);
+
+// ─── Wallet & Transactions ──────────────────────────────────────────
+router.get('/transactions', paymentController.getTransactions);
+router.get('/wallet-breakdown', paymentController.getWalletBreakdown);
+router.post('/withdraw', paymentController.withdraw);
+router.get('/methods', paymentController.getPaymentMethods);
+
+// ─── Manual Payments ────────────────────────────────────────────────
+router.post('/manual', upload.single('receipt'), paymentController.submitManualPayment);
+router.get('/manual/:paymentId', paymentController.getManualPaymentStatus);
+router.get('/manual/user/all', paymentController.getUserManualPayments);
+
+// ─── Welcome Bonus ──────────────────────────────────────────────────
+router.post('/claim-welcome-bonus', paymentController.claimWelcomeBonus);
 
 export default router;
