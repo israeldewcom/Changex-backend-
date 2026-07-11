@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/payment.controller.ts (COMPLETE UPDATED)
+// FILE: src/controllers/payment.controller.ts (FIXED – removed duplicate and missing references)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -25,7 +25,7 @@ const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
 // ──────────────────────────────────────────────────────────────────────
-// 1. INITIALIZE PAYSTACK TRANSACTION (Unified)
+// 1. INITIALIZE PAYSTACK TRANSACTION
 // ──────────────────────────────────────────────────────────────────────
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -41,7 +41,6 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
     if (!userEmail) return res.status(400).json({ success: false, message: 'Email is required' });
     if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Valid amount is required' });
 
-    // Add userId to metadata
     finalMetadata.userId = user._id;
 
     const response = await axios.post(
@@ -56,7 +55,7 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
 };
 
 // ──────────────────────────────────────────────────────────────────────
-// 2. VERIFY PAYSTACK TRANSACTION – FULL LOGIC
+// 2. VERIFY TRANSACTION – MAIN LOGIC
 // ──────────────────────────────────────────────────────────────────────
 export const verifyTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -80,12 +79,10 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
     const referralCode = meta.referralCode ? String(meta.referralCode).trim().toUpperCase() : null;
     const affiliateCode = meta.affiliateCode ? String(meta.affiliateCode).trim() : null;
 
-    // ─── COURSE PURCHASE ──────────────────────────────────────────────────
+    // ─── COURSE PURCHASE ──────────────────────────────────────────────
     if (type === 'course_purchase' && courseIdFromMeta) {
       const course = await Course.findById(courseIdFromMeta);
-      if (!course) {
-        return res.status(404).json({ success: false, message: 'Course not found' });
-      }
+      if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
       const price = course.salePrice || course.price || 0;
 
       const existingEnrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id });
@@ -95,9 +92,9 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         await course.save();
       }
 
+      // Affiliate commission
       let affiliateCommission = 0;
       let affiliateUserId = null;
-
       if (affiliateCode) {
         const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
         if (affiliateLink) {
@@ -129,11 +126,10 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
             type: 'affiliate_commission',
             amount: affiliateCommission,
             status: 'completed',
-            description: `Commission for course: ${course.title}${affiliateCode ? ' (affiliate)' : ' (referral affiliate)'}`,
+            description: `Commission for course: ${course.title}`,
             reference,
             metadata: { courseId: course._id },
           });
-          // Update wallet via socket
           getIO().to(`user:${affiliate._id}`).emit('wallet_updated', {
             userId: affiliate._id,
             balance: affiliate.walletBalance,
@@ -176,7 +172,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
             type: 'instructor_earning',
             amount: instructorShare,
             status: 'completed',
-            description: `Sale of course (net after affiliate): ${course.title}`,
+            description: `Sale of course: ${course.title}`,
             reference,
             metadata: { courseId: course._id },
           });
@@ -201,9 +197,6 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         userId: user._id,
         balance: user.walletBalance,
       });
-
-      // Update user's wallet balance (they spent money, but we track it)
-      // The actual balance is tracked elsewhere
     }
 
     // ─── SUBSCRIPTION ──────────────────────────────────────────────────
@@ -226,7 +219,6 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         description: `${plan.charAt(0).toUpperCase() + plan.slice(1)} subscription`,
       });
 
-      // Update premium status in socket
       getIO().to(`user:${user._id}`).emit('premium_updated', {
         userId: user._id,
         isPremium: true,
@@ -263,9 +255,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
     // ─── BOOK PURCHASE ──────────────────────────────────────────────────
     else if (type === 'book_purchase' && bookIdFromMeta) {
       const book = await Book.findById(bookIdFromMeta);
-      if (!book) {
-        return res.status(404).json({ success: false, message: 'Book not found' });
-      }
+      if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
       await Transaction.create({
         userId: user._id,
@@ -315,9 +305,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
     // ─── ARTICLE PURCHASE ──────────────────────────────────────────────
     else if (type === 'article_purchase' && articleIdFromMeta) {
       const post = await Post.findById(articleIdFromMeta);
-      if (!post) {
-        return res.status(404).json({ success: false, message: 'Article not found' });
-      }
+      if (!post) return res.status(404).json({ success: false, message: 'Article not found' });
 
       await ArticlePurchase.findOneAndUpdate(
         { userId: user._id, postId: post._id },
@@ -391,9 +379,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
     // ─── CAMPAIGN PAYMENT ─────────────────────────────────────────────
     else if (type === 'campaign_payment' && campaignIdFromMeta) {
       const campaign = await Campaign.findById(campaignIdFromMeta);
-      if (!campaign) {
-        return res.status(404).json({ success: false, message: 'Campaign not found' });
-      }
+      if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
 
       campaign.paymentStatus = 'paid';
       campaign.escrowBalance = data.amount / 100;
@@ -430,7 +416,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ─── SUBSCRIBE (Premium / Elite) ──────────────────────────────────────
+// ─── SUBSCRIBE ──────────────────────────────────────────────────────
 export const subscribe = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
