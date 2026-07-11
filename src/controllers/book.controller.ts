@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/book.controller.ts (COMPLETE UPDATED)
+// FILE: src/controllers/book.controller.ts (COMPLETE FIXED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -16,29 +16,98 @@ import Notification from '../models/Notification.js';
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// ─── ADMIN: CREATE BOOK ──────────────────────────────────────────────
+// ─── USER SUBMIT BOOK FOR APPROVAL (Premium users) ──────────────
+export const submitBookForApproval = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    
+    // Check if user is premium
+    if (!user.isPremium && !user.roles.includes('admin')) {
+      return res.status(403).json({ success: false, message: 'Premium subscription required to upload books' });
+    }
+
+    const { title, author, description, price, coverImage, fileUrl, affiliatePercent } = req.body;
+
+    if (!title || !author || !fileUrl) {
+      return res.status(400).json({ success: false, message: 'Title, author, and file URL are required' });
+    }
+
+    const book = await Book.create({
+      title,
+      author,
+      description: description || '',
+      price: price || 0,
+      coverImage: coverImage || '',
+      fileUrl,
+      uploadedBy: user._id,
+      isPublished: false,
+      status: 'pending',
+      affiliatePercent: affiliatePercent || 0,
+    });
+
+    // Notify all admins
+    const User = await import('../models/User.js').then(m => m.default);
+    const admins = await User.find({ roles: 'admin' }).select('_id');
+    for (const admin of admins) {
+      getIO().to(`user:${admin._id}`).emit('book_submitted', {
+        bookId: book._id,
+        title: book.title,
+        userId: user._id,
+        userName: `${user.firstName} ${user.lastName}`,
+        userEmail: user.email,
+      });
+      await Notification.create({
+        userId: admin._id,
+        title: '📚 New Book Submission Pending',
+        message: `${user.firstName} ${user.lastName} submitted a new book: "${book.title}" for approval.`,
+        type: 'system',
+        data: { bookId: book._id, type: 'book_submission' },
+      });
+    }
+
+    await Notification.create({
+      userId: user._id,
+      title: '📚 Book Submitted for Approval',
+      message: `Your book "${book.title}" has been submitted for admin approval. You will be notified once reviewed.`,
+      type: 'system',
+      data: { bookId: book._id },
+    });
+
+    res.status(201).json({ 
+      success: true, 
+      message: 'Book submitted for admin approval',
+      data: book 
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── ADMIN: CREATE BOOK (Direct upload, no approval) ──────────────
 export const createBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     if (!user.roles.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Admin only' });
     }
-    const { title, author, description, price, coverImage, fileUrl, affiliatePercent, isPublished, status } = req.body;
+    const { title, author, description, price, coverImage, fileUrl, affiliatePercent, isPublished } = req.body;
+    
     const book = await Book.create({
       title,
       author,
-      description,
+      description: description || '',
       price: price || 0,
       coverImage: coverImage || '',
       fileUrl,
       uploadedBy: user._id,
       isPublished: isPublished !== undefined ? isPublished : true,
-      status: status || 'approved',
+      status: 'approved',
       affiliatePercent: affiliatePercent || 0,
     });
 
     // Notify all admins
-    const admins = await (await import('../models/User.js')).default.find({ roles: 'admin' }).select('_id');
+    const User = await import('../models/User.js').then(m => m.default);
+    const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('book_created', {
         bookId: book._id,
@@ -330,7 +399,6 @@ export const downloadBook = async (req: Request, res: Response, next: NextFuncti
 
     // Fallback – if fileUrl is stored but not accessible, try to construct URL
     if (fileUrl) {
-      // Assume it's a full URL
       return res.redirect(fileUrl);
     }
 
