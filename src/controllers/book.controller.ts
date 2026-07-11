@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/book.controller.ts (COMPLETE FIXED)
+// FILE: src/controllers/book.controller.ts (FIXED – Admin auto-approve)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -12,16 +12,42 @@ import path from 'path';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { getIO } from '../socket.js';
 import Notification from '../models/Notification.js';
+import User from '../models/User.js';
+import AffiliateLink from '../models/AffiliateLink.js';
+import Referral from '../models/Referral.js';
+import Enrollment from '../models/Enrollment.js';
+import Course from '../models/Course.js';
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// ─── USER SUBMIT BOOK FOR APPROVAL (Premium users) ──────────────
+// ─── Helper: Initialize Paystack Transaction ─────────────────────────
+async function initializePaystackTransaction(email: string, amount: number, metadata: any) {
+  const response = await axios.post(
+    `${PAYSTACK_BASE}/transaction/initialize`,
+    {
+      email,
+      amount: amount * 100,
+      currency: 'NGN',
+      metadata,
+      callback_url: `${process.env.FRONTEND_URL}/payment-callback`,
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${PAYSTACK_SECRET}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  return response.data.data;
+}
+
+// ─── USER SUBMIT BOOK FOR APPROVAL (Premium users only) ──────────────
 export const submitBookForApproval = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    
-    // Check if user is premium
+
+    // Check if user is premium (or admin, but admin should use admin create)
     if (!user.isPremium && !user.roles.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Premium subscription required to upload books' });
     }
@@ -40,13 +66,12 @@ export const submitBookForApproval = async (req: Request, res: Response, next: N
       coverImage: coverImage || '',
       fileUrl,
       uploadedBy: user._id,
-      isPublished: false,
-      status: 'pending',
+      isPublished: false,          // ❌ Not published until admin approves
+      status: 'pending',           // ⏳ Waiting for admin review
       affiliatePercent: affiliatePercent || 0,
     });
 
     // Notify all admins
-    const User = await import('../models/User.js').then(m => m.default);
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('book_submitted', {
@@ -73,25 +98,30 @@ export const submitBookForApproval = async (req: Request, res: Response, next: N
       data: { bookId: book._id },
     });
 
-    res.status(201).json({ 
-      success: true, 
+    res.status(201).json({
+      success: true,
       message: 'Book submitted for admin approval',
-      data: book 
+      data: book,
     });
   } catch (err) {
     next(err);
   }
 };
 
-// ─── ADMIN: CREATE BOOK (Direct upload, no approval) ──────────────
+// ─── ADMIN: CREATE BOOK (Direct upload, auto-approved) ──────────────
 export const createBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     if (!user.roles.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Admin only' });
     }
-    const { title, author, description, price, coverImage, fileUrl, affiliatePercent, isPublished } = req.body;
-    
+    const { title, author, description, price, coverImage, fileUrl, affiliatePercent } = req.body;
+
+    // Validate required fields
+    if (!title || !author || !fileUrl) {
+      return res.status(400).json({ success: false, message: 'Title, author, and file URL are required' });
+    }
+
     const book = await Book.create({
       title,
       author,
@@ -100,13 +130,13 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
       coverImage: coverImage || '',
       fileUrl,
       uploadedBy: user._id,
-      isPublished: isPublished !== undefined ? isPublished : true,
-      status: 'approved',
+      // ─── AUTO-APPROVED ────────────────────────────────────────────
+      isPublished: true,              // ✅ Always published immediately
+      status: 'approved',             // ✅ Always approved – no pending
       affiliatePercent: affiliatePercent || 0,
     });
 
-    // Notify all admins
-    const User = await import('../models/User.js').then(m => m.default);
+    // Notify all admins (and maybe the user who uploaded – which is admin)
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('book_created', {
