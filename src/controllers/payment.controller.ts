@@ -1,6 +1,5 @@
 // ============================================================
-// FILE: src/controllers/payment.controller.ts (UPDATED)
-// Minimum withdrawal changed from ₦2,000 to ₦5,000
+// FILE: src/controllers/payment.controller.ts (COMPLETE UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -16,6 +15,7 @@ import AffiliateLink from '../models/AffiliateLink.js';
 import Referral from '../models/Referral.js';
 import ArticlePurchase from '../models/ArticlePurchase.js';
 import Post from '../models/Post.js';
+import Campaign from '../models/Campaign.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { validateManualPayment } from '../services/manualPaymentValidator.js';
 import { getIO } from '../socket.js';
@@ -25,7 +25,7 @@ const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
 // ──────────────────────────────────────────────────────────────────────
-// 1. INITIALIZE PAYSTACK TRANSACTION
+// 1. INITIALIZE PAYSTACK TRANSACTION (Unified)
 // ──────────────────────────────────────────────────────────────────────
 export const initializeTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -40,6 +40,9 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
     const userEmail = email || user.email;
     if (!userEmail) return res.status(400).json({ success: false, message: 'Email is required' });
     if (!amount || amount <= 0) return res.status(400).json({ success: false, message: 'Valid amount is required' });
+
+    // Add userId to metadata
+    finalMetadata.userId = user._id;
 
     const response = await axios.post(
       `${PAYSTACK_BASE}/transaction/initialize`,
@@ -57,7 +60,7 @@ export const initializeTransaction = async (req: Request, res: Response, next: N
 // ──────────────────────────────────────────────────────────────────────
 export const verifyTransaction = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { reference, courseId, bookId, articleId, meetingId } = req.body;
+    const { reference, courseId, bookId, articleId, meetingId, campaignId } = req.body;
     const user = req.user as IUser;
     if (!reference) return res.status(400).json({ success: false, message: 'Reference required' });
 
@@ -73,6 +76,9 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
     let bookIdFromMeta = meta.bookId || bookId;
     let articleIdFromMeta = meta.articleId || articleId;
     let meetingIdFromMeta = meta.meetingId || meetingId;
+    let campaignIdFromMeta = meta.campaignId || campaignId;
+    const referralCode = meta.referralCode ? String(meta.referralCode).trim().toUpperCase() : null;
+    const affiliateCode = meta.affiliateCode ? String(meta.affiliateCode).trim() : null;
 
     // ─── COURSE PURCHASE ──────────────────────────────────────────────────
     if (type === 'course_purchase' && courseIdFromMeta) {
@@ -92,7 +98,6 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       let affiliateCommission = 0;
       let affiliateUserId = null;
 
-      const affiliateCode = meta.affiliateCode;
       if (affiliateCode) {
         const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
         if (affiliateLink) {
@@ -105,7 +110,6 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         }
       }
 
-      const referralCode = meta.referralCode;
       if (!affiliateCode && referralCode && course.hasAffiliate && course.affiliatePercent > 0) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== user._id.toString()) {
@@ -129,6 +133,11 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
             reference,
             metadata: { courseId: course._id },
           });
+          // Update wallet via socket
+          getIO().to(`user:${affiliate._id}`).emit('wallet_updated', {
+            userId: affiliate._id,
+            balance: affiliate.walletBalance,
+          });
         }
       }
 
@@ -149,6 +158,10 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
             reference,
             metadata: { courseId: course._id },
           });
+          getIO().to(`user:${referrer._id}`).emit('wallet_updated', {
+            userId: referrer._id,
+            balance: referrer.walletBalance,
+          });
         }
       }
 
@@ -167,6 +180,10 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
             reference,
             metadata: { courseId: course._id },
           });
+          getIO().to(`user:${instructor._id}`).emit('wallet_updated', {
+            userId: instructor._id,
+            balance: instructor.walletBalance,
+          });
         }
       }
 
@@ -179,9 +196,17 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         description: `Purchase of course: ${course.title}`,
         metadata: { courseId: course._id },
       });
+
+      getIO().to(`user:${user._id}`).emit('wallet_updated', {
+        userId: user._id,
+        balance: user.walletBalance,
+      });
+
+      // Update user's wallet balance (they spent money, but we track it)
+      // The actual balance is tracked elsewhere
     }
 
-    // ─── SUBSCRIPTION (Premium / Elite) ──────────────────────────────────
+    // ─── SUBSCRIPTION ──────────────────────────────────────────────────
     else if (type === 'subscription') {
       const plan = meta.plan || 'premium';
       const days = plan === 'elite' ? 30 : 30;
@@ -201,7 +226,14 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         description: `${plan.charAt(0).toUpperCase() + plan.slice(1)} subscription`,
       });
 
-      const referralCode = meta.referralCode;
+      // Update premium status in socket
+      getIO().to(`user:${user._id}`).emit('premium_updated', {
+        userId: user._id,
+        isPremium: true,
+        tier: plan,
+        expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000),
+      });
+
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== user._id.toString()) {
@@ -216,6 +248,10 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
             description: `Referral bonus for new ${plan} subscriber: ${user.email}`,
             reference,
           });
+          getIO().to(`user:${referrer._id}`).emit('wallet_updated', {
+            userId: referrer._id,
+            balance: referrer.walletBalance,
+          });
           await Referral.findOneAndUpdate(
             { referredId: user._id, status: 'pending' },
             { status: 'converted', earned: bonus }
@@ -224,7 +260,7 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       }
     }
 
-    // ─── BOOK PURCHASE ──────────────────────────────────────────────────────
+    // ─── BOOK PURCHASE ──────────────────────────────────────────────────
     else if (type === 'book_purchase' && bookIdFromMeta) {
       const book = await Book.findById(bookIdFromMeta);
       if (!book) {
@@ -244,7 +280,15 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
 
-      const referralCode = meta.referralCode;
+      getIO().to(`user:${user._id}`).emit('book_purchased', {
+        bookId: book._id,
+        title: book.title,
+      });
+      getIO().to(`user:${user._id}`).emit('wallet_updated', {
+        userId: user._id,
+        balance: user.walletBalance,
+      });
+
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== user._id.toString()) {
@@ -260,11 +304,15 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
             reference,
             metadata: { bookId: book._id },
           });
+          getIO().to(`user:${referrer._id}`).emit('wallet_updated', {
+            userId: referrer._id,
+            balance: referrer.walletBalance,
+          });
         }
       }
     }
 
-    // ─── ARTICLE PURCHASE ──────────────────────────────────────────────────
+    // ─── ARTICLE PURCHASE ──────────────────────────────────────────────
     else if (type === 'article_purchase' && articleIdFromMeta) {
       const post = await Post.findById(articleIdFromMeta);
       if (!post) {
@@ -287,7 +335,15 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         metadata: { postId: post._id },
       });
 
-      const referralCode = meta.referralCode;
+      getIO().to(`user:${user._id}`).emit('article_purchased', {
+        postId: post._id,
+        title: post.title,
+      });
+      getIO().to(`user:${user._id}`).emit('wallet_updated', {
+        userId: user._id,
+        balance: user.walletBalance,
+      });
+
       if (referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== user._id.toString()) {
@@ -303,11 +359,15 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
             reference,
             metadata: { postId: post._id },
           });
+          getIO().to(`user:${referrer._id}`).emit('wallet_updated', {
+            userId: referrer._id,
+            balance: referrer.walletBalance,
+          });
         }
       }
     }
 
-    // ─── MEETING BOOKING ──────────────────────────────────────────────────
+    // ─── MEETING BOOKING ──────────────────────────────────────────────
     else if (type === 'meeting_booking' && meetingIdFromMeta) {
       await Transaction.create({
         userId: user._id,
@@ -317,6 +377,50 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         reference,
         description: 'Meeting booking payment',
         metadata: { meetingId: meetingIdFromMeta },
+      });
+
+      const Meeting = await import('../models/Meeting.js').then(m => m.default);
+      const meeting = await Meeting.findById(meetingIdFromMeta);
+      if (meeting) {
+        meeting.status = 'booked';
+        meeting.attendeeId = user._id;
+        await meeting.save();
+      }
+    }
+
+    // ─── CAMPAIGN PAYMENT ─────────────────────────────────────────────
+    else if (type === 'campaign_payment' && campaignIdFromMeta) {
+      const campaign = await Campaign.findById(campaignIdFromMeta);
+      if (!campaign) {
+        return res.status(404).json({ success: false, message: 'Campaign not found' });
+      }
+
+      campaign.paymentStatus = 'paid';
+      campaign.escrowBalance = data.amount / 100;
+      campaign.totalDeducted = 0;
+      campaign.status = 'active';
+      campaign.isActive = true;
+      campaign.paymentMethod = 'paystack';
+      await campaign.save();
+
+      await Transaction.create({
+        userId: user._id,
+        type: 'campaign_payment',
+        amount: data.amount / 100,
+        status: 'completed',
+        reference,
+        description: `Campaign payment: ${campaign.title}`,
+        metadata: { campaignId: campaign._id },
+      });
+
+      getIO().to(`user:${user._id}`).emit('campaign_active', {
+        campaignId: campaign._id,
+        title: campaign.title,
+        paymentMethod: 'paystack',
+      });
+      getIO().to(`user:${user._id}`).emit('wallet_updated', {
+        userId: user._id,
+        balance: user.walletBalance,
       });
     }
 
@@ -365,17 +469,17 @@ export const getTransactions = async (req: Request, res: Response, next: NextFun
     const { limit = 50 } = req.query;
     const transactions = await Transaction.find({ userId: user._id }).sort('-createdAt').limit(Number(limit));
     res.json({ success: true, data: transactions });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 // ─── WITHDRAW ──────────────────────────────────────────────────────
-// ✅ UPDATED: Minimum withdrawal changed from ₦2,000 to ₦5,000
 export const withdraw = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const { amount } = req.body;
 
-    // ✅ MINIMUM WITHDRAWAL IS NOW ₦5,000
     if (amount < 5000) {
       return res.status(400).json({ success: false, message: 'Minimum withdrawal is ₦5,000' });
     }
@@ -400,6 +504,11 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
       metadata: { fee, netAmount },
     });
 
+    getIO().to(`user:${user._id}`).emit('wallet_updated', {
+      userId: user._id,
+      balance: user.walletBalance,
+    });
+
     res.json({ success: true, message: 'Withdrawal request submitted', fee, netAmount });
   } catch (err) {
     next(err);
@@ -412,128 +521,96 @@ export const getPaymentMethods = async (req: Request, res: Response, next: NextF
     const user = req.user as IUser;
     const bankAccounts = user.bankAccount ? [user.bankAccount] : [];
     res.json({ success: true, data: { bankAccounts } });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 // ─── MANUAL PAYMENT SUBMISSION ──────────────────────────────────────
 export const submitManualPayment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    console.log('📥 Manual payment request received');
     const user = req.user as IUser;
     if (!user) {
-      console.log('❌ No user authenticated');
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
 
-    const { type, courseId, bookId, amount, reference, paymentDate, referralCode, affiliateCode } = req.body;
+    const { type, courseId, bookId, amount, reference, paymentDate, referralCode, affiliateCode, campaignId } = req.body;
     const file = req.file;
 
-    console.log('📦 Request body:', { type, amount, reference, paymentDate });
-    console.log('📎 File:', file ? `Received: ${file.originalname} (${file.size} bytes)` : 'No file');
-
     if (!file) {
-      console.log('❌ No file uploaded');
       return res.status(400).json({ success: false, message: 'Receipt file is required' });
     }
     if (!reference || !amount || !paymentDate) {
-      console.log('❌ Missing fields');
       return res.status(400).json({ success: false, message: 'Missing required fields' });
     }
 
-    const allowedTypes = ['course', 'subscription', 'book', 'article', 'meeting'];
+    const allowedTypes = ['course', 'subscription', 'book', 'article', 'meeting', 'campaign'];
     if (!allowedTypes.includes(type)) {
-      console.log('❌ Invalid type:', type);
-      return res.status(400).json({ success: false, message: 'Invalid payment type. Allowed: course, subscription, book, article, meeting' });
+      return res.status(400).json({ success: false, message: 'Invalid payment type' });
     }
 
     let expectedAmount = 0;
-    let courseTitle = '';
-    let bookTitle = '';
-    let articleTitle = '';
+    let title = '';
     let metadata: any = { referralCode, affiliateCode };
 
     if (type === 'subscription') {
       expectedAmount = Number(process.env.SUBSCRIPTION_PRICE) || 5000;
-      console.log(`📌 Subscription expected amount: ₦${expectedAmount}`);
+      title = 'Premium Subscription';
     } else if (type === 'course' && courseId) {
       const course = await Course.findById(courseId);
-      if (!course) {
-        console.log('❌ Course not found:', courseId);
-        return res.status(404).json({ success: false, message: 'Course not found' });
-      }
+      if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
       expectedAmount = course.salePrice || course.price || 0;
-      courseTitle = course.title;
+      title = course.title;
       metadata.courseId = courseId;
-      console.log(`📌 Course "${courseTitle}" expected amount: ₦${expectedAmount}`);
     } else if (type === 'book' && bookId) {
       const book = await Book.findById(bookId);
-      if (!book) {
-        console.log('❌ Book not found:', bookId);
-        return res.status(404).json({ success: false, message: 'Book not found' });
-      }
+      if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
       expectedAmount = book.price || 0;
-      bookTitle = book.title;
+      title = book.title;
       metadata.bookId = bookId;
-      console.log(`📌 Book "${bookTitle}" expected amount: ₦${expectedAmount}`);
     } else if (type === 'article' && req.body.articleId) {
       const post = await Post.findById(req.body.articleId);
-      if (!post) {
-        console.log('❌ Article not found:', req.body.articleId);
-        return res.status(404).json({ success: false, message: 'Article not found' });
-      }
+      if (!post) return res.status(404).json({ success: false, message: 'Article not found' });
       expectedAmount = post.price || 0;
-      articleTitle = post.title;
+      title = post.title;
       metadata.articleId = post._id;
-      console.log(`📌 Article "${articleTitle}" expected amount: ₦${expectedAmount}`);
-    } else if (type === 'meeting' && req.body.meetingId) {
-      const meeting = await (await import('../models/Meeting.js')).default.findById(req.body.meetingId);
-      if (!meeting) {
-        console.log('❌ Meeting not found:', req.body.meetingId);
-        return res.status(404).json({ success: false, message: 'Meeting not found' });
-      }
-      expectedAmount = meeting.price || 0;
-      metadata.meetingId = meeting._id;
-      console.log(`📌 Meeting expected amount: ₦${expectedAmount}`);
+    } else if (type === 'campaign' && campaignId) {
+      const campaign = await Campaign.findById(campaignId);
+      if (!campaign) return res.status(404).json({ success: false, message: 'Campaign not found' });
+      expectedAmount = campaign.budget || 0;
+      title = campaign.title;
+      metadata.campaignId = campaignId;
     }
 
     if (expectedAmount <= 0) {
-      console.log('❌ Invalid expected amount:', expectedAmount);
       return res.status(400).json({ success: false, message: 'Invalid payment amount' });
     }
 
-    // Upload receipt to Cloudinary
+    // Upload receipt
     let receiptUrl;
     try {
-      console.log('☁️ Uploading receipt to Cloudinary...');
       const uploadResult = await uploadToCloudinary(file.buffer, 'manual_payments');
       receiptUrl = uploadResult.secure_url;
-      console.log('✅ Receipt uploaded:', receiptUrl);
     } catch (uploadError) {
-      console.error('❌ Cloudinary upload failed:', uploadError);
       return res.status(500).json({ success: false, message: 'Receipt upload failed. Please try again.' });
     }
 
-    // Check for duplicate reference
-    console.log('🔍 Checking duplicate reference:', reference.toUpperCase());
+    // Check duplicate reference
     const existing = await ManualPayment.findOne({ reference: reference.toUpperCase() });
     if (existing) {
-      console.log('❌ Duplicate reference found');
-      return res.status(400).json({ success: false, message: 'This reference has already been used. Please use a unique transaction reference.' });
+      return res.status(400).json({ success: false, message: 'This reference has already been used.' });
     }
 
-    // Validate payment details
-    console.log('🔎 Validating payment details...');
+    // Validate payment
     const validation = await validateManualPayment(
       reference,
       Number(amount),
       new Date(paymentDate),
       expectedAmount,
-      [] // duplicate check already done manually
+      []
     );
-    console.log('✅ Validation result:', validation);
 
     // Create manual payment record
-    console.log('💾 Creating manual payment record...');
     const manualPayment = await ManualPayment.create({
       userId: user._id,
       type,
@@ -544,13 +621,11 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       receiptUrl,
       status: 'pending_review',
       autoDetected: false,
-      adminNote: validation.isValid ? 'Valid format, pending admin review' : 'Format validation failed – admin review required',
+      adminNote: validation.isValid ? 'Valid format, pending admin review' : 'Format validation failed',
       metadata,
     });
-    console.log('✅ Manual payment created:', manualPayment._id);
 
     // Notify admins
-    console.log('🔔 Notifying admins...');
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('admin_manual_payment_alert', {
@@ -562,13 +637,12 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
         reference,
         type,
         receiptUrl,
-        reason: validation.isValid ? 'Valid payment, awaiting admin approval' : validation.reason || 'Format mismatch, manual review required',
-        createdAt: manualPayment.createdAt,
+        reason: validation.isValid ? 'Valid payment, awaiting admin approval' : validation.reason || 'Manual review required',
       });
       await Notification.create({
         userId: admin._id,
         title: '📋 Manual Payment Pending Review',
-        message: `${user.firstName} ${user.lastName} submitted a manual payment of ₦${amount.toLocaleString()} for ${type}. Reference: ${reference}`,
+        message: `${user.firstName} ${user.lastName} submitted a manual payment of ₦${amount.toLocaleString()} for ${type}${title ? ` (${title})` : ''}. Reference: ${reference}`,
         type: 'system',
         data: { paymentId: manualPayment._id, type: 'manual_payment_review' },
       });
@@ -577,7 +651,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
     await Notification.create({
       userId: user._id,
       title: '⏳ Payment Submitted for Review',
-      message: `Your manual payment of ₦${amount.toLocaleString()} for ${type === 'course' ? courseTitle : type === 'book' ? bookTitle : type === 'article' ? articleTitle : type} has been submitted. An admin will review it shortly. You will be notified once approved.`,
+      message: `Your manual payment of ₦${amount.toLocaleString()} for ${type}${title ? ` (${title})` : ''} has been submitted. An admin will review it shortly.`,
       type: 'payment',
     });
 
@@ -586,11 +660,10 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       message: validation.isValid
         ? 'Payment submitted for admin review. You will be notified once approved.'
         : 'Payment submitted for admin review. Please ensure all details are correct.',
-      autoApproved: false,
       data: manualPayment,
     });
   } catch (err) {
-    console.error('❌ Manual payment error:', err);
+    console.error('Manual payment error:', err);
     next(err);
   }
 };
@@ -603,7 +676,9 @@ export const getManualPaymentStatus = async (req: Request, res: Response, next: 
     const payment = await ManualPayment.findOne({ _id: paymentId, userId: user._id });
     if (!payment) return res.status(404).json({ success: false, message: 'Payment not found' });
     res.json({ success: true, data: payment });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 export const getUserManualPayments = async (req: Request, res: Response, next: NextFunction) => {
@@ -611,40 +686,8 @@ export const getUserManualPayments = async (req: Request, res: Response, next: N
     const user = req.user as IUser;
     const payments = await ManualPayment.find({ userId: user._id }).sort('-createdAt');
     res.json({ success: true, data: payments });
-  } catch (err) { next(err); }
-};
-
-// ─── PURCHASE BOOK (Paystack) ──────────────────────────────────────
-export const purchaseBook = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const user = req.user as IUser;
-    const { bookId } = req.body;
-    if (!bookId) return res.status(400).json({ success: false, message: 'Book ID required' });
-
-    const book = await Book.findById(bookId);
-    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
-    if (book.price === 0) return res.status(400).json({ success: false, message: 'This book is free' });
-
-    const metadata = { type: 'book_purchase', bookId: book._id, userId: user._id };
-    const response = await axios.post(
-      `${PAYSTACK_BASE}/transaction/initialize`,
-      {
-        email: user.email,
-        amount: book.price * 100,
-        currency: 'NGN',
-        metadata,
-      },
-      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` } }
-    );
-    res.json({
-      success: true,
-      data: {
-        paymentUrl: response.data.data.authorization_url,
-        reference: response.data.data.reference,
-      },
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, message: err.message });
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -656,8 +699,17 @@ export const cancelSubscription = async (req: Request, res: Response, next: Next
     user.tier = 'free';
     user.subscriptionExpires = undefined;
     await user.save();
+
+    getIO().to(`user:${user._id}`).emit('premium_updated', {
+      userId: user._id,
+      isPremium: false,
+      tier: 'free',
+    });
+
     res.json({ success: true, message: 'Subscription cancelled successfully.' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
 };
 
 // ─── CLAIM WELCOME BONUS ────────────────────────────────────────────
@@ -679,6 +731,78 @@ export const claimWelcomeBonus = async (req: Request, res: Response, next: NextF
       description: 'Welcome bonus for joining ChangeX',
     });
 
+    getIO().to(`user:${user._id}`).emit('wallet_updated', {
+      userId: user._id,
+      balance: user.walletBalance,
+    });
+
     res.json({ success: true, message: '🎉 ₦500 welcome bonus added to your wallet!' });
-  } catch (err) { next(err); }
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── GET WALLET BREAKDOWN ────────────────────────────────────────────
+export const getWalletBreakdown = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const transactions = await Transaction.find({ userId: user._id, status: 'completed' });
+
+    const breakdown: Record<string, number> = {
+      referralEarnings: 0,
+      affiliateCommissions: 0,
+      instructorEarnings: 0,
+      courseBonuses: 0,
+      welcomeBonus: 0,
+      socialEarnings: 0,
+      adRevenue: 0,
+      campaignRevenue: 0,
+      totalEarnings: 0,
+    };
+
+    for (const tx of transactions) {
+      const amount = tx.amount || 0;
+      if (amount <= 0) continue;
+      switch (tx.type) {
+        case 'referral_bonus':
+        case 'referral_commission':
+          breakdown.referralEarnings += amount;
+          break;
+        case 'affiliate_commission':
+          breakdown.affiliateCommissions += amount;
+          break;
+        case 'instructor_earning':
+          breakdown.instructorEarnings += amount;
+          break;
+        case 'bonus':
+          if (tx.description?.toLowerCase().includes('welcome')) {
+            breakdown.welcomeBonus += amount;
+          } else if (tx.description?.toLowerCase().includes('social')) {
+            breakdown.socialEarnings += amount;
+          } else {
+            breakdown.courseBonuses += amount;
+          }
+          break;
+        case 'ad_revenue':
+          breakdown.adRevenue += amount;
+          break;
+        case 'campaign_payment':
+          breakdown.campaignRevenue += amount;
+          break;
+      }
+    }
+
+    breakdown.totalEarnings = Object.values(breakdown).reduce((a, b) => a + b, 0);
+
+    res.json({
+      success: true,
+      data: {
+        balance: user.walletBalance || 0,
+        pending: user.pendingWithdrawal || 0,
+        breakdown,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
 };
