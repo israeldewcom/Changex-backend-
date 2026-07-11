@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/book.routes.ts (COMPLETE FIXED)
+// FILE: src/routes/book.routes.ts (FIXED – correct route order)
 // ============================================================
 
 import { Router } from 'express';
@@ -10,17 +10,17 @@ const router = Router();
 
 // ─── Public routes ──────────────────────────────────────────────────
 router.get('/', bookController.listBooks);
-router.get('/:id', bookController.getBook);
+router.get('/:id', bookController.getBook);              // wildcard – keep last!
 router.post('/:id/view', bookController.trackBookView);
 
-// ─── Authenticated routes ──────────────────────────────────────────
+// ─── Authenticated routes (specific BEFORE the wildcard) ──────────
 router.use(authenticate);
+
+// ✅ MOVED UP: This route must come BEFORE the `:id` route
+router.get('/purchased', bookController.getPurchasedBooks);    // <-- now works
 
 // User submits a book for approval (Premium users)
 router.post('/submit', bookController.submitBookForApproval);
-
-// User's purchased books library
-router.get('/purchased', bookController.getPurchasedBooks);
 
 // Download book (requires purchase if paid)
 router.post('/:id/download', bookController.downloadBook);
