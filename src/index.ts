@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (COMPLETE UPDATED – ALL ROUTES MOUNTED)
+// FILE: src/index.ts (UPDATED – mount articles routes)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -60,6 +60,9 @@ import certificateRoutes from './routes/certificate.routes.js';
 
 // ─── BOOKS ──────────────────────────────────────────────────────────
 import bookRoutes from './routes/book.routes.js';
+
+// ─── ARTICLES ───────────────────────────────────────────────────────
+import articlesRoutes from './routes/articles.routes.js';
 
 // ─── SEO ─────────────────────────────────────────────────────────────
 import seoRoutes from './routes/seo.routes.js';
@@ -172,6 +175,7 @@ app.get('/debug/version', (req, res) => {
       interactiveMaterials: true,
       certificateGeneration: true,
       booksLibrary: true,
+      paidArticles: true,
       personalizedFeed: true,
       seoFriendlyUrls: true,
       videoCalls: true,
@@ -253,6 +257,9 @@ app.use('/seo', seoRoutes);
 
 // ─── BOOKS (mixed – public + protected) ────────────────────────────
 app.use('/api/v1/books', bookRoutes);
+
+// ─── ARTICLES (mixed – public + protected) ──────────────────────────
+app.use('/api/v1/articles', articlesRoutes);
 
 // ─── COURSES (mixed – public + protected) ──────────────────────────
 app.use('/api/v1/courses', courseRoutes);
@@ -342,7 +349,7 @@ async function bootstrap() {
       logger.info(`✅ Debug: http://localhost:${PORT}/debug/version`);
       logger.info(`📍 Routes: http://localhost:${PORT}/debug/routes`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO, Video, DMs, Stories, Groups, Splits, Cohorts, Analytics, Campaigns, Sponsorships`);
+      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO, Video, DMs, Stories, Groups, Splits, Cohorts, Analytics, Campaigns, Sponsorships, Paid Articles`);
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
