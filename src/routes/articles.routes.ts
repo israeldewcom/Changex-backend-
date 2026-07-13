@@ -1,10 +1,9 @@
 // ============================================================
-// FILE: src/routes/articles.routes.ts
+// FILE: src/routes/articles.routes.ts (FIXED – removed createArticle)
 // ============================================================
 
 import { Router } from 'express';
 import {
-  createArticle,
   getMyArticles,
   getArticleById,
   updateArticle,
