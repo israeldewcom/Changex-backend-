@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE)
+// FILE: src/controllers/admin.controller.ts (COMPLETE UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -26,9 +26,11 @@ import Referral from '../models/Referral.js';
 import AffiliateLink from '../models/AffiliateLink.js';
 import Rating from '../models/Rating.js';
 import { getIO } from '../socket.js';
-import { uploadToCloudinary } from '../services/cloudinary.js';
+import { uploadToCloudinary, deleteFromCloudinary } from '../services/cloudinary.js';
 import { invalidateCache } from '../services/cache.js';
 import { sendNotification } from '../services/notification.service.js';
+import Article from '../models/Article.js';
+import ArticlePurchase from '../models/ArticlePurchase.js';
 
 // ==================== DASHBOARD ====================
 export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -475,9 +477,9 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
     const book = await Book.create({
       title,
       author,
-      description,
+      description: description || '',
       price: price || 0,
-      coverImage,
+      coverImage: coverImage || '',
       fileUrl,
       uploadedBy: admin._id,
       isPremium: isPremium || false,
@@ -917,7 +919,7 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
             type: 'affiliate_commission',
             amount: affiliateCommission,
             status: 'completed',
-            description: `Commission for course: ${course.title}${affiliateCode ? ' (affiliate)' : ' (referral affiliate)'}`,
+            description: `Commission for course: ${course.title}`,
             reference: payment.reference,
             metadata: { courseId: course._id },
           });
@@ -1051,6 +1053,68 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
       }
     }
 
+    // ─── ARTICLE PURCHASE ──────────────────────────────────────────────────
+    else if (payment.type === 'article') {
+      const articleId = payment.metadata?.articleId;
+      if (!articleId) return res.status(400).json({ success: false, message: 'Article ID missing in metadata' });
+      const article = await Article.findById(articleId);
+      if (!article) return res.status(404).json({ success: false, message: 'Article not found' });
+
+      // Mark as purchased
+      await ArticlePurchase.findOneAndUpdate(
+        { userId: payment.userId, articleId: article._id },
+        { status: 'completed', completedAt: new Date() },
+        { upsert: true }
+      );
+
+      // Record transaction
+      await Transaction.create({
+        userId: payment.userId,
+        type: 'article_purchase',
+        amount: payment.amount,
+        status: 'completed',
+        description: `Manual purchase of article: ${article.title}`,
+        reference: payment.reference,
+        metadata: { articleId: article._id },
+      });
+
+      // Author earnings (80% of purchase)
+      const authorShare = payment.amount * 0.8;
+      const author = await User.findById(article.userId);
+      if (author) {
+        author.walletBalance = (author.walletBalance || 0) + authorShare;
+        await author.save();
+        await Transaction.create({
+          userId: author._id,
+          type: 'article_author_earning',
+          amount: authorShare,
+          status: 'completed',
+          description: `Article purchase: ${article.title}`,
+          reference: payment.reference,
+          metadata: { articleId: article._id },
+        });
+      }
+
+      const referralCode = payment.metadata?.referralCode;
+      if (referralCode) {
+        const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
+        if (referrer && referrer._id.toString() !== payment.userId.toString()) {
+          const bonus = (article.price || 0) * 0.1;
+          referrer.walletBalance = (referrer.walletBalance || 0) + bonus;
+          await referrer.save();
+          await Transaction.create({
+            userId: referrer._id,
+            type: 'referral_commission',
+            amount: bonus,
+            status: 'completed',
+            description: `Referral commission for article: ${article.title} (manual)`,
+            reference: payment.reference,
+            metadata: { articleId: article._id },
+          });
+        }
+      }
+    }
+
     payment.status = 'approved';
     payment.adminNote = adminNote;
     payment.approvedBy = admin._id;
@@ -1060,7 +1124,7 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
     await sendNotification({
       userId: payment.userId.toString(),
       title: '✅ Manual Payment Approved',
-      message: `Your manual payment of ₦${payment.amount.toLocaleString()} has been approved. You now have access to ${payment.type === 'subscription' ? 'Premium features' : payment.type === 'book' ? 'your book' : 'your course'}.`,
+      message: `Your manual payment of ₦${payment.amount.toLocaleString()} has been approved. You now have access to your purchase.`,
       type: 'payment',
       channels: ['email', 'push'],
     });
@@ -1531,15 +1595,21 @@ export const triggerSocialEarnings = async (req: Request, res: Response, next: N
   }
 };
 
-// ==================== FILE UPLOAD ====================
+// ==================== FILE UPLOAD (FIXED) ====================
 export const uploadImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, message: 'No file uploaded' });
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
     }
 
     if (!req.file.mimetype.startsWith('image/')) {
-      return res.status(400).json({ success: false, message: 'File must be an image' });
+      return res.status(400).json({
+        success: false,
+        message: 'File must be an image'
+      });
     }
 
     const result = await uploadToCloudinary(req.file.buffer, 'admin/uploads', {
@@ -1547,17 +1617,30 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
       transformation: [{ width: 1200, crop: 'limit', quality: 'auto' }],
     });
 
-    res.json({ success: true, data: { url: result.secure_url } });
-  } catch (err) {
+    // ✅ Return consistent structure with `data.url`
+    res.json({
+      success: true,
+      data: {
+        url: result.secure_url,
+        publicId: result.public_id,
+      },
+    });
+  } catch (err: any) {
     console.error('Upload image error:', err);
-    res.status(500).json({ success: false, message: String(err) });
+    res.status(500).json({
+      success: false,
+      message: err.message || 'Upload failed',
+    });
   }
 };
 
 export const uploadFile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ success: false, message: 'No file uploaded' });
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
     }
 
     const allowedTypes = [
@@ -1565,10 +1648,11 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
       'application/msword',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     ];
+
     if (!allowedTypes.includes(req.file.mimetype) && !req.file.mimetype.startsWith('image/')) {
       return res.status(400).json({
         success: false,
-        message: 'File type not supported. Please upload PDF or image.',
+        message: 'File type not supported. Please upload PDF, Word, or image files.',
       });
     }
 
@@ -1582,10 +1666,21 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
       unique_filename: true,
     });
 
-    res.json({ success: true, data: { url: result.secure_url } });
-  } catch (err) {
+    // ✅ Return consistent structure with `data.url`
+    res.json({
+      success: true,
+      data: {
+        url: result.secure_url,
+        publicId: result.public_id,
+        originalName: req.file.originalname,
+      },
+    });
+  } catch (err: any) {
     console.error('Upload file error:', err);
-    res.status(500).json({ success: false, message: String(err) });
+    res.status(500).json({
+      success: false,
+      message: err.message || 'Upload failed',
+    });
   }
 };
 
@@ -1601,6 +1696,11 @@ export const getPlatformStats = async (req: Request, res: Response, next: NextFu
       { $group: { _id: null, total: { $sum: '$amount' } } },
     ]);
 
+    // Additional stats for dashboard
+    const totalEnrollments = await Enrollment.countDocuments();
+    const totalArticles = await Article.countDocuments({ status: 'published' });
+    const totalCampaigns = await (await import('../models/Campaign.js')).default.countDocuments();
+
     res.json({
       success: true,
       data: {
@@ -1608,6 +1708,9 @@ export const getPlatformStats = async (req: Request, res: Response, next: NextFu
         totalCourses,
         totalPosts,
         totalBooks,
+        totalArticles,
+        totalCampaigns,
+        totalEnrollments,
         totalRevenue: totalRevenue[0]?.total || 0,
         totalWithdrawals: await Transaction.countDocuments({ type: 'withdrawal', status: 'completed' }),
         pendingWithdrawals: await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' }),
