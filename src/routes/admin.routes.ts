@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (FIXED – import getRevenueAnalytics from analytics.controller)
+// FILE: src/routes/admin.routes.ts (COMPLETE UPDATED)
 // ============================================================
 
 import { Router } from 'express';
@@ -93,7 +93,7 @@ import {
 
 } from '../controllers/admin.controller.js';
 
-// ─── Article Admin Controllers ─────────────────────────────────────────────────
+// ─── Article Admin Controllers ─────────────────────────────────
 import {
     approveArticle,
     rejectArticle,
@@ -101,7 +101,17 @@ import {
     getArticleStats,
 } from '../controllers/article.controller.js';
 
-// ─── Revenue Analytics ─────────────────────────────────────────────────────────
+// ─── Campaign Admin Controllers ──────────────────────────────
+import {
+    approveCampaign,
+    rejectCampaign,
+    adminGetCampaigns,
+    adminGetCampaign,
+    verifyManualPayment,
+    refundCampaign,
+} from '../controllers/campaign.controller.js';
+
+// ─── Revenue Analytics ─────────────────────────────────────────
 import { getRevenueAnalytics } from '../controllers/analytics.controller.js';
 
 import { authenticate, authorize } from '../middlewares/auth.js';
@@ -195,8 +205,19 @@ router.get('/articles/stats', getArticleStats);
 router.post('/articles/:id/approve', approveArticle);
 router.post('/articles/:id/reject', rejectArticle);
 
-// ==================== FILE UPLOADS ====================
+// ==================== CAMPAIGNS (Admin) ====================
+router.get('/campaigns', adminGetCampaigns);
+router.get('/campaigns/:id', adminGetCampaign);
+router.post('/campaigns/:id/approve', approveCampaign);
+router.post('/campaigns/:id/reject', rejectCampaign);
+router.post('/campaigns/:id/verify-manual', verifyManualPayment);
+router.post('/campaigns/:id/refund', refundCampaign);
+
+// ==================== FILE UPLOADS (FIXED) ====================
+// Cover image upload: field name must be "image"
 router.post('/upload', upload.single('image'), uploadImage);
+
+// PDF file upload: field name must be "file"
 router.post('/upload-file', upload.single('file'), uploadFile);
 
 // ==================== PLATFORM STATS ====================
@@ -205,7 +226,7 @@ router.get('/platform-stats', getPlatformStats);
 // ==================== ADMIN POST MANAGEMENT ====================
 router.delete('/posts/:id', deletePostByAdmin);
 
-// ==================== REVENUE ANALYTICS (Admin) ====================
+// ==================== REVENUE ANALYTICS ====================
 router.get('/analytics/revenue', getRevenueAnalytics);
 router.get('/revenue', getRevenueAnalytics);
 
