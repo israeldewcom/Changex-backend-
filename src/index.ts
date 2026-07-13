@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (UPDATED – mount articles routes)
+// FILE: src/index.ts (FIXED – removed duplicate paidArticles in features)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -182,7 +182,6 @@ app.get('/debug/version', (req, res) => {
       directMessaging: true,
       stories: true,
       studyGroups: true,
-      paidArticles: true,
       revenueSplits: true,
       cohorts: true,
       analytics: true,
