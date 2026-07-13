@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (COMPLETE)
+// FILE: src/routes/admin.routes.ts (COMPLETE – FIXED)
 // ============================================================
 
 import { Router } from 'express';
@@ -175,6 +175,7 @@ router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
 router.get('/books', getAdminBooks);
 router.get('/books/pending', getPendingBooks);
+// CRITICAL: approve/reject routes must be defined with correct method
 router.put('/books/:id/approve', approveBook);
 router.put('/books/:id/reject', rejectBook);
 
