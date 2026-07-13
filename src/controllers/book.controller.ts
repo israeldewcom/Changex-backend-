@@ -3,94 +3,124 @@
 // ============================================================
 
 import { Request, Response } from 'express';
-import { v4 as uuidv4 } from 'uuid';
+import Book from '../models/Book.js';
+import { IUser } from '../models/User.js';
+import Transaction from '../models/Transaction.js';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
-import Book from '../models/Book.js';
-import Transaction, { TransactionType, TransactionStatus } from '../models/Transaction.js';
-import User, { IUser } from '../models/User.js';
-import { AppError } from '../utils/AppError.js';
-import { catchAsync } from '../utils/catchAsync.js';
-import { sendResponse } from '../utils/response.js';
-import config from '../config/index.js';
 
-// ─── Utility: resolve file path ──────────────────────────────
-const resolveFilePath = (fileUrl: string): string | null => {
-  if (!fileUrl) return null;
-  if (fileUrl.startsWith('/uploads/')) {
-    const diskPath = path.join(process.cwd(), fileUrl);
-    return fs.existsSync(diskPath) ? diskPath : null;
+const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
+const PAYSTACK_BASE = 'https://api.paystack.co';
+
+export const createBook = async (req: Request, res: Response) => {
+  try {
+    const user = req.user as IUser;
+    if (!user.roles.includes('admin')) {
+      return res.status(403).json({ success: false, message: 'Admin only' });
+    }
+    const { title, author, description, price, coverImage, fileUrl } = req.body;
+    const book = await Book.create({
+      title,
+      author,
+      description,
+      price: price || 0,
+      coverImage,
+      fileUrl,
+      uploadedBy: user._id,
+    });
+    res.status(201).json({ success: true, data: book });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
   }
-  return null;
 };
 
-// ─── Services (business logic) ──────────────────────────────
-class BookService {
-  static async create(data: any, userId: string) {
-    return await Book.create({
-      ...data,
-      uploadedBy: userId,
-    });
+export const updateBook = async (req: Request, res: Response) => {
+  try {
+    const user = req.user as IUser;
+    if (!user.roles.includes('admin')) {
+      return res.status(403).json({ success: false, message: 'Admin only' });
+    }
+    const book = await Book.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+    res.json({ success: true, data: book });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
   }
+};
 
-  static async update(id: string, data: any) {
-    const book = await Book.findByIdAndUpdate(id, data, { new: true, runValidators: true });
-    if (!book) throw new AppError('Book not found', 404);
-    return book;
+export const deleteBook = async (req: Request, res: Response) => {
+  try {
+    const user = req.user as IUser;
+    if (!user.roles.includes('admin')) {
+      return res.status(403).json({ success: false, message: 'Admin only' });
+    }
+    await Book.findByIdAndDelete(req.params.id);
+    res.json({ success: true, message: 'Book deleted' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
   }
+};
 
-  static async delete(id: string) {
-    const book = await Book.findByIdAndDelete(id);
-    if (!book) throw new AppError('Book not found', 404);
-    return book;
+export const listAllBooks = async (req: Request, res: Response) => {
+  try {
+    const books = await Book.find().sort('-createdAt');
+    res.json({ success: true, data: books });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
   }
+};
 
-  static async findAllPublished() {
-    return await Book.find({ isPublished: true }).sort('-createdAt');
+export const listBooks = async (req: Request, res: Response) => {
+  try {
+    const books = await Book.find({ isPublished: true }).sort('-createdAt');
+    res.json({ success: true, data: books });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
   }
+};
 
-  static async findAll() {
-    return await Book.find().sort('-createdAt');
-  }
+export const getBook = async (req: Request, res: Response) => {
+  try {
+    const book = await Book.findById(req.params.id);
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-  static async findById(id: string, userId?: string) {
-    const book = await Book.findById(id);
-    if (!book) throw new AppError('Book not found', 404);
-
-    // Increment views
-    book.views += 1;
-    await book.save();
-
-    // Check if user purchased
     let isPurchased = false;
-    if (userId) {
+    if (req.user) {
+      const user = req.user as IUser;
       const purchase = await Transaction.findOne({
-        userId,
-        type: TransactionType.BOOK_PURCHASE,
+        userId: user._id,
+        type: 'book_purchase',
         'metadata.bookId': book._id,
-        status: TransactionStatus.COMPLETED,
+        status: 'completed',
       });
       isPurchased = !!purchase;
     }
 
-    return { book, isPurchased };
+    book.views += 1;
+    await book.save();
+
+    res.json({ success: true, data: { ...book.toObject(), isPurchased } });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
   }
+};
 
-  static async download(id: string, userId: string) {
-    const book = await Book.findById(id);
-    if (!book) throw new AppError('Book not found', 404);
+export const downloadBook = async (req: Request, res: Response) => {
+  try {
+    const user = req.user as IUser;
+    const book = await Book.findById(req.params.id);
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-    // Check purchase for paid books
     if (book.price > 0) {
       const purchased = await Transaction.findOne({
-        userId,
-        type: TransactionType.BOOK_PURCHASE,
+        userId: user._id,
+        type: 'book_purchase',
         'metadata.bookId': book._id,
-        status: TransactionStatus.COMPLETED,
+        status: 'completed',
       });
       if (!purchased) {
-        throw new AppError('You need to purchase this book first', 403);
+        return res.status(403).json({ success: false, message: 'You need to purchase this book first' });
       }
     }
 
@@ -98,143 +128,62 @@ class BookService {
     book.downloads += 1;
     await book.save();
 
-    // Resolve file
-    const fileUrl = book.fileUrl;
-    if (!fileUrl) throw new AppError('No download file available', 404);
+    // ─── Hybrid download: prefer Cloudinary, fallback to disk ───
+    // If the book has a Cloudinary URL in the database (or fileUrl points to Cloudinary)
+    // We'll check if fileUrl contains 'cloudinary' or is a full URL.
+    let downloadUrl = book.fileUrl;
 
-    // Check local disk
-    const diskPath = resolveFilePath(fileUrl);
-    if (diskPath) {
-      return { type: 'file', path: diskPath, filename: `${book.title.replace(/[^a-zA-Z0-9 ]/g, ' ').trim()}.pdf` };
-    }
-
-    // Remote URL (Cloudinary, etc.)
-    if (fileUrl.startsWith('http')) {
-      return { type: 'redirect', url: fileUrl };
-    }
-
-    throw new AppError('No download file available', 404);
-  }
-
-  static async initializePurchase(userId: string, bookId: string) {
-    const user = await User.findById(userId);
-    if (!user) throw new AppError('User not found', 404);
-
-    const book = await Book.findById(bookId);
-    if (!book) throw new AppError('Book not found', 404);
-    if (book.price === 0) throw new AppError('This book is free', 400);
-
-    // Create pending transaction record
-    const reference = `PAY-${uuidv4()}`;
-    const transaction = await Transaction.create({
-      userId: user._id,
-      type: TransactionType.BOOK_PURCHASE,
-      amount: book.price,
-      status: TransactionStatus.PENDING,
-      metadata: { bookId: book._id },
-      reference,
-    });
-
-    // Initialize Paystack
-    const payload = {
-      email: user.email,
-      amount: book.price * 100, // in kobo
-      currency: 'NGN',
-      reference,
-      metadata: { transactionId: transaction._id.toString() },
-    };
-
-    const response = await axios.post(
-      `${config.paystack.baseUrl}/transaction/initialize`,
-      payload,
-      {
-        headers: {
-          Authorization: `Bearer ${config.paystack.secretKey}`,
-          'Content-Type': 'application/json',
-        },
+    // If fileUrl is a disk path (starts with /uploads/), construct full URL
+    if (downloadUrl && downloadUrl.startsWith('/uploads/')) {
+      const diskPath = path.join(process.cwd(), downloadUrl);
+      if (fs.existsSync(diskPath)) {
+        // Serve the file from disk
+        const fileName = `${book.title.replace(/[^a-zA-Z0-9 ]/g, ' ').trim()}.pdf`;
+        return res.download(diskPath, fileName);
+      } else {
+        return res.status(404).json({ success: false, message: 'File not found on server' });
       }
+    }
+
+    // Otherwise, if it's a full URL (Cloudinary or any CDN), redirect
+    if (downloadUrl && downloadUrl.startsWith('http')) {
+      return res.redirect(downloadUrl);
+    }
+
+    // Fallback – if no URL, return error
+    return res.status(404).json({ success: false, message: 'No download file available' });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const purchaseBook = async (req: Request, res: Response) => {
+  try {
+    const user = req.user as IUser;
+    const { bookId } = req.body;
+    const book = await Book.findById(bookId);
+    if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
+    if (book.price === 0) return res.status(400).json({ success: false, message: 'This book is free' });
+
+    const metadata = { type: 'book_purchase', bookId: book._id, userId: user._id };
+    const response = await axios.post(
+      `${PAYSTACK_BASE}/transaction/initialize`,
+      {
+        email: user.email,
+        amount: book.price * 100,
+        currency: 'NGN',
+        metadata,
+      },
+      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` } }
     );
-
-    if (!response.data.status) {
-      throw new AppError('Payment initialization failed', 500);
-    }
-
-    return {
-      paymentUrl: response.data.data.authorization_url,
-      reference: response.data.data.reference,
-    };
+    res.json({
+      success: true,
+      data: {
+        paymentUrl: response.data.data.authorization_url,
+        reference: response.data.data.reference,
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
-}
-
-// ─── Controllers ──────────────────────────────────────────────
-
-export const createBook = catchAsync(async (req: Request, res: Response) => {
-  const user = req.user as IUser;
-  const book = await BookService.create(req.body, user._id);
-  sendResponse(res, 201, book);
-});
-
-export const updateBook = catchAsync(async (req: Request, res: Response) => {
-  const book = await BookService.update(req.params.id, req.body);
-  sendResponse(res, 200, book);
-});
-
-export const deleteBook = catchAsync(async (req: Request, res: Response) => {
-  await BookService.delete(req.params.id);
-  sendResponse(res, 200, { message: 'Book deleted successfully' });
-});
-
-export const listBooks = catchAsync(async (req: Request, res: Response) => {
-  const books = await BookService.findAllPublished();
-  sendResponse(res, 200, books);
-});
-
-export const listAllBooks = catchAsync(async (req: Request, res: Response) => {
-  const books = await BookService.findAll();
-  sendResponse(res, 200, books);
-});
-
-export const getBook = catchAsync(async (req: Request, res: Response) => {
-  const userId = (req.user as IUser)?._id;
-  const { book, isPurchased } = await BookService.findById(req.params.id, userId);
-  sendResponse(res, 200, { ...book.toObject(), isPurchased });
-});
-
-export const downloadBook = catchAsync(async (req: Request, res: Response) => {
-  const user = req.user as IUser;
-  const result = await BookService.download(req.params.id, user._id);
-
-  if (result.type === 'file') {
-    return res.download(result.path, result.filename);
-  } else if (result.type === 'redirect') {
-    return res.redirect(result.url);
-  }
-});
-
-export const purchaseBook = catchAsync(async (req: Request, res: Response) => {
-  const user = req.user as IUser;
-  const { bookId } = req.body;
-  const data = await BookService.initializePurchase(user._id, bookId);
-  sendResponse(res, 200, data);
-});
-
-// ─── Webhook handler (for Paystack) ───────────────────────────
-export const handlePaystackWebhook = catchAsync(async (req: Request, res: Response) => {
-  const event = req.body;
-  // Verify signature (implement signature verification using config.paystack.secretKey)
-  // ...
-
-  if (event.event === 'charge.success') {
-    const reference = event.data.reference;
-    const transaction = await Transaction.findOne({ reference });
-    if (transaction && transaction.status === TransactionStatus.PENDING) {
-      transaction.status = TransactionStatus.COMPLETED;
-      transaction.paymentData = event.data;
-      await transaction.save();
-
-      // Optionally grant access or perform other actions
-    }
-  }
-
-  res.sendStatus(200);
-});
+};
