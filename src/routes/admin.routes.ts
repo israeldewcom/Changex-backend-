@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts
+// FILE: src/routes/admin.routes.ts (FIXED – import getRevenueAnalytics from analytics.controller)
 // ============================================================
 
 import { Router } from 'express';
@@ -91,9 +91,6 @@ import {
     // Admin Post Management
     deletePostByAdmin,
 
-    // ─── Revenue Analytics ─────────────────────────────────────────────────────
-    getRevenueAnalytics,   // from analytics.controller
-
 } from '../controllers/admin.controller.js';
 
 // ─── Article Admin Controllers ─────────────────────────────────────────────────
@@ -103,6 +100,9 @@ import {
     getAdminArticles,
     getArticleStats,
 } from '../controllers/article.controller.js';
+
+// ─── Revenue Analytics ─────────────────────────────────────────────────────────
+import { getRevenueAnalytics } from '../controllers/analytics.controller.js';
 
 import { authenticate, authorize } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
