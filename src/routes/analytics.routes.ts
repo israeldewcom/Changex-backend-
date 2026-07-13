@@ -1,11 +1,11 @@
 // ============================================================
-// FILE: src/routes/analytics.routes.ts (COMPLETE – REVENUE ROUTE ADDED)
+// FILE: src/routes/analytics.routes.ts
 // ============================================================
 
 import { Router } from 'express';
 import {
   getCourseAnalytics,
-  getRevenueAnalytics,   // ✅ now imported
+  getRevenueAnalytics,
   getStudentAnalytics,
   getEngagementAnalytics,
   getFunnelAnalytics,
@@ -18,7 +18,7 @@ router.use(authenticate);
 router.use(authorize('instructor', 'admin'));
 
 router.get('/courses/:courseId', getCourseAnalytics);
-router.get('/revenue', getRevenueAnalytics);   // ✅ revenue route is now present
+router.get('/revenue', getRevenueAnalytics);
 router.get('/students', getStudentAnalytics);
 router.get('/engagement', getEngagementAnalytics);
 router.get('/funnel/:courseId', getFunnelAnalytics);
