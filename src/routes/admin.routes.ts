@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (COMPLETE – FIXED)
+// FILE: src/routes/admin.routes.ts
 // ============================================================
 
 import { Router } from 'express';
@@ -91,7 +91,18 @@ import {
     // Admin Post Management
     deletePostByAdmin,
 
+    // ─── Revenue Analytics ─────────────────────────────────────────────────────
+    getRevenueAnalytics,   // from analytics.controller
+
 } from '../controllers/admin.controller.js';
+
+// ─── Article Admin Controllers ─────────────────────────────────────────────────
+import {
+    approveArticle,
+    rejectArticle,
+    getAdminArticles,
+    getArticleStats,
+} from '../controllers/article.controller.js';
 
 import { authenticate, authorize } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
@@ -175,9 +186,14 @@ router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
 router.get('/books', getAdminBooks);
 router.get('/books/pending', getPendingBooks);
-// CRITICAL: approve/reject routes must be defined with correct method
-router.put('/books/:id/approve', approveBook);
-router.put('/books/:id/reject', rejectBook);
+router.post('/books/:id/approve', approveBook);
+router.post('/books/:id/reject', rejectBook);
+
+// ==================== ARTICLES (Admin) ====================
+router.get('/articles', getAdminArticles);
+router.get('/articles/stats', getArticleStats);
+router.post('/articles/:id/approve', approveArticle);
+router.post('/articles/:id/reject', rejectArticle);
 
 // ==================== FILE UPLOADS ====================
 router.post('/upload', upload.single('image'), uploadImage);
@@ -188,5 +204,9 @@ router.get('/platform-stats', getPlatformStats);
 
 // ==================== ADMIN POST MANAGEMENT ====================
 router.delete('/posts/:id', deletePostByAdmin);
+
+// ==================== REVENUE ANALYTICS (Admin) ====================
+router.get('/analytics/revenue', getRevenueAnalytics);
+router.get('/revenue', getRevenueAnalytics);
 
 export default router;
