@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/book.routes.ts (COMPLETE – STATIC ROUTES FIRST)
+// FILE: src/routes/book.routes.ts
 // ============================================================
 
 import { Router } from 'express';
@@ -44,8 +44,6 @@ router.post('/admin/:id/approve', bookController.approveBook);
 router.post('/admin/:id/reject', bookController.rejectBook);
 
 // ─── PUBLIC DYNAMIC ROUTE (MUST BE LAST) ──────────────────────────────────────
-// Get a single book – this will match any GET /books/:id, but since /purchased
-// and /admin/... are defined above, they take precedence.
 router.get('/:id', bookController.getBook);
 
 export default router;
