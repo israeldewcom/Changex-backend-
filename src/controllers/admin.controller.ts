@@ -31,6 +31,11 @@ import { invalidateCache } from '../services/cache.js';
 import { sendNotification } from '../services/notification.service.js';
 import Article from '../models/Article.js';
 import ArticlePurchase from '../models/ArticlePurchase.js';
+import path from 'path';
+import fs from 'fs';
+
+// Maximum file size for Cloudinary (10MB)
+const CLOUDINARY_MAX_BYTES = 10 * 1024 * 1024;
 
 // ==================== DASHBOARD ====================
 export const getDashboard = async (req: Request, res: Response, next: NextFunction) => {
@@ -468,12 +473,13 @@ export const processWithdrawal = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ==================== BOOKS ====================
+// ==================== BOOKS (Admin Create = Auto-Approved) ====================
 export const createBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const admin = req.user as IUser;
     const { title, author, description, price, coverImage, fileUrl, isPremium } = req.body;
 
+    // Admin creates the book – auto-approved and published immediately
     const book = await Book.create({
       title,
       author,
@@ -483,24 +489,44 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
       fileUrl,
       uploadedBy: admin._id,
       isPremium: isPremium || false,
-      approvalStatus: 'pending',
-      isPublished: false,
+      approvalStatus: 'approved',  // ✅ auto-approved
+      isPublished: true,          // ✅ auto-published
     });
 
+    // Notify admins about the new book (optional)
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const adminUser of admins) {
       await sendNotification({
         userId: adminUser._id.toString(),
-        title: '📚 New Book Pending Approval',
-        message: `Book "${title}" by ${author} needs your review.`,
+        title: '📚 New Book Published',
+        message: `Book "${title}" by ${author} is now live in the library.`,
         type: 'system',
         channels: ['email', 'push'],
       });
       getIO().to(`user:${adminUser._id}`).emit('notification', {
-        title: 'New Book Pending Approval',
-        message: `Book "${title}" by ${author} needs your review.`,
+        title: 'New Book Published',
+        message: `Book "${title}" by ${author} is now live.`,
       });
     }
+
+    // Also notify all users
+    const users = await User.find({ roles: { $ne: 'admin' } }).select('_id');
+    for (const user of users) {
+      await sendNotification({
+        userId: user._id.toString(),
+        title: '📚 New Book Available',
+        message: `A new book "${title}" by ${author} is now available in the library!`,
+        type: 'system',
+        channels: ['email', 'push'],
+        data: { bookId: book._id, type: 'book' },
+      });
+    }
+    getIO().emit('book_created', {
+      bookId: book._id,
+      title: book.title,
+      uploadedBy: admin._id,
+      userName: `${admin.firstName} ${admin.lastName}`,
+    });
 
     res.status(201).json({ success: true, data: book });
   } catch (err) {
@@ -1595,7 +1621,7 @@ export const triggerSocialEarnings = async (req: Request, res: Response, next: N
   }
 };
 
-// ==================== FILE UPLOAD (FIXED) ====================
+// ==================== FILE UPLOAD (HYBRID: Cloudinary <= 10MB, Local > 10MB) ====================
 export const uploadImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.file) {
@@ -1605,28 +1631,44 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
       });
     }
 
-    if (!req.file.mimetype.startsWith('image/')) {
-      return res.status(400).json({
-        success: false,
-        message: 'File must be an image'
+    const fileSize = req.file.size;
+    let url = '';
+    let storageMethod = 'local';
+    let publicId = '';
+
+    // If file is <= 10MB, upload to Cloudinary
+    if (fileSize <= CLOUDINARY_MAX_BYTES) {
+      const result = await uploadToCloudinary(req.file.path, 'admin/uploads', {
+        resource_type: 'image',
+        transformation: [{ width: 1200, crop: 'limit', quality: 'auto' }],
       });
+      url = result.secure_url;
+      publicId = result.public_id;
+      storageMethod = 'cloudinary';
+      // Clean up the local file after Cloudinary upload
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    } else {
+      // File is too large for Cloudinary – serve locally
+      url = `/uploads/${path.basename(req.file.path)}`;
+      storageMethod = 'local';
+      // Keep file on disk
     }
 
-    const result = await uploadToCloudinary(req.file.buffer, 'admin/uploads', {
-      resource_type: 'image',
-      transformation: [{ width: 1200, crop: 'limit', quality: 'auto' }],
-    });
-
-    // ✅ Return consistent structure with `data.url`
     res.json({
       success: true,
       data: {
-        url: result.secure_url,
-        publicId: result.public_id,
+        url,
+        publicId,
+        storageMethod,
+        size: req.file.size,
+        originalName: req.file.originalname,
       },
     });
   } catch (err: any) {
     console.error('Upload image error:', err);
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     res.status(500).json({
       success: false,
       message: err.message || 'Upload failed',
@@ -1643,40 +1685,48 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
       });
     }
 
-    const allowedTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    ];
+    const fileSize = req.file.size;
+    let url = '';
+    let storageMethod = 'local';
+    let publicId = '';
 
-    if (!allowedTypes.includes(req.file.mimetype) && !req.file.mimetype.startsWith('image/')) {
-      return res.status(400).json({
-        success: false,
-        message: 'File type not supported. Please upload PDF, Word, or image files.',
+    // If file is <= 10MB, upload to Cloudinary
+    if (fileSize <= CLOUDINARY_MAX_BYTES) {
+      const isImage = req.file.mimetype.startsWith('image/');
+      const resourceType = isImage ? 'image' : 'raw';
+      const result = await uploadToCloudinary(req.file.path, 'books', {
+        resource_type: resourceType,
+        access_mode: 'public',
+        use_filename: true,
+        unique_filename: true,
       });
+      url = result.secure_url;
+      publicId = result.public_id;
+      storageMethod = 'cloudinary';
+      // Clean up the local file after Cloudinary upload
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    } else {
+      // File is too large for Cloudinary – serve locally
+      url = `/uploads/${path.basename(req.file.path)}`;
+      storageMethod = 'local';
+      // Keep file on disk
     }
 
-    const isImage = req.file.mimetype.startsWith('image/');
-    const resourceType = isImage ? 'image' : 'raw';
-
-    const result = await uploadToCloudinary(req.file.buffer, 'books', {
-      resource_type: resourceType,
-      access_mode: 'public',
-      use_filename: true,
-      unique_filename: true,
-    });
-
-    // ✅ Return consistent structure with `data.url`
     res.json({
       success: true,
       data: {
-        url: result.secure_url,
-        publicId: result.public_id,
+        url,
+        publicId,
+        storageMethod,
+        size: req.file.size,
         originalName: req.file.originalname,
       },
     });
   } catch (err: any) {
     console.error('Upload file error:', err);
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     res.status(500).json({
       success: false,
       message: err.message || 'Upload failed',
@@ -1696,7 +1746,6 @@ export const getPlatformStats = async (req: Request, res: Response, next: NextFu
       { $group: { _id: null, total: { $sum: '$amount' } } },
     ]);
 
-    // Additional stats for dashboard
     const totalEnrollments = await Enrollment.countDocuments();
     const totalArticles = await Article.countDocuments({ status: 'published' });
     const totalCampaigns = await (await import('../models/Campaign.js')).default.countDocuments();
