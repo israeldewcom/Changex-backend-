@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (COMPLETE UPDATED)
+// FILE: src/routes/admin.routes.ts (UPDATED – with book routes)
 // ============================================================
 
 import { Router } from 'express';
@@ -191,14 +191,16 @@ router.get('/social-earnings/total-pool', getTotalSocialEarningsPool);
 router.post('/social-earnings/trigger', triggerSocialEarnings);
 
 // ==================== BOOKS (Admin CRUD + Approval) ====================
-// Admin creates a book – auto-approved and published immediately
 router.post('/books', createBook);
 router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
 router.get('/books', getAdminBooks);
 router.get('/books/pending', getPendingBooks);
+// Approve/reject endpoints – frontend expects both POST and PUT
 router.post('/books/:id/approve', approveBook);
+router.put('/books/:id/approve', approveBook);
 router.post('/books/:id/reject', rejectBook);
+router.put('/books/:id/reject', rejectBook);
 
 // ==================== ARTICLES (Admin) ====================
 router.get('/articles', getAdminArticles);
@@ -214,7 +216,7 @@ router.post('/campaigns/:id/reject', rejectCampaign);
 router.post('/campaigns/:id/verify-manual', verifyManualPayment);
 router.post('/campaigns/:id/refund', refundCampaign);
 
-// ==================== FILE UPLOADS (FIXED – hybrid storage) ====================
+// ==================== FILE UPLOADS ====================
 // Cover image upload: field name must be "image"
 router.post('/upload', upload.single('image'), uploadImage);
 
