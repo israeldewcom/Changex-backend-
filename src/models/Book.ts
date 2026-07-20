@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Book.ts (UPDATED – add approvalStatus, isPremium)
+// FILE: src/models/Book.ts (FINAL – with all required fields)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -17,13 +17,12 @@ export interface IBook extends Document {
   views: number;
   isPublished: boolean;
   uploadedBy: mongoose.Types.ObjectId;
-  // ─── NEW FIELDS ──────────────────────────────────────────────
   approvalStatus: 'pending' | 'approved' | 'rejected';
   rejectionReason?: string;
   adminApprovedBy?: mongoose.Types.ObjectId;
   adminApprovedAt?: Date;
   affiliatePercent: number;
-  isPremium: boolean;              // Added
+  isPremium: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,7 +41,6 @@ const BookSchema = new Schema<IBook>(
     views: { type: Number, default: 0 },
     isPublished: { type: Boolean, default: true },
     uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    // ─── NEW FIELDS ──────────────────────────────────────────────
     approvalStatus: {
       type: String,
       enum: ['pending', 'approved', 'rejected'],
