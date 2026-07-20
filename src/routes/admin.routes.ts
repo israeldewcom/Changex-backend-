@@ -191,6 +191,7 @@ router.get('/social-earnings/total-pool', getTotalSocialEarningsPool);
 router.post('/social-earnings/trigger', triggerSocialEarnings);
 
 // ==================== BOOKS (Admin CRUD + Approval) ====================
+// Admin creates a book – auto-approved and published immediately
 router.post('/books', createBook);
 router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
@@ -213,7 +214,7 @@ router.post('/campaigns/:id/reject', rejectCampaign);
 router.post('/campaigns/:id/verify-manual', verifyManualPayment);
 router.post('/campaigns/:id/refund', refundCampaign);
 
-// ==================== FILE UPLOADS (FIXED) ====================
+// ==================== FILE UPLOADS (FIXED – hybrid storage) ====================
 // Cover image upload: field name must be "image"
 router.post('/upload', upload.single('image'), uploadImage);
 
