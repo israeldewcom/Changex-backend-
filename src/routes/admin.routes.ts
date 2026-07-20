@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (UPDATED – with book routes)
+// FILE: src/routes/admin.routes.ts (COMPLETE)
 // ============================================================
 
 import { Router } from 'express';
