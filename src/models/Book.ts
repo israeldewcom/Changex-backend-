@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Book.ts (UPDATED)
+// FILE: src/models/Book.ts (UPDATED – add approvalStatus, isPremium)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -17,14 +17,13 @@ export interface IBook extends Document {
   views: number;
   isPublished: boolean;
   uploadedBy: mongoose.Types.ObjectId;
-  // ─── Approval status ──────────────────────────────────────────
+  // ─── NEW FIELDS ──────────────────────────────────────────────
   approvalStatus: 'pending' | 'approved' | 'rejected';
   rejectionReason?: string;
   adminApprovedBy?: mongoose.Types.ObjectId;
   adminApprovedAt?: Date;
   affiliatePercent: number;
-  // ─── Premium flag ─────────────────────────────────────────────
-  isPremium: boolean;
+  isPremium: boolean;              // Added
   createdAt: Date;
   updatedAt: Date;
 }
@@ -43,7 +42,7 @@ const BookSchema = new Schema<IBook>(
     views: { type: Number, default: 0 },
     isPublished: { type: Boolean, default: true },
     uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    // ─── Approval status ──────────────────────────────────────────
+    // ─── NEW FIELDS ──────────────────────────────────────────────
     approvalStatus: {
       type: String,
       enum: ['pending', 'approved', 'rejected'],
@@ -53,7 +52,6 @@ const BookSchema = new Schema<IBook>(
     adminApprovedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     adminApprovedAt: Date,
     affiliatePercent: { type: Number, default: 0 },
-    // ─── Premium flag ─────────────────────────────────────────────
     isPremium: { type: Boolean, default: false },
   },
   { timestamps: true }
