@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/book.controller.ts (FIXED – getBook permissions)
+// FILE: src/controllers/book.controller.ts (FIXED SYNTAX ERRORS)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -475,7 +475,7 @@ export const purchaseBook = async (req: Request, res: Response, next: NextFuncti
       },
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, message: err.response?.data?.message || err.message);
+    res.status(500).json({ success: false, message: err.response?.data?.message || err.message });
   }
 };
 
@@ -537,7 +537,7 @@ export const verifyBookPurchase = async (req: Request, res: Response, next: Next
 
     res.json({ success: true, message: 'Book purchased successfully' });
   } catch (err: any) {
-    res.status(500).json({ success: false, message: err.response?.data?.message || err.message );
+    res.status(500).json({ success: false, message: err.response?.data?.message || err.message });
   }
 };
 
