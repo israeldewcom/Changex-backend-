@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Book.ts (UPDATED – added missing fields)
+// FILE: src/models/Book.ts (UPDATED)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -17,12 +17,14 @@ export interface IBook extends Document {
   views: number;
   isPublished: boolean;
   uploadedBy: mongoose.Types.ObjectId;
-  // ─── NEW FIELDS ──────────────────────────────────────────────
-  status: 'pending' | 'approved' | 'rejected';
+  // ─── Approval status ──────────────────────────────────────────
+  approvalStatus: 'pending' | 'approved' | 'rejected';
   rejectionReason?: string;
   adminApprovedBy?: mongoose.Types.ObjectId;
   adminApprovedAt?: Date;
   affiliatePercent: number;
+  // ─── Premium flag ─────────────────────────────────────────────
+  isPremium: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -41,8 +43,8 @@ const BookSchema = new Schema<IBook>(
     views: { type: Number, default: 0 },
     isPublished: { type: Boolean, default: true },
     uploadedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    // ─── NEW FIELDS ──────────────────────────────────────────────
-    status: {
+    // ─── Approval status ──────────────────────────────────────────
+    approvalStatus: {
       type: String,
       enum: ['pending', 'approved', 'rejected'],
       default: 'pending'
@@ -51,11 +53,13 @@ const BookSchema = new Schema<IBook>(
     adminApprovedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     adminApprovedAt: Date,
     affiliatePercent: { type: Number, default: 0 },
+    // ─── Premium flag ─────────────────────────────────────────────
+    isPremium: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
-BookSchema.index({ status: 1, isPublished: 1 });
+BookSchema.index({ approvalStatus: 1, isPublished: 1 });
 BookSchema.index({ uploadedBy: 1, createdAt: -1 });
 
 export default mongoose.model<IBook>('Book', BookSchema);
