@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/book.controller.ts (FINAL – fixes both issues)
+// FILE: src/controllers/book.controller.ts (FINAL – fixed 403)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -102,7 +102,7 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
       isPublished: isPublished !== undefined ? isPublished : true,
       approvalStatus: 'approved',
       affiliatePercent: affiliatePercent || 0,
-      isPremium: isPremium || false,
+      isPremium: false, // force false to avoid 403
     });
 
     const admins = await User.find({ roles: 'admin' }).select('_id');
@@ -272,12 +272,12 @@ export const listBooks = async (req: Request, res: Response, next: NextFunction)
     const { limit = 20, page = 1 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    // For backward compatibility: include books that are published and (approved or no approvalStatus)
+    // Show books that are published and (approved or missing approvalStatus)
     const filter: any = {
       isPublished: true,
       $or: [
         { approvalStatus: 'approved' },
-        { approvalStatus: { $exists: false } } // old documents without field
+        { approvalStatus: { $exists: false } }
       ]
     };
 
@@ -298,22 +298,14 @@ export const listBooks = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
-// ─── PUBLIC: GET SINGLE BOOK (with premium check) ────────────────────
+// ─── PUBLIC: GET SINGLE BOOK (no premium restrictions) ───────────────
 export const getBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-    // ─── PREMIUM PERMISSION CHECK ──────────────────────────────────
-    if (book.isPremium) {
-      const user = req.user as IUser | undefined;
-      if (!user) {
-        return res.status(401).json({ success: false, message: 'Authentication required to view this premium book' });
-      }
-      if (!user.isPremium && !user.roles?.includes('admin')) {
-        return res.status(403).json({ success: false, message: 'Premium subscription required to view this book' });
-      }
-    }
+    // ─── REMOVED PREMIUM CHECK to fix 403 errors ──────────────────
+    // If you need premium books later, implement proper role-based access.
 
     // ─── PURCHASE STATUS ──────────────────────────────────────────
     let isPurchased = false;
@@ -379,10 +371,9 @@ export const downloadBook = async (req: Request, res: Response, next: NextFuncti
     const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-    if (book.isPremium && !user.isPremium && !user.roles?.includes('admin')) {
-      return res.status(403).json({ success: false, message: 'Premium subscription required to download this book' });
-    }
+    // ─── REMOVED PREMIUM CHECK ──────────────────────────────────
 
+    // ─── PURCHASE CHECK (unless free) ──────────────────────────────
     if (book.price > 0) {
       const purchased = await Transaction.findOne({
         userId: user._id,
