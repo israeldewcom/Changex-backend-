@@ -1,83 +1,95 @@
 // ============================================================
-// FILE: src/services/cloudinary.ts (accepts file path or buffer)
+// FILE: src/services/cloudinary.ts (FIXED TYPES)
 // ============================================================
 
 import cloudinary from '../config/cloudinary.js';
 import fs from 'fs';
-import path from 'path';
+import { Readable } from 'stream';
+import { UploadApiOptions, UploadApiResponse } from 'cloudinary';
 
 /**
  * Upload a file to Cloudinary.
  * @param {string|Buffer} input - file path or buffer
  * @param {string} folder - Cloudinary folder
  * @param {object} options - additional options
- * @returns {Promise<object>} Cloudinary result
+ * @returns {Promise<UploadApiResponse>} Cloudinary result
  */
 export const uploadToCloudinary = async (
   input: string | Buffer,
   folder: string,
   options?: Record<string, any>
-): Promise<any> => {
-  return new Promise((resolve, reject) => {
-    // Determine if input is a file path (string) or buffer
-    const isFilePath = typeof input === 'string' && fs.existsSync(input);
-    const isBuffer = Buffer.isBuffer(input);
+): Promise<UploadApiResponse> => {
+  // Determine if input is a file path (string) or buffer
+  const isFilePath = typeof input === 'string' && fs.existsSync(input);
+  const isBuffer = Buffer.isBuffer(input);
 
-    if (!isFilePath && !isBuffer) {
-      return reject(new Error('Invalid input: must be a file path or Buffer'));
-    }
+  if (!isFilePath && !isBuffer) {
+    throw new Error('Invalid input: must be a file path or Buffer');
+  }
 
-    let uploadMethod = cloudinary.uploader.upload;
+  // Prepare upload options with correct types
+  const uploadOptions: UploadApiOptions = {
+    folder,
+    resource_type: 'auto', // Accept any resource type
+    access_mode: 'public',
+    use_filename: true,
+    unique_filename: true,
+    timeout: 600000, // 10 minutes
+    ...options,
+  };
 
-    // If it's a file path, check file size for upload_large
-    if (isFilePath) {
-      const stats = fs.statSync(input);
-      const fileSizeMB = stats.size / (1024 * 1024);
-      if (fileSizeMB > 100) {
-        uploadMethod = cloudinary.uploader.upload_large;
-      }
-    }
-
-    // Prepare upload options
-    const uploadOptions = {
-      folder,
-      resource_type: 'auto',
-      access_mode: 'public',
-      use_filename: true,
-      unique_filename: true,
-      timeout: 600000, // 10 minutes
-      ...options,
-    };
-
-    // If input is a buffer, use a readable stream
-    if (isBuffer) {
-      const uploadStream = uploadMethod(uploadOptions, (error, result) => {
-        if (error) {
-          console.error('Cloudinary upload error:', error);
-          reject(error);
-        } else {
-          resolve(result);
-        }
+  // If it's a file path, use the file directly (could be large)
+  if (isFilePath) {
+    const stats = fs.statSync(input);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    // For files > 100MB, use upload_large (which handles chunked upload)
+    if (fileSizeMB > 100) {
+      // upload_large expects the file path and options, returns a promise
+      const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        cloudinary.uploader.upload_large(
+          input,
+          uploadOptions,
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
       });
-      const { Readable } = require('stream');
+      return result;
+    } else {
+      // Regular upload for smaller files
+      const result = await new Promise<UploadApiResponse>((resolve, reject) => {
+        cloudinary.uploader.upload(
+          input,
+          uploadOptions,
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+      });
+      return result;
+    }
+  }
+
+  // If input is a buffer, use a readable stream
+  if (isBuffer) {
+    return new Promise<UploadApiResponse>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        uploadOptions,
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
       const readable = new Readable();
       readable.push(input);
       readable.push(null);
       readable.pipe(uploadStream);
-      return;
-    }
-
-    // If input is a file path, use the file directly
-    uploadMethod(input, uploadOptions, (error, result) => {
-      // Clean up the temporary file after upload (optional, but we'll do it in the controller)
-      if (error) {
-        console.error('Cloudinary upload error:', error);
-        reject(error);
-      } else {
-        resolve(result);
-      }
     });
-  });
+  }
+
+  throw new Error('Unreachable');
 };
 
 export const deleteFromCloudinary = async (publicId: string) => {
