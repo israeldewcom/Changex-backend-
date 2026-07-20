@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – removed duplicate paidArticles in features)
+// FILE: src/index.ts (FIXED – graceful static file handling)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -15,6 +15,7 @@ import rateLimit from 'express-rate-limit';
 import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 import { connectDB } from './config/db.js';
 import { connectRedis } from './config/redis.js';
 import { initializePassport } from './config/passport.js';
@@ -298,12 +299,32 @@ app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-// ─── CATCH‑ALL ROUTE (SPA) ──────────────────────────────────────────
+// ─── CATCH‑ALL ROUTE (SPA) – gracefully handle missing static files ──
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ success: false, message: 'API route not found' });
   }
-  res.sendFile(path.join(__dirname, '../public/index.html'));
+
+  const indexPath = path.join(__dirname, '../public/index.html');
+  // Check if the file exists before attempting to send it
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    // If frontend is not deployed here, just return a basic response
+    // or redirect to the actual frontend URL if provided
+    const frontendUrl = process.env.FRONTEND_URL || 'https://changex.academy';
+    if (process.env.NODE_ENV === 'production') {
+      // Redirect to the frontend (if you want to redirect)
+      // res.redirect(frontendUrl);
+      // Or return a JSON message
+      res.status(404).json({
+        success: false,
+        message: 'Frontend not served by this API. Please use the main application URL.',
+      });
+    } else {
+      res.status(404).json({ success: false, message: 'Static file not found' });
+    }
+  }
 });
 
 // ─── ERROR HANDLER ──────────────────────────────────────────────────
