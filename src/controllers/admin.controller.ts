@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE UPDATED)
+// FILE: src/controllers/admin.controller.ts (UPDATED – BOOK AUTO-APPROVE FOR ADMIN)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -473,13 +473,17 @@ export const processWithdrawal = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ==================== BOOKS (Admin Create = Auto-Approved) ====================
+// ==================== BOOKS ====================
 export const createBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const admin = req.user as IUser;
     const { title, author, description, price, coverImage, fileUrl, isPremium } = req.body;
 
-    // Admin creates the book – auto-approved and published immediately
+    // Determine approval status: admin creates auto-approved; others pending
+    const isAdmin = admin.roles.includes('admin');
+    const approvalStatus = isAdmin ? 'approved' : 'pending';
+    const isPublished = isAdmin ? true : false;
+
     const book = await Book.create({
       title,
       author,
@@ -489,44 +493,31 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
       fileUrl,
       uploadedBy: admin._id,
       isPremium: isPremium || false,
-      approvalStatus: 'approved',  // ✅ auto-approved
-      isPublished: true,          // ✅ auto-published
+      approvalStatus,
+      isPublished,
     });
 
-    // Notify admins about the new book (optional)
-    const admins = await User.find({ roles: 'admin' }).select('_id');
-    for (const adminUser of admins) {
-      await sendNotification({
-        userId: adminUser._id.toString(),
-        title: '📚 New Book Published',
-        message: `Book "${title}" by ${author} is now live in the library.`,
-        type: 'system',
-        channels: ['email', 'push'],
-      });
-      getIO().to(`user:${adminUser._id}`).emit('notification', {
-        title: 'New Book Published',
-        message: `Book "${title}" by ${author} is now live.`,
-      });
+    // If admin created, notify all admins (optional)
+    if (isAdmin) {
+      // Optionally notify other admins about new book (or not)
+      // No pending approval needed
+    } else {
+      // Notify admins for approval
+      const admins = await User.find({ roles: 'admin' }).select('_id');
+      for (const adminUser of admins) {
+        await sendNotification({
+          userId: adminUser._id.toString(),
+          title: '📚 New Book Pending Approval',
+          message: `Book "${title}" by ${author} needs your review.`,
+          type: 'system',
+          channels: ['email', 'push'],
+        });
+        getIO().to(`user:${adminUser._id}`).emit('notification', {
+          title: 'New Book Pending Approval',
+          message: `Book "${title}" by ${author} needs your review.`,
+        });
+      }
     }
-
-    // Also notify all users
-    const users = await User.find({ roles: { $ne: 'admin' } }).select('_id');
-    for (const user of users) {
-      await sendNotification({
-        userId: user._id.toString(),
-        title: '📚 New Book Available',
-        message: `A new book "${title}" by ${author} is now available in the library!`,
-        type: 'system',
-        channels: ['email', 'push'],
-        data: { bookId: book._id, type: 'book' },
-      });
-    }
-    getIO().emit('book_created', {
-      bookId: book._id,
-      title: book.title,
-      uploadedBy: admin._id,
-      userName: `${admin.firstName} ${admin.lastName}`,
-    });
 
     res.status(201).json({ success: true, data: book });
   } catch (err) {
