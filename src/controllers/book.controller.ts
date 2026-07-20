@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/book.controller.ts (FINAL – fixed 403)
+// FILE: src/controllers/book.controller.ts (FINAL – NO PERMISSION CHECKS)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -17,7 +17,7 @@ import User from '../models/User.js';
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
 
-// ─── USER SUBMIT BOOK FOR APPROVAL (Premium users) ──────────────
+// ─── USER SUBMIT BOOK FOR APPROVAL (Premium only) ──────────────
 export const submitBookForApproval = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -82,7 +82,7 @@ export const submitBookForApproval = async (req: Request, res: Response, next: N
   }
 };
 
-// ─── ADMIN: CREATE BOOK (Direct upload, auto‑approved) ──────────────
+// ─── ADMIN: CREATE BOOK (auto‑approved) ──────────────────────────
 export const createBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -102,7 +102,7 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
       isPublished: isPublished !== undefined ? isPublished : true,
       approvalStatus: 'approved',
       affiliatePercent: affiliatePercent || 0,
-      isPremium: false, // force false to avoid 403
+      isPremium: false, // force false to avoid any restrictions
     });
 
     const admins = await User.find({ roles: 'admin' }).select('_id');
@@ -121,7 +121,7 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-// ─── ADMIN: UPDATE BOOK ──────────────────────────────────────────────
+// ─── ADMIN: UPDATE BOOK ──────────────────────────────────────────
 export const updateBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -138,7 +138,7 @@ export const updateBook = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-// ─── ADMIN: DELETE BOOK ──────────────────────────────────────────────
+// ─── ADMIN: DELETE BOOK ──────────────────────────────────────────
 export const deleteBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -155,7 +155,7 @@ export const deleteBook = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-// ─── ADMIN: GET ALL BOOKS ─────────────────────────────────────────────
+// ─── ADMIN: GET ALL BOOKS ──────────────────────────────────────
 export const listAllBooks = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, limit = 50 } = req.query;
@@ -180,7 +180,7 @@ export const listAllBooks = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── ADMIN: GET SINGLE BOOK ──────────────────────────────────────────
+// ─── ADMIN: GET SINGLE BOOK ────────────────────────────────────
 export const getBookById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const book = await Book.findById(req.params.id).populate('uploadedBy', 'firstName lastName email');
@@ -191,7 +191,7 @@ export const getBookById = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-// ─── ADMIN: APPROVE BOOK ─────────────────────────────────────────────
+// ─── ADMIN: APPROVE BOOK ──────────────────────────────────────
 export const approveBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const admin = req.user as IUser;
@@ -227,7 +227,7 @@ export const approveBook = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-// ─── ADMIN: REJECT BOOK ──────────────────────────────────────────────
+// ─── ADMIN: REJECT BOOK ──────────────────────────────────────
 export const rejectBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const admin = req.user as IUser;
@@ -266,13 +266,12 @@ export const rejectBook = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-// ─── PUBLIC: LIST PUBLISHED BOOKS (flexible filter) ──────────────────
+// ─── PUBLIC: LIST BOOKS (only approved, no premium check) ─────────
 export const listBooks = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { limit = 20, page = 1 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    // Show books that are published and (approved or missing approvalStatus)
     const filter: any = {
       isPublished: true,
       $or: [
@@ -298,16 +297,14 @@ export const listBooks = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
-// ─── PUBLIC: GET SINGLE BOOK (no premium restrictions) ───────────────
+// ─── PUBLIC: GET SINGLE BOOK (no permission checks) ────────────────
 export const getBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-    // ─── REMOVED PREMIUM CHECK to fix 403 errors ──────────────────
-    // If you need premium books later, implement proper role-based access.
+    // ✅ No premium check – all authenticated users can view
 
-    // ─── PURCHASE STATUS ──────────────────────────────────────────
     let isPurchased = false;
     if (req.user) {
       const user = req.user as IUser;
@@ -337,7 +334,7 @@ export const getBook = async (req: Request, res: Response, next: NextFunction) =
   }
 };
 
-// ─── GET PURCHASED BOOKS (User's Library) ──────────────────────────
+// ─── USER: GET PURCHASED BOOKS ──────────────────────────────────────
 export const getPurchasedBooks = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -364,16 +361,15 @@ export const getPurchasedBooks = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ─── DOWNLOAD BOOK ────────────────────────────────────────────────────
+// ─── USER: DOWNLOAD BOOK ────────────────────────────────────────────
 export const downloadBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-    // ─── REMOVED PREMIUM CHECK ──────────────────────────────────
+    // ✅ No premium check – only purchase check for paid books
 
-    // ─── PURCHASE CHECK (unless free) ──────────────────────────────
     if (book.price > 0) {
       const purchased = await Transaction.findOne({
         userId: user._id,
@@ -413,7 +409,7 @@ export const downloadBook = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── PURCHASE BOOK (Initialize Paystack) ────────────────────────────
+// ─── PURCHASE BOOK (Paystack) ───────────────────────────────────────
 export const purchaseBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
