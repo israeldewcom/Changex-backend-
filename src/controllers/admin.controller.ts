@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (UPDATED – BOOK AUTO-APPROVE FOR ADMIN)
+// FILE: src/controllers/admin.controller.ts (COMPLETE)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
