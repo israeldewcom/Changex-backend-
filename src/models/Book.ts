@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Book.ts (FINAL – with all required fields)
+// FILE: src/models/Book.ts (FINAL)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -22,7 +22,7 @@ export interface IBook extends Document {
   adminApprovedBy?: mongoose.Types.ObjectId;
   adminApprovedAt?: Date;
   affiliatePercent: number;
-  isPremium: boolean;
+  isPremium: boolean; // currently unused – all books are free for all
   createdAt: Date;
   updatedAt: Date;
 }
