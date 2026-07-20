@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/book.routes.ts
+// FILE: src/routes/book.routes.ts (FIXED – public getBook)
 // ============================================================
 
 import { Router } from 'express';
@@ -8,11 +8,17 @@ import { authenticate, authorize } from '../middlewares/auth.js';
 
 const router = Router();
 
-// ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────────────
+// ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────
+// List published books
 router.get('/', bookController.listBooks);
+
+// Track a book view (public)
 router.post('/:id/view', bookController.trackBookView);
 
-// ─── AUTHENTICATED ROUTES ──────────────────────────────────────────────────────
+// Get a single book by ID – PUBLIC (anyone can view book details)
+router.get('/:id', bookController.getBook);
+
+// ─── AUTHENTICATED ROUTES ─────────────────────────────────────────────
 router.use(authenticate);
 
 // User submits a book for approval (Premium users)
@@ -30,10 +36,10 @@ router.post('/purchase', bookController.purchaseBook);
 // Verify book purchase
 router.post('/verify-purchase', bookController.verifyBookPurchase);
 
-// ─── ADMIN ONLY ──────────────────────────────────────────────────────────────────
+// ─── ADMIN ONLY ──────────────────────────────────────────────────────────
 router.use(authorize('admin'));
 
-// Admin CRUD and approval routes (static routes first)
+// Admin CRUD and approval routes
 router.get('/admin/all', bookController.listAllBooks);
 router.get('/admin/stats', bookController.getBookStats);
 router.get('/admin/:id', bookController.getBookById);
@@ -42,8 +48,5 @@ router.put('/admin/:id', bookController.updateBook);
 router.delete('/admin/:id', bookController.deleteBook);
 router.post('/admin/:id/approve', bookController.approveBook);
 router.post('/admin/:id/reject', bookController.rejectBook);
-
-// ─── PUBLIC DYNAMIC ROUTE (MUST BE LAST) ──────────────────────────────────────
-router.get('/:id', bookController.getBook);
 
 export default router;
