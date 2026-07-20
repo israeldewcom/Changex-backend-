@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE)
+// FILE: src/controllers/admin.controller.ts
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
