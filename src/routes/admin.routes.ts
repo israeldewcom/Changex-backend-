@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (COMPLETE)
+// FILE: src/routes/admin.routes.ts (WITH BOOK APPROVE/REJECT ROUTES)
 // ============================================================
 
 import { Router } from 'express';
@@ -196,7 +196,7 @@ router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
 router.get('/books', getAdminBooks);
 router.get('/books/pending', getPendingBooks);
-// Approve/reject endpoints – frontend expects both POST and PUT
+// ✅ Approve/reject routes – frontend expects both POST and PUT
 router.post('/books/:id/approve', approveBook);
 router.put('/books/:id/approve', approveBook);
 router.post('/books/:id/reject', rejectBook);
