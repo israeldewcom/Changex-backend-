@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/book.controller.ts (FIXED SYNTAX ERRORS)
+// FILE: src/controllers/book.controller.ts (FIXED – free users can buy books)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -44,6 +44,7 @@ export const submitBookForApproval = async (req: Request, res: Response, next: N
       isPublished: false,
       approvalStatus: 'pending', // Require admin approval
       affiliatePercent: affiliatePercent || 0,
+      isPremium: false, // User-submitted books are not premium by default
     });
 
     // Notify all admins
@@ -90,7 +91,7 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
     if (!user.roles.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Admin only' });
     }
-    const { title, author, description, price, coverImage, fileUrl, affiliatePercent, isPublished } = req.body;
+    const { title, author, description, price, coverImage, fileUrl, affiliatePercent, isPublished, isPremium } = req.body;
     
     const book = await Book.create({
       title,
@@ -103,6 +104,7 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
       isPublished: isPublished !== undefined ? isPublished : true,
       approvalStatus: 'approved', // Auto-approved
       affiliatePercent: affiliatePercent || 0,
+      isPremium: isPremium || false,
     });
 
     // Notify all admins (optional)
@@ -275,7 +277,7 @@ export const listBooks = async (req: Request, res: Response, next: NextFunction)
     const { limit = 20, page = 1 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    // ✅ Only fetch books that are published AND approved
+    // ✅ Only fetch books that are published AND approved (regardless of isPremium)
     const books = await Book.find({ isPublished: true, approvalStatus: 'approved' })
       .sort('-createdAt')
       .skip(skip)
@@ -293,23 +295,11 @@ export const listBooks = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
-// ─── PUBLIC: GET SINGLE BOOK (with premium check) ────────────────────
+// ─── PUBLIC: GET SINGLE BOOK (no premium restriction) ────────────────────
 export const getBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
-
-    // ─── PREMIUM PERMISSION CHECK ──────────────────────────────────
-    // If the book is marked as premium-only, the user must be premium to view it.
-    if (book.isPremium) {
-      const user = req.user as IUser | undefined;
-      if (!user) {
-        return res.status(401).json({ success: false, message: 'Authentication required to view this premium book' });
-      }
-      if (!user.isPremium && !user.roles?.includes('admin')) {
-        return res.status(403).json({ success: false, message: 'Premium subscription required to view this book' });
-      }
-    }
 
     // ─── PURCHASE STATUS ──────────────────────────────────────────
     let isPurchased = false;
@@ -328,6 +318,7 @@ export const getBook = async (req: Request, res: Response, next: NextFunction) =
     book.views = (book.views || 0) + 1;
     await book.save();
 
+    // ✅ Always return the book, even if isPremium is true – we only restrict download.
     res.json({
       success: true,
       data: {
@@ -376,7 +367,7 @@ export const downloadBook = async (req: Request, res: Response, next: NextFuncti
     const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-    // ─── PREMIUM CHECK FOR DOWNLOAD ─────────────────────────────────
+    // ─── PREMIUM CHECK: only if book is marked premium and user is not premium/admin ──
     if (book.isPremium && !user.isPremium && !user.roles?.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Premium subscription required to download this book' });
     }
@@ -426,7 +417,7 @@ export const downloadBook = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── PURCHASE BOOK (Initialize Paystack) ────────────────────────────
+// ─── PURCHASE BOOK (Initialize Paystack – free users can buy) ──────
 export const purchaseBook = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
