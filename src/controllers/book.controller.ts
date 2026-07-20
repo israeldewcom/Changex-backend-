@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/book.controller.ts (FIXED SYNTAX ERRORS)
+// FILE: src/controllers/book.controller.ts (FINAL – fixes both issues)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -22,7 +22,6 @@ export const submitBookForApproval = async (req: Request, res: Response, next: N
   try {
     const user = req.user as IUser;
     
-    // Check if user is premium
     if (!user.isPremium && !user.roles.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Premium subscription required to upload books' });
     }
@@ -42,11 +41,11 @@ export const submitBookForApproval = async (req: Request, res: Response, next: N
       fileUrl,
       uploadedBy: user._id,
       isPublished: false,
-      approvalStatus: 'pending', // Require admin approval
+      approvalStatus: 'pending',
       affiliatePercent: affiliatePercent || 0,
+      isPremium: false,
     });
 
-    // Notify all admins
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('book_submitted', {
@@ -90,7 +89,7 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
     if (!user.roles.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Admin only' });
     }
-    const { title, author, description, price, coverImage, fileUrl, affiliatePercent, isPublished } = req.body;
+    const { title, author, description, price, coverImage, fileUrl, affiliatePercent, isPublished, isPremium } = req.body;
     
     const book = await Book.create({
       title,
@@ -101,11 +100,11 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
       fileUrl,
       uploadedBy: user._id,
       isPublished: isPublished !== undefined ? isPublished : true,
-      approvalStatus: 'approved', // Auto-approved
+      approvalStatus: 'approved',
       affiliatePercent: affiliatePercent || 0,
+      isPremium: isPremium || false,
     });
 
-    // Notify all admins (optional)
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('book_created', {
@@ -209,7 +208,6 @@ export const approveBook = async (req: Request, res: Response, next: NextFunctio
     book.adminApprovedAt = new Date();
     await book.save();
 
-    // Notify the uploader
     getIO().to(`user:${book.uploadedBy}`).emit('book_approved', {
       bookId: book._id,
       title: book.title,
@@ -248,7 +246,6 @@ export const rejectBook = async (req: Request, res: Response, next: NextFunction
     book.adminApprovedAt = new Date();
     await book.save();
 
-    // Notify the uploader
     getIO().to(`user:${book.uploadedBy}`).emit('book_rejected', {
       bookId: book._id,
       title: book.title,
@@ -269,19 +266,27 @@ export const rejectBook = async (req: Request, res: Response, next: NextFunction
   }
 };
 
-// ─── PUBLIC: LIST PUBLISHED BOOKS (ONLY APPROVED) ────────────────────
+// ─── PUBLIC: LIST PUBLISHED BOOKS (flexible filter) ──────────────────
 export const listBooks = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { limit = 20, page = 1 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
-    // ✅ Only fetch books that are published AND approved
-    const books = await Book.find({ isPublished: true, approvalStatus: 'approved' })
+    // For backward compatibility: include books that are published and (approved or no approvalStatus)
+    const filter: any = {
+      isPublished: true,
+      $or: [
+        { approvalStatus: 'approved' },
+        { approvalStatus: { $exists: false } } // old documents without field
+      ]
+    };
+
+    const books = await Book.find(filter)
       .sort('-createdAt')
       .skip(skip)
       .limit(Number(limit));
 
-    const total = await Book.countDocuments({ isPublished: true, approvalStatus: 'approved' });
+    const total = await Book.countDocuments(filter);
 
     res.json({
       success: true,
@@ -300,7 +305,6 @@ export const getBook = async (req: Request, res: Response, next: NextFunction) =
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
     // ─── PREMIUM PERMISSION CHECK ──────────────────────────────────
-    // If the book is marked as premium-only, the user must be premium to view it.
     if (book.isPremium) {
       const user = req.user as IUser | undefined;
       if (!user) {
@@ -354,7 +358,6 @@ export const getPurchasedBooks = async (req: Request, res: Response, next: NextF
     const bookIds = transactions.map(t => t.metadata?.bookId).filter(Boolean);
     const books = await Book.find({ _id: { $in: bookIds }, isPublished: true, approvalStatus: 'approved' });
 
-    // Add purchase date to each book
     const booksWithPurchaseDate = books.map(book => {
       const tx = transactions.find(t => t.metadata?.bookId?.toString() === book._id.toString());
       return {
@@ -376,12 +379,10 @@ export const downloadBook = async (req: Request, res: Response, next: NextFuncti
     const book = await Book.findById(req.params.id);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-    // ─── PREMIUM CHECK FOR DOWNLOAD ─────────────────────────────────
     if (book.isPremium && !user.isPremium && !user.roles?.includes('admin')) {
       return res.status(403).json({ success: false, message: 'Premium subscription required to download this book' });
     }
 
-    // ─── PURCHASE CHECK (unless free) ──────────────────────────────
     if (book.price > 0) {
       const purchased = await Transaction.findOne({
         userId: user._id,
@@ -394,19 +395,15 @@ export const downloadBook = async (req: Request, res: Response, next: NextFuncti
       }
     }
 
-    // Increment download count
     book.downloads = (book.downloads || 0) + 1;
     await book.save();
 
-    // ─── Handle file delivery ──────────────────────────────────────
     const fileUrl = book.fileUrl;
 
-    // If fileUrl is a Cloudinary URL, redirect to it
     if (fileUrl && fileUrl.startsWith('http')) {
       return res.redirect(fileUrl);
     }
 
-    // If fileUrl is a local disk path
     if (fileUrl && fileUrl.startsWith('/uploads/')) {
       const diskPath = path.join(process.cwd(), fileUrl);
       if (fs.existsSync(diskPath)) {
@@ -415,7 +412,6 @@ export const downloadBook = async (req: Request, res: Response, next: NextFuncti
       }
     }
 
-    // Fallback – if fileUrl is stored but not accessible, try to construct URL
     if (fileUrl) {
       return res.redirect(fileUrl);
     }
@@ -437,7 +433,6 @@ export const purchaseBook = async (req: Request, res: Response, next: NextFuncti
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
     if (book.price === 0) return res.status(400).json({ success: false, message: 'This book is free' });
 
-    // Check if already purchased
     const existing = await Transaction.findOne({
       userId: user._id,
       type: 'book_purchase',
@@ -479,7 +474,7 @@ export const purchaseBook = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── VERIFY BOOK PURCHASE (Webhook/Manual) ──────────────────────────
+// ─── VERIFY BOOK PURCHASE ──────────────────────────────────────────
 export const verifyBookPurchase = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -503,7 +498,6 @@ export const verifyBookPurchase = async (req: Request, res: Response, next: Next
     const book = await Book.findById(bookId);
     if (!book) return res.status(404).json({ success: false, message: 'Book not found' });
 
-    // Check if already purchased
     const existing = await Transaction.findOne({
       userId: user._id,
       type: 'book_purchase',
@@ -514,7 +508,6 @@ export const verifyBookPurchase = async (req: Request, res: Response, next: Next
       return res.json({ success: true, message: 'Book already purchased' });
     }
 
-    // Create transaction
     await Transaction.create({
       userId: user._id,
       type: 'book_purchase',
@@ -525,11 +518,9 @@ export const verifyBookPurchase = async (req: Request, res: Response, next: Next
       metadata: { bookId: book._id },
     });
 
-    // Increment downloads
     book.downloads = (book.downloads || 0) + 1;
     await book.save();
 
-    // Notify user
     getIO().to(`user:${user._id}`).emit('book_purchased', {
       bookId: book._id,
       title: book.title,
