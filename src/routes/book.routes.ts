@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/book.routes.ts (FIXED – public getBook)
+// FILE: src/routes/book.routes.ts (FIXED ORDER – static routes first)
 // ============================================================
 
 import { Router } from 'express';
@@ -9,22 +9,20 @@ import { authenticate, authorize } from '../middlewares/auth.js';
 const router = Router();
 
 // ─── PUBLIC ROUTES (no auth) ──────────────────────────────────────────
-// List published books
+// List all published books (static)
 router.get('/', bookController.listBooks);
 
-// Track a book view (public)
+// Track a book view (static)
 router.post('/:id/view', bookController.trackBookView);
 
-// Get a single book by ID – PUBLIC (anyone can view book details)
-router.get('/:id', bookController.getBook);
-
-// ─── AUTHENTICATED ROUTES ─────────────────────────────────────────────
+// ─── AUTHENTICATED STATIC ROUTES ──────────────────────────────────────
+// These must be defined BEFORE the dynamic /:id route
 router.use(authenticate);
 
 // User submits a book for approval (Premium users)
 router.post('/submit', bookController.submitBookForApproval);
 
-// STATIC route: User's purchased books library – MUST come before dynamic :id
+// User's purchased books library – static route
 router.get('/purchased', bookController.getPurchasedBooks);
 
 // Download book (requires purchase if paid)
@@ -36,10 +34,9 @@ router.post('/purchase', bookController.purchaseBook);
 // Verify book purchase
 router.post('/verify-purchase', bookController.verifyBookPurchase);
 
-// ─── ADMIN ONLY ──────────────────────────────────────────────────────────
+// ─── ADMIN ROUTES (static) ─────────────────────────────────────────────
 router.use(authorize('admin'));
 
-// Admin CRUD and approval routes
 router.get('/admin/all', bookController.listAllBooks);
 router.get('/admin/stats', bookController.getBookStats);
 router.get('/admin/:id', bookController.getBookById);
@@ -48,5 +45,10 @@ router.put('/admin/:id', bookController.updateBook);
 router.delete('/admin/:id', bookController.deleteBook);
 router.post('/admin/:id/approve', bookController.approveBook);
 router.post('/admin/:id/reject', bookController.rejectBook);
+
+// ─── PUBLIC DYNAMIC ROUTE (MUST BE LAST) ─────────────────────────────
+// Get a single book by ID – this will match any GET request to /books/:id
+// that hasn't been handled by a static route above.
+router.get('/:id', bookController.getBook);
 
 export default router;
