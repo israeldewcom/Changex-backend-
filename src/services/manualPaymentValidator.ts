@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/services/manualPaymentValidator.ts
+// ============================================================
+
 export interface ValidationResult {
   isValid: boolean;
   autoApprove: boolean;
@@ -42,7 +46,8 @@ export async function validateManualPayment(
 
   // 4. Date validation (must be within last 7 days)
   const now = new Date();
-  const sevenDaysAgo = new Date(now.setDate(now.getDate() - 7));
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   if (paymentDate < sevenDaysAgo) {
     return {
       isValid: false,
@@ -52,7 +57,7 @@ export async function validateManualPayment(
   }
 
   // 5. Future date check
-  if (paymentDate > new Date()) {
+  if (paymentDate > now) {
     return {
       isValid: false,
       autoApprove: false,
