@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/payment.routes.ts (UPDATED)
+// FILE: src/routes/payment.routes.ts
 // ============================================================
 
 import { Router } from 'express';
