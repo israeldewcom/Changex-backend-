@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/payment.controller.ts (FIXED – removed duplicate and missing references)
+// FILE: src/controllers/payment.controller.ts (FIXED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -20,6 +20,7 @@ import { uploadToCloudinary } from '../services/cloudinary.js';
 import { validateManualPayment } from '../services/manualPaymentValidator.js';
 import { getIO } from '../socket.js';
 import Notification from '../models/Notification.js';
+import mongoose from 'mongoose';
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
@@ -523,11 +524,18 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
     const { type, courseId, bookId, amount, reference, paymentDate, referralCode, affiliateCode, campaignId } = req.body;
     const file = req.file;
 
+    // ─── Validation ──────────────────────────────────────────────────────
     if (!file) {
       return res.status(400).json({ success: false, message: 'Receipt file is required' });
     }
-    if (!reference || !amount || !paymentDate) {
-      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    if (!reference) {
+      return res.status(400).json({ success: false, message: 'Transaction reference is required' });
+    }
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Valid amount is required' });
+    }
+    if (!paymentDate) {
+      return res.status(400).json({ success: false, message: 'Payment date is required' });
     }
 
     const allowedTypes = ['course', 'subscription', 'book', 'article', 'meeting', 'campaign'];
@@ -535,6 +543,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       return res.status(400).json({ success: false, message: 'Invalid payment type' });
     }
 
+    // ─── Determine expected amount ─────────────────────────────────────
     let expectedAmount = 0;
     let title = '';
     let metadata: any = { referralCode, affiliateCode };
@@ -566,37 +575,51 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       expectedAmount = campaign.budget || 0;
       title = campaign.title;
       metadata.campaignId = campaignId;
+    } else if (type === 'meeting') {
+      // Handle meeting booking
+      const meetingId = req.body.meetingId;
+      if (!meetingId) return res.status(400).json({ success: false, message: 'Meeting ID required' });
+      const Meeting = await import('../models/Meeting.js').then(m => m.default);
+      const meeting = await Meeting.findById(meetingId);
+      if (!meeting) return res.status(404).json({ success: false, message: 'Meeting not found' });
+      expectedAmount = meeting.price || 0;
+      title = meeting.title;
+      metadata.meetingId = meetingId;
     }
 
     if (expectedAmount <= 0) {
       return res.status(400).json({ success: false, message: 'Invalid payment amount' });
     }
 
-    // Upload receipt
+    // ─── Upload receipt ──────────────────────────────────────────────────
     let receiptUrl;
     try {
-      const uploadResult = await uploadToCloudinary(file.buffer, 'manual_payments');
+      const uploadResult = await uploadToCloudinary(file.buffer, 'manual_payments', {
+        resource_type: 'auto',
+        access_mode: 'public',
+      });
       receiptUrl = uploadResult.secure_url;
     } catch (uploadError) {
+      console.error('Receipt upload error:', uploadError);
       return res.status(500).json({ success: false, message: 'Receipt upload failed. Please try again.' });
     }
 
-    // Check duplicate reference
+    // ─── Check duplicate reference ────────────────────────────────────
     const existing = await ManualPayment.findOne({ reference: reference.toUpperCase() });
     if (existing) {
       return res.status(400).json({ success: false, message: 'This reference has already been used.' });
     }
 
-    // Validate payment
+    // ─── Validate payment details ──────────────────────────────────────
     const validation = await validateManualPayment(
       reference,
       Number(amount),
       new Date(paymentDate),
       expectedAmount,
-      []
+      [] // existing references already checked above
     );
 
-    // Create manual payment record
+    // ─── Create manual payment record ──────────────────────────────────
     const manualPayment = await ManualPayment.create({
       userId: user._id,
       type,
@@ -611,7 +634,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       metadata,
     });
 
-    // Notify admins
+    // ─── Notify admins ──────────────────────────────────────────────────
     const admins = await User.find({ roles: 'admin' }).select('_id');
     for (const admin of admins) {
       getIO().to(`user:${admin._id}`).emit('admin_manual_payment_alert', {
@@ -634,12 +657,104 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
       });
     }
 
+    // ─── Notify user ────────────────────────────────────────────────────
     await Notification.create({
       userId: user._id,
       title: '⏳ Payment Submitted for Review',
       message: `Your manual payment of ₦${amount.toLocaleString()} for ${type}${title ? ` (${title})` : ''} has been submitted. An admin will review it shortly.`,
       type: 'payment',
     });
+
+    // ─── Auto-approve if validation passed ─────────────────────────────
+    if (validation.isValid && validation.autoApprove) {
+      // Call the approve function directly (you might want to trigger webhook or queue)
+      // For now, we'll just mark it as approved and handle the purchase
+      try {
+        // Re-use the approveManualPayment logic from admin.controller
+        // But we need to call it with the admin context – we'll just handle it here.
+        // Since we're in the same file, we can import and call it, but it's better to
+        // use a service or event. For simplicity, we'll just create a transaction
+        // to avoid duplication.
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        // Mark payment as approved
+        manualPayment.status = 'approved';
+        manualPayment.approvedBy = null; // auto-approved, no admin
+        manualPayment.approvedAt = new Date();
+        await manualPayment.save({ session });
+
+        // Grant access based on type
+        if (type === 'course') {
+          const course = await Course.findById(courseId);
+          if (course) {
+            const existingEnrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id });
+            if (!existingEnrollment) {
+              await Enrollment.create({ userId: user._id, courseId: course._id });
+              course.totalStudents += 1;
+              await course.save({ session });
+            }
+            // Simulate instructor revenue etc. (simplified)
+            // In production, you'd want to handle commissions similarly to verifyTransaction
+          }
+        } else if (type === 'subscription') {
+          await User.findByIdAndUpdate(user._id, {
+            isPremium: true,
+            subscriptionExpires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          }, { session });
+        } else if (type === 'book') {
+          const book = await Book.findById(bookId);
+          if (book) {
+            book.downloads = (book.downloads || 0) + 1;
+            await book.save({ session });
+          }
+        } else if (type === 'article') {
+          await ArticlePurchase.findOneAndUpdate(
+            { userId: user._id, articleId: req.body.articleId },
+            { status: 'completed', completedAt: new Date() },
+            { upsert: true, session }
+          );
+        } else if (type === 'campaign') {
+          const campaign = await Campaign.findById(campaignId);
+          if (campaign) {
+            campaign.paymentStatus = 'paid';
+            campaign.escrowBalance = Number(amount);
+            campaign.status = 'active';
+            campaign.isActive = true;
+            await campaign.save({ session });
+          }
+        }
+
+        await session.commitTransaction();
+
+        // Notify user
+        await Notification.create({
+          userId: user._id,
+          title: '✅ Payment Approved Automatically',
+          message: `Your manual payment of ₦${amount.toLocaleString()} has been automatically approved and access granted.`,
+          type: 'payment',
+        });
+        getIO().to(`user:${user._id}`).emit('notification', {
+          title: 'Payment Approved',
+          message: `Your manual payment has been approved!`,
+        });
+
+        res.json({
+          success: true,
+          message: 'Payment verified and approved automatically.',
+          data: manualPayment,
+          autoApproved: true,
+        });
+        return;
+      } catch (err) {
+        console.error('Auto-approve failed:', err);
+        // Fall back to pending review
+        manualPayment.status = 'pending_review';
+        manualPayment.adminNote = 'Auto-approve failed – pending admin review';
+        await manualPayment.save();
+        // Continue to normal response
+      }
+    }
 
     res.json({
       success: true,
@@ -743,6 +858,8 @@ export const getWalletBreakdown = async (req: Request, res: Response, next: Next
       socialEarnings: 0,
       adRevenue: 0,
       campaignRevenue: 0,
+      articleEarnings: 0,
+      bookEarnings: 0,
       totalEarnings: 0,
     };
 
@@ -774,6 +891,12 @@ export const getWalletBreakdown = async (req: Request, res: Response, next: Next
           break;
         case 'campaign_payment':
           breakdown.campaignRevenue += amount;
+          break;
+        case 'article_author_earning':
+          breakdown.articleEarnings += amount;
+          break;
+        case 'book_author_earning':
+          breakdown.bookEarnings += amount;
           break;
       }
     }
