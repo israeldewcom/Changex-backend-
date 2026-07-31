@@ -680,7 +680,7 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
 
         // Mark payment as approved
         manualPayment.status = 'approved';
-        manualPayment.approvedBy = null; // auto-approved, no admin
+        manualPayment.approvedBy = undefined; // ✅ FIX: use undefined instead of null
         manualPayment.approvedAt = new Date();
         await manualPayment.save({ session });
 
