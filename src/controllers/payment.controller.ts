@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/payment.controller.ts (FINAL FIXED)
+// FILE: src/controllers/payment.controller.ts (FIXED – use file.path)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -20,6 +20,7 @@ import { uploadToCloudinary } from '../services/cloudinary.js';
 import { getIO } from '../socket.js';
 import Notification from '../models/Notification.js';
 import mongoose from 'mongoose';
+import fs from 'fs';
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY!;
 const PAYSTACK_BASE = 'https://api.paystack.co';
@@ -616,7 +617,15 @@ export const submitManualPayment = async (req: Request, res: Response, next: Nex
     // ─── Upload receipt ──────────────────────────────────────────────────
     let receiptUrl;
     try {
-      const uploadResult = await uploadToCloudinary(file.buffer, 'manual_payments', {
+      // ✅ FIX: Use file.path instead of file.buffer
+      // Multer diskStorage provides `path`, not `buffer`
+      const filePath = file.path;
+      console.log('📁 File path:', filePath);
+      // Verify file exists
+      if (!fs.existsSync(filePath)) {
+        throw new Error('File not found on disk');
+      }
+      const uploadResult = await uploadToCloudinary(filePath, 'manual_payments', {
         resource_type: 'auto',
         access_mode: 'public',
       });
