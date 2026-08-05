@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – graceful static file handling)
+// FILE: src/index.ts (FIXED – added user upload routes)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -102,6 +102,12 @@ import redis from './config/redis.js';
 import Enrollment from './models/Enrollment.js';
 import Referral from './models/Referral.js';
 import User from './models/User.js';
+
+// ─── CONTROLLERS (for upload) ───────────────────────────────────────
+import { uploadImage, uploadFile } from './controllers/admin.controller.js';
+
+// ─── MULTER ──────────────────────────────────────────────────────────
+import { upload } from './middlewares/upload.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -296,6 +302,15 @@ app.use('/api/v1/analytics', authenticate, authorize('instructor', 'admin'), ana
 app.use('/api/v1/campaigns', authenticate, campaignRoutes);
 app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
 
+// ═════════════════════════════════════════════════════════════════════
+// NEW FILE UPLOAD ROUTES FOR ALL AUTHENTICATED USERS
+// ═════════════════════════════════════════════════════════════════════
+// These allow regular users (e.g., premium book uploaders) to upload
+// images and PDFs without admin privileges.
+app.post('/api/v1/upload', authenticate, upload.single('image'), uploadImage);
+app.post('/api/v1/upload-file', authenticate, upload.single('file'), uploadFile);
+// ─────────────────────────────────────────────────────────────────────
+
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
@@ -306,17 +321,11 @@ app.get('*', (req, res) => {
   }
 
   const indexPath = path.join(__dirname, '../public/index.html');
-  // Check if the file exists before attempting to send it
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    // If frontend is not deployed here, just return a basic response
-    // or redirect to the actual frontend URL if provided
     const frontendUrl = process.env.FRONTEND_URL || 'https://changex.academy';
     if (process.env.NODE_ENV === 'production') {
-      // Redirect to the frontend (if you want to redirect)
-      // res.redirect(frontendUrl);
-      // Or return a JSON message
       res.status(404).json({
         success: false,
         message: 'Frontend not served by this API. Please use the main application URL.',
