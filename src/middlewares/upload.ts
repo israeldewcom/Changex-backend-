@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/middlewares/upload.ts (500 MB disk storage)
+// FILE: src/middlewares/upload.ts (FIXED – correct field names)
 // ============================================================
 
 import multer from 'multer';
@@ -35,6 +35,7 @@ export const upload = multer({
     fileSize: 500 * 1024 * 1024, // 500MB
   },
   fileFilter: (req, file, cb) => {
+    // Define allowed MIME types
     const allowedTypes = [
       'image/jpeg',
       'image/png',
@@ -49,9 +50,13 @@ export const upload = multer({
       'application/vnd.ms-excel',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ];
+
+    // ✅ Accept if MIME type is in allowed list or starts with image/
     if (allowedTypes.includes(file.mimetype) || file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
+      // ✅ Log the field name to help debug "Unexpected field"
+      console.log(`❌ Rejected file field: ${file.fieldname}, mimetype: ${file.mimetype}`);
       cb(new Error(`File type not allowed: ${file.mimetype}`));
     }
   },
