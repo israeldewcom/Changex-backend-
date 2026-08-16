@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts
+// FILE: src/controllers/admin.controller.ts (COMPLETE UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -33,6 +33,7 @@ import Article from '../models/Article.js';
 import ArticlePurchase from '../models/ArticlePurchase.js';
 import path from 'path';
 import fs from 'fs';
+import Lesson from '../models/Lesson.js';
 
 // Maximum file size for Cloudinary (10MB)
 const CLOUDINARY_MAX_BYTES = 10 * 1024 * 1024;
@@ -381,6 +382,30 @@ export const rejectCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// ==================== COURSE DELETE BY ADMIN (NEW) ====================
+export const deleteCourseByAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const course = await Course.findById(id);
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found' });
+    }
+
+    await Lesson.deleteMany({ courseId: id });
+    await Enrollment.deleteMany({ courseId: id });
+    await Rating.deleteMany({ courseId: id });
+    await course.deleteOne();
+
+    await invalidateCache('courses:*');
+    await invalidateCache(`course:${id}`);
+    await invalidateCache(`course:${course.slug}`);
+
+    res.json({ success: true, message: 'Course deleted by admin' });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // ==================== WITHDRAWAL MANAGEMENT ====================
 export const getWithdrawals = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -479,7 +504,6 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
     const admin = req.user as IUser;
     const { title, author, description, price, coverImage, fileUrl, isPremium } = req.body;
 
-    // Determine approval status: admin creates auto-approved; others pending
     const isAdmin = admin.roles.includes('admin');
     const approvalStatus = isAdmin ? 'approved' : 'pending';
     const isPublished = isAdmin ? true : false;
@@ -497,12 +521,9 @@ export const createBook = async (req: Request, res: Response, next: NextFunction
       isPublished,
     });
 
-    // If admin created, notify all admins (optional)
     if (isAdmin) {
       // Optionally notify other admins about new book (or not)
-      // No pending approval needed
     } else {
-      // Notify admins for approval
       const admins = await User.find({ roles: 'admin' }).select('_id');
       for (const adminUser of admins) {
         await sendNotification({
@@ -1077,14 +1098,12 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
       const article = await Article.findById(articleId);
       if (!article) return res.status(404).json({ success: false, message: 'Article not found' });
 
-      // Mark as purchased
       await ArticlePurchase.findOneAndUpdate(
         { userId: payment.userId, articleId: article._id },
         { status: 'completed', completedAt: new Date() },
         { upsert: true }
       );
 
-      // Record transaction
       await Transaction.create({
         userId: payment.userId,
         type: 'article_purchase',
@@ -1095,7 +1114,6 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
         metadata: { articleId: article._id },
       });
 
-      // Author earnings (80% of purchase)
       const authorShare = payment.amount * 0.8;
       const author = await User.findById(article.userId);
       if (author) {
@@ -1627,7 +1645,6 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
     let storageMethod = 'local';
     let publicId = '';
 
-    // If file is <= 10MB, upload to Cloudinary
     if (fileSize <= CLOUDINARY_MAX_BYTES) {
       const result = await uploadToCloudinary(req.file.path, 'admin/uploads', {
         resource_type: 'image',
@@ -1636,13 +1653,10 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
       url = result.secure_url;
       publicId = result.public_id;
       storageMethod = 'cloudinary';
-      // Clean up the local file after Cloudinary upload
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     } else {
-      // File is too large for Cloudinary – serve locally
       url = `/uploads/${path.basename(req.file.path)}`;
       storageMethod = 'local';
-      // Keep file on disk
     }
 
     res.json({
@@ -1681,7 +1695,6 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
     let storageMethod = 'local';
     let publicId = '';
 
-    // If file is <= 10MB, upload to Cloudinary
     if (fileSize <= CLOUDINARY_MAX_BYTES) {
       const isImage = req.file.mimetype.startsWith('image/');
       const resourceType = isImage ? 'image' : 'raw';
@@ -1694,13 +1707,10 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
       url = result.secure_url;
       publicId = result.public_id;
       storageMethod = 'cloudinary';
-      // Clean up the local file after Cloudinary upload
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     } else {
-      // File is too large for Cloudinary – serve locally
       url = `/uploads/${path.basename(req.file.path)}`;
       storageMethod = 'local';
-      // Keep file on disk
     }
 
     res.json({
