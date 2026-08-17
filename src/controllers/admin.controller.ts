@@ -382,7 +382,7 @@ export const rejectCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ==================== COURSE DELETE BY ADMIN (NEW) ====================
+// ==================== COURSE DELETE BY ADMIN ====================
 export const deleteCourseByAdmin = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -1633,29 +1633,28 @@ export const triggerSocialEarnings = async (req: Request, res: Response, next: N
 // ==================== FILE UPLOAD (HYBRID: Cloudinary <= 10MB, Local > 10MB) ====================
 export const uploadImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No file uploaded'
-      });
+    const files = (req as any).files;
+    if (!files || files.length === 0) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const fileSize = req.file.size;
+    const file = files[0];
+    const fileSize = file.size;
     let url = '';
     let storageMethod = 'local';
     let publicId = '';
 
     if (fileSize <= CLOUDINARY_MAX_BYTES) {
-      const result = await uploadToCloudinary(req.file.path, 'admin/uploads', {
+      const result = await uploadToCloudinary(file.path, 'admin/uploads', {
         resource_type: 'image',
         transformation: [{ width: 1200, crop: 'limit', quality: 'auto' }],
       });
       url = result.secure_url;
       publicId = result.public_id;
       storageMethod = 'cloudinary';
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
     } else {
-      url = `/uploads/${path.basename(req.file.path)}`;
+      url = `/uploads/${path.basename(file.path)}`;
       storageMethod = 'local';
     }
 
@@ -1665,8 +1664,8 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
         url,
         publicId,
         storageMethod,
-        size: req.file.size,
-        originalName: req.file.originalname,
+        size: file.size,
+        originalName: file.originalname,
       },
     });
   } catch (err: any) {
@@ -1683,22 +1682,21 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
 
 export const uploadFile = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No file uploaded'
-      });
+    const files = (req as any).files;
+    if (!files || files.length === 0) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const fileSize = req.file.size;
+    const file = files[0];
+    const fileSize = file.size;
     let url = '';
     let storageMethod = 'local';
     let publicId = '';
 
     if (fileSize <= CLOUDINARY_MAX_BYTES) {
-      const isImage = req.file.mimetype.startsWith('image/');
+      const isImage = file.mimetype.startsWith('image/');
       const resourceType = isImage ? 'image' : 'raw';
-      const result = await uploadToCloudinary(req.file.path, 'books', {
+      const result = await uploadToCloudinary(file.path, 'books', {
         resource_type: resourceType,
         access_mode: 'public',
         use_filename: true,
@@ -1707,9 +1705,9 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
       url = result.secure_url;
       publicId = result.public_id;
       storageMethod = 'cloudinary';
-      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
     } else {
-      url = `/uploads/${path.basename(req.file.path)}`;
+      url = `/uploads/${path.basename(file.path)}`;
       storageMethod = 'local';
     }
 
@@ -1719,8 +1717,8 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
         url,
         publicId,
         storageMethod,
-        size: req.file.size,
-        originalName: req.file.originalname,
+        size: file.size,
+        originalName: file.originalname,
       },
     });
   } catch (err: any) {
