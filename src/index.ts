@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – uses upload.any() for maximum compatibility)
+// FILE: src/index.ts (FIXED – admin routes use upload.any())
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -303,12 +303,15 @@ app.use('/api/v1/campaigns', authenticate, campaignRoutes);
 app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
 
 // ═════════════════════════════════════════════════════════════════════
-// FILE UPLOAD ROUTES – USE upload.any() TO ACCEPT ANY FIELD NAME
+// FILE UPLOAD ROUTES – USE upload.any() FOR BOTH PUBLIC AND ADMIN
 // ═════════════════════════════════════════════════════════════════════
-// This solves both "Unexpected field" and "Invalid response" errors.
-// The uploadImage and uploadFile functions will extract the file from req.files.
+// Public routes (for all authenticated users)
 app.post('/api/v1/upload', authenticate, upload.any(), uploadImage);
 app.post('/api/v1/upload-file', authenticate, upload.any(), uploadFile);
+
+// Admin routes (in case frontend still calls them)
+app.post('/api/v1/admin/upload', authenticate, authorize('admin'), upload.any(), uploadImage);
+app.post('/api/v1/admin/upload-file', authenticate, authorize('admin'), upload.any(), uploadFile);
 // ─────────────────────────────────────────────────────────────────────
 
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
