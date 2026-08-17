@@ -1633,7 +1633,14 @@ export const triggerSocialEarnings = async (req: Request, res: Response, next: N
 // ==================== FILE UPLOAD (HYBRID: Cloudinary <= 10MB, Local > 10MB) ====================
 export const uploadImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const files = (req as any).files;
+    let files = (req as any).files;
+    const singleFile = (req as any).file;
+
+    // If using upload.any(), files is an array; if single file, wrap it
+    if ((!files || files.length === 0) && singleFile) {
+      files = [singleFile];
+    }
+
     if (!files || files.length === 0) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
@@ -1682,7 +1689,14 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
 
 export const uploadFile = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const files = (req as any).files;
+    let files = (req as any).files;
+    const singleFile = (req as any).file;
+
+    // Normalize: if files is empty but file exists, wrap it
+    if ((!files || files.length === 0) && singleFile) {
+      files = [singleFile];
+    }
+
     if (!files || files.length === 0) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
