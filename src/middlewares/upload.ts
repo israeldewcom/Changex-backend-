@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/middlewares/upload.ts (FIXED – correct field names)
+// FILE: src/middlewares/upload.ts (FIXED + DEBUG LOGGING)
 // ============================================================
 
 import multer from 'multer';
@@ -10,13 +10,11 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Ensure uploads directory exists
 const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Configure disk storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadDir);
@@ -35,28 +33,12 @@ export const upload = multer({
     fileSize: 500 * 1024 * 1024, // 500MB
   },
   fileFilter: (req, file, cb) => {
-    // Define allowed MIME types
-    const allowedTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-      'image/gif',
-      'application/pdf',
-      'video/mp4',
-      'video/webm',
-      'video/ogg',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    ];
-
-    // ✅ Accept if MIME type is in allowed list or starts with image/
-    if (allowedTypes.includes(file.mimetype) || file.mimetype.startsWith('image/')) {
+    console.log(`📎 Multer received: fieldname="${file.fieldname}", originalname="${file.originalname}", mimetype="${file.mimetype}"`);
+    const isImage = file.mimetype.startsWith('image/');
+    const isPDF = file.mimetype === 'application/pdf';
+    if (isImage || isPDF) {
       cb(null, true);
     } else {
-      // ✅ Log the field name to help debug "Unexpected field"
-      console.log(`❌ Rejected file field: ${file.fieldname}, mimetype: ${file.mimetype}`);
       cb(new Error(`File type not allowed: ${file.mimetype}`));
     }
   },
