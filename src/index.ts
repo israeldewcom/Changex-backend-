@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – supports both 'image' and 'cover', and both 'file' and 'pdf')
+// FILE: src/index.ts (FIXED – uses upload.any() for maximum compatibility)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -303,14 +303,12 @@ app.use('/api/v1/campaigns', authenticate, campaignRoutes);
 app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
 
 // ═════════════════════════════════════════════════════════════════════
-// FILE UPLOAD ROUTES – SUPPORTS BOTH 'image' AND 'cover' FOR IMAGES,
-// AND BOTH 'file' AND 'pdf' FOR PDFS.
-// These routes are accessible to any authenticated user.
+// FILE UPLOAD ROUTES – USE upload.any() TO ACCEPT ANY FIELD NAME
 // ═════════════════════════════════════════════════════════════════════
-app.post('/api/v1/upload', authenticate, upload.single('image'), uploadImage);
-app.post('/api/v1/upload-cover', authenticate, upload.single('cover'), uploadImage);
-app.post('/api/v1/upload-file', authenticate, upload.single('file'), uploadFile);
-app.post('/api/v1/upload-pdf', authenticate, upload.single('pdf'), uploadFile);
+// This solves both "Unexpected field" and "Invalid response" errors.
+// The uploadImage and uploadFile functions will extract the file from req.files.
+app.post('/api/v1/upload', authenticate, upload.any(), uploadImage);
+app.post('/api/v1/upload-file', authenticate, upload.any(), uploadFile);
 // ─────────────────────────────────────────────────────────────────────
 
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
