@@ -303,15 +303,27 @@ app.use('/api/v1/campaigns', authenticate, campaignRoutes);
 app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
 
 // ═════════════════════════════════════════════════════════════════════
-// FILE UPLOAD ROUTES – USE upload.any() FOR BOTH PUBLIC AND ADMIN
+// FILE UPLOAD ROUTES – USE upload.any() WITH ERROR HANDLING
 // ═════════════════════════════════════════════════════════════════════
+
+// Helper to wrap upload.any() with error handling
+const uploadAnyHandler = (req: Request, res: Response, next: NextFunction) => {
+  upload.any()(req, res, (err: any) => {
+    if (err) {
+      // Multer error (e.g., file too large, unexpected field, etc.)
+      return res.status(400).json({ success: false, message: err.message });
+    }
+    next();
+  });
+};
+
 // Public routes (for all authenticated users)
-app.post('/api/v1/upload', authenticate, upload.any(), uploadImage);
-app.post('/api/v1/upload-file', authenticate, upload.any(), uploadFile);
+app.post('/api/v1/upload', authenticate, uploadAnyHandler, uploadImage);
+app.post('/api/v1/upload-file', authenticate, uploadAnyHandler, uploadFile);
 
 // Admin routes (in case frontend still calls them)
-app.post('/api/v1/admin/upload', authenticate, authorize('admin'), upload.any(), uploadImage);
-app.post('/api/v1/admin/upload-file', authenticate, authorize('admin'), upload.any(), uploadFile);
+app.post('/api/v1/admin/upload', authenticate, authorize('admin'), uploadAnyHandler, uploadImage);
+app.post('/api/v1/admin/upload-file', authenticate, authorize('admin'), uploadAnyHandler, uploadFile);
 // ─────────────────────────────────────────────────────────────────────
 
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
