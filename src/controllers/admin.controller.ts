@@ -1633,25 +1633,36 @@ export const triggerSocialEarnings = async (req: Request, res: Response, next: N
 // ==================== FILE UPLOAD (HYBRID: Cloudinary <= 10MB, Local > 10MB) ====================
 export const uploadImage = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let files = (req as any).files;
+    // ─── DEBUG LOGGING ──────────────────────────────────────────────────
+    console.log('📥 uploadImage called');
+    const files = (req as any).files;
     const singleFile = (req as any).file;
+    console.log('  - req.files:', files);
+    console.log('  - req.file:', singleFile);
+    console.log('  - req.body:', req.body);
+    console.log('  - req.headers["content-type"]:', req.headers['content-type']);
 
-    // If using upload.any(), files is an array; if single file, wrap it
-    if ((!files || files.length === 0) && singleFile) {
-      files = [singleFile];
+    // ─── NORMALIZE INPUT ──────────────────────────────────────────────
+    let uploadedFiles = files;
+    if ((!uploadedFiles || uploadedFiles.length === 0) && singleFile) {
+      uploadedFiles = [singleFile];
     }
 
-    if (!files || files.length === 0) {
+    if (!uploadedFiles || uploadedFiles.length === 0) {
+      console.log('❌ No file found in request');
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const file = files[0];
+    const file = uploadedFiles[0];
+    console.log(`📎 Processing file: ${file.originalname}, size: ${file.size}, mimetype: ${file.mimetype}`);
+
     const fileSize = file.size;
     let url = '';
     let storageMethod = 'local';
     let publicId = '';
 
     if (fileSize <= CLOUDINARY_MAX_BYTES) {
+      console.log('☁️ Uploading to Cloudinary...');
       const result = await uploadToCloudinary(file.path, 'admin/uploads', {
         resource_type: 'image',
         transformation: [{ width: 1200, crop: 'limit', quality: 'auto' }],
@@ -1660,12 +1671,14 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
       publicId = result.public_id;
       storageMethod = 'cloudinary';
       if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      console.log(`✅ Cloudinary upload success: ${url}`);
     } else {
       url = `/uploads/${path.basename(file.path)}`;
       storageMethod = 'local';
+      console.log(`💾 Saved locally: ${url}`);
     }
 
-    res.json({
+    const responsePayload = {
       success: true,
       data: {
         url,
@@ -1674,9 +1687,13 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
         size: file.size,
         originalName: file.originalname,
       },
-    });
+    };
+
+    console.log('📤 Sending response:', JSON.stringify(responsePayload));
+    res.json(responsePayload);
   } catch (err: any) {
-    console.error('Upload image error:', err);
+    console.error('❌ Upload error:', err);
+    // Clean up file if exists
     if (req.file?.path && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -1689,19 +1706,29 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
 
 export const uploadFile = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    let files = (req as any).files;
+    // ─── DEBUG LOGGING ──────────────────────────────────────────────────
+    console.log('📥 uploadFile called');
+    const files = (req as any).files;
     const singleFile = (req as any).file;
+    console.log('  - req.files:', files);
+    console.log('  - req.file:', singleFile);
+    console.log('  - req.body:', req.body);
+    console.log('  - req.headers["content-type"]:', req.headers['content-type']);
 
-    // Normalize: if files is empty but file exists, wrap it
-    if ((!files || files.length === 0) && singleFile) {
-      files = [singleFile];
+    // ─── NORMALIZE INPUT ──────────────────────────────────────────────
+    let uploadedFiles = files;
+    if ((!uploadedFiles || uploadedFiles.length === 0) && singleFile) {
+      uploadedFiles = [singleFile];
     }
 
-    if (!files || files.length === 0) {
+    if (!uploadedFiles || uploadedFiles.length === 0) {
+      console.log('❌ No file found in request');
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
 
-    const file = files[0];
+    const file = uploadedFiles[0];
+    console.log(`📎 Processing file: ${file.originalname}, size: ${file.size}, mimetype: ${file.mimetype}`);
+
     const fileSize = file.size;
     let url = '';
     let storageMethod = 'local';
@@ -1710,6 +1737,7 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
     if (fileSize <= CLOUDINARY_MAX_BYTES) {
       const isImage = file.mimetype.startsWith('image/');
       const resourceType = isImage ? 'image' : 'raw';
+      console.log(`☁️ Uploading to Cloudinary as ${resourceType}...`);
       const result = await uploadToCloudinary(file.path, 'books', {
         resource_type: resourceType,
         access_mode: 'public',
@@ -1720,12 +1748,14 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
       publicId = result.public_id;
       storageMethod = 'cloudinary';
       if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
+      console.log(`✅ Cloudinary upload success: ${url}`);
     } else {
       url = `/uploads/${path.basename(file.path)}`;
       storageMethod = 'local';
+      console.log(`💾 Saved locally: ${url}`);
     }
 
-    res.json({
+    const responsePayload = {
       success: true,
       data: {
         url,
@@ -1734,9 +1764,12 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
         size: file.size,
         originalName: file.originalname,
       },
-    });
+    };
+
+    console.log('📤 Sending response:', JSON.stringify(responsePayload));
+    res.json(responsePayload);
   } catch (err: any) {
-    console.error('Upload file error:', err);
+    console.error('❌ Upload error:', err);
     if (req.file?.path && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
