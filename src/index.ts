@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – added user upload routes)
+// FILE: src/index.ts (FIXED – supports both 'image' and 'cover', and both 'file' and 'pdf')
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -303,12 +303,14 @@ app.use('/api/v1/campaigns', authenticate, campaignRoutes);
 app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
 
 // ═════════════════════════════════════════════════════════════════════
-// NEW FILE UPLOAD ROUTES FOR ALL AUTHENTICATED USERS
+// FILE UPLOAD ROUTES – SUPPORTS BOTH 'image' AND 'cover' FOR IMAGES,
+// AND BOTH 'file' AND 'pdf' FOR PDFS.
+// These routes are accessible to any authenticated user.
 // ═════════════════════════════════════════════════════════════════════
-// These allow regular users (e.g., premium book uploaders) to upload
-// images and PDFs without admin privileges.
 app.post('/api/v1/upload', authenticate, upload.single('image'), uploadImage);
+app.post('/api/v1/upload-cover', authenticate, upload.single('cover'), uploadImage);
 app.post('/api/v1/upload-file', authenticate, upload.single('file'), uploadFile);
+app.post('/api/v1/upload-pdf', authenticate, upload.single('pdf'), uploadFile);
 // ─────────────────────────────────────────────────────────────────────
 
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
