@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – admin routes use upload.any())
+// FILE: src/index.ts (FULL UPDATED – with debugging and robust upload)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -167,6 +167,19 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
+// ─── RAW REQUEST LOGGER (for debugging) ──────────────────────────────
+app.use((req, res, next) => {
+  console.log(`🔍 ${req.method} ${req.url}`);
+  console.log('  Headers:', JSON.stringify(req.headers, null, 2));
+  if (req.body && Object.keys(req.body).length) {
+    console.log('  Body:', req.body);
+  }
+  if (req.headers['content-type']?.includes('multipart/form-data')) {
+    console.log('  ⚠️ Multipart request – file will be handled by multer');
+  }
+  next();
+});
+
 // ─── DEBUG ENDPOINTS ──────────────────────────────────────────────────
 app.get('/debug/version', (req, res) => {
   res.json({
@@ -303,16 +316,18 @@ app.use('/api/v1/campaigns', authenticate, campaignRoutes);
 app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
 
 // ═════════════════════════════════════════════════════════════════════
-// FILE UPLOAD ROUTES – USE upload.any() WITH ERROR HANDLING
+// FILE UPLOAD ROUTES – WITH ERROR HANDLING AND DEBUG LOGGING
 // ═════════════════════════════════════════════════════════════════════
 
-// Helper to wrap upload.any() with error handling
+// Helper to wrap upload.any() with error handling and logging
 const uploadAnyHandler = (req: Request, res: Response, next: NextFunction) => {
+  console.log('📥 Multer upload handler invoked');
   upload.any()(req, res, (err: any) => {
     if (err) {
-      // Multer error (e.g., file too large, unexpected field, etc.)
+      console.error('❌ Multer error:', err);
       return res.status(400).json({ success: false, message: err.message });
     }
+    console.log('✅ Multer parsed files successfully');
     next();
   });
 };
