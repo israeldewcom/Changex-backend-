@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (FINAL – WITH UPLOAD FIXES)
+// FILE: src/controllers/admin.controller.ts (COMPLETE UPDATED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -382,7 +382,6 @@ export const rejectCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ==================== COURSE DELETE BY ADMIN ====================
 export const deleteCourseByAdmin = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -1630,31 +1629,32 @@ export const triggerSocialEarnings = async (req: Request, res: Response, next: N
   }
 };
 
-// ==================== FILE UPLOAD (HYBRID: Cloudinary <= 10MB, Local > 10MB) ====================
-export const uploadImage = async (req: Request, res: Response, next: NextFunction) => {
+// ==================== FILE UPLOAD (UNIFIED – PURE JSON RESPONSE) ====================
+async function handleFileUpload(
+  req: Request,
+  res: Response,
+  folder: string,
+  isImage: boolean
+): Promise<void> {
   try {
-    // ─── DEBUG LOGGING ──────────────────────────────────────────────────
-    console.log('📥 uploadImage called');
+    console.log('📥 Upload to', folder, 'isImage:', isImage);
     const files = (req as any).files;
     const singleFile = (req as any).file;
-    console.log('  - req.files:', files);
-    console.log('  - req.file:', singleFile);
-    console.log('  - req.body:', req.body);
-    console.log('  - req.headers["content-type"]:', req.headers['content-type']);
 
-    // ─── NORMALIZE INPUT ──────────────────────────────────────────────
     let uploadedFiles = files;
     if ((!uploadedFiles || uploadedFiles.length === 0) && singleFile) {
       uploadedFiles = [singleFile];
     }
 
     if (!uploadedFiles || uploadedFiles.length === 0) {
-      console.log('❌ No file found in request');
-      return res.status(400).json({ success: false, message: 'No file uploaded' });
+      const errorJson = JSON.stringify({ success: false, message: 'No file uploaded' });
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(400).send(errorJson);
+      return;
     }
 
     const file = uploadedFiles[0];
-    console.log(`📎 Processing file: ${file.originalname}, size: ${file.size}, mimetype: ${file.mimetype}`);
+    console.log('📎 Processing:', file.originalname, 'size:', file.size, 'type:', file.mimetype);
 
     const fileSize = file.size;
     let url = '';
@@ -1663,24 +1663,31 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
 
     if (fileSize <= CLOUDINARY_MAX_BYTES) {
       console.log('☁️ Uploading to Cloudinary...');
-      const result = await uploadToCloudinary(file.path, 'admin/uploads', {
-        resource_type: 'image',
-        transformation: [{ width: 1200, crop: 'limit', quality: 'auto' }],
-      });
+      const resourceType = isImage ? 'image' : 'auto';
+      const options: any = {
+        resource_type: resourceType,
+        folder: folder,
+      };
+      if (isImage) {
+        options.transformation = [{ width: 1200, crop: 'limit', quality: 'auto' }];
+      } else {
+        options.access_mode = 'public';
+        options.use_filename = true;
+        options.unique_filename = true;
+      }
+      const result = await uploadToCloudinary(file.path, folder, options);
       url = result.secure_url;
       publicId = result.public_id;
       storageMethod = 'cloudinary';
       if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-      console.log(`✅ Cloudinary upload success: ${url}`);
+      console.log('✅ Cloudinary URL:', url);
     } else {
-      // For local files, we need to return an absolute URL so the frontend can use it
       const baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
       url = `${baseUrl}/uploads/${path.basename(file.path)}`;
       storageMethod = 'local';
-      console.log(`💾 Saved locally: ${url}`);
+      console.log('💾 Local file:', url);
     }
 
-    // ─── FORCE A CLEAN JSON RESPONSE ──────────────────────────────────
     const responsePayload = {
       success: true,
       data: {
@@ -1692,100 +1699,34 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
       },
     };
 
-    console.log('📤 Sending response:', JSON.stringify(responsePayload));
+    const jsonString = JSON.stringify(responsePayload);
+    console.log('📤 Sending response:', jsonString);
+
+    // 🔥 CRITICAL: Pure JSON with no BOM, no whitespace, no monkey-patching
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    // Use res.send to avoid any interference from res.json overrides
-    return res.send(JSON.stringify(responsePayload));
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Response-JSON', 'true');
+    res.status(200).send(jsonString);
   } catch (err: any) {
     console.error('❌ Upload error:', err);
-    // Clean up file if exists
     if (req.file?.path && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    res.status(500).json({
+    const errorJson = JSON.stringify({
       success: false,
       message: err.message || 'Upload failed',
     });
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.status(500).send(errorJson);
   }
+}
+
+export const uploadImage = async (req: Request, res: Response, next: NextFunction) => {
+  await handleFileUpload(req, res, 'admin/uploads', true);
 };
 
 export const uploadFile = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    // ─── DEBUG LOGGING ──────────────────────────────────────────────────
-    console.log('📥 uploadFile called');
-    const files = (req as any).files;
-    const singleFile = (req as any).file;
-    console.log('  - req.files:', files);
-    console.log('  - req.file:', singleFile);
-    console.log('  - req.body:', req.body);
-    console.log('  - req.headers["content-type"]:', req.headers['content-type']);
-
-    // ─── NORMALIZE INPUT ──────────────────────────────────────────────
-    let uploadedFiles = files;
-    if ((!uploadedFiles || uploadedFiles.length === 0) && singleFile) {
-      uploadedFiles = [singleFile];
-    }
-
-    if (!uploadedFiles || uploadedFiles.length === 0) {
-      console.log('❌ No file found in request');
-      return res.status(400).json({ success: false, message: 'No file uploaded' });
-    }
-
-    const file = uploadedFiles[0];
-    console.log(`📎 Processing file: ${file.originalname}, size: ${file.size}, mimetype: ${file.mimetype}`);
-
-    const fileSize = file.size;
-    let url = '';
-    let storageMethod = 'local';
-    let publicId = '';
-
-    if (fileSize <= CLOUDINARY_MAX_BYTES) {
-      const isImage = file.mimetype.startsWith('image/');
-      const resourceType = isImage ? 'image' : 'raw';
-      console.log(`☁️ Uploading to Cloudinary as ${resourceType}...`);
-      const result = await uploadToCloudinary(file.path, 'books', {
-        resource_type: resourceType,
-        access_mode: 'public',
-        use_filename: true,
-        unique_filename: true,
-      });
-      url = result.secure_url;
-      publicId = result.public_id;
-      storageMethod = 'cloudinary';
-      if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
-      console.log(`✅ Cloudinary upload success: ${url}`);
-    } else {
-      const baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
-      url = `${baseUrl}/uploads/${path.basename(file.path)}`;
-      storageMethod = 'local';
-      console.log(`💾 Saved locally: ${url}`);
-    }
-
-    const responsePayload = {
-      success: true,
-      data: {
-        url,
-        publicId,
-        storageMethod,
-        size: file.size,
-        originalName: file.originalname,
-      },
-    };
-
-    console.log('📤 Sending response:', JSON.stringify(responsePayload));
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    // Use res.send to avoid any interference from res.json overrides
-    return res.send(JSON.stringify(responsePayload));
-  } catch (err: any) {
-    console.error('❌ Upload error:', err);
-    if (req.file?.path && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-    res.status(500).json({
-      success: false,
-      message: err.message || 'Upload failed',
-    });
-  }
+  await handleFileUpload(req, res, 'books', false);
 };
 
 // ==================== PLATFORM STATS ====================
