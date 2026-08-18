@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (UPDATED – removed duplicate upload routes)
+// FILE: src/routes/admin.routes.ts (WITH BOOK APPROVE/REJECT ROUTES)
 // ============================================================
 
 import { Router } from 'express';
@@ -21,7 +21,6 @@ import {
     getCourseDetails,
     approveCourse,
     rejectCourse,
-    deleteCourseByAdmin,
 
     // Withdrawals
     getWithdrawals,
@@ -82,8 +81,7 @@ import {
     rejectBook,
     getPendingBooks,
 
-    // File uploads – removed duplicate routes; they are now in index.ts with upload.any()
-    // uploadImage and uploadFile are still imported for use elsewhere if needed.
+    // File uploads
     uploadImage,
     uploadFile,
 
@@ -141,7 +139,6 @@ router.get('/courses', getAdminCourses);
 router.get('/courses/:id', getCourseDetails);
 router.post('/courses/:id/approve', approveCourse);
 router.post('/courses/:id/reject', rejectCourse);
-router.delete('/courses/:id', deleteCourseByAdmin);
 
 // ==================== WITHDRAWALS ====================
 router.get('/withdrawals', getWithdrawals);
@@ -199,7 +196,7 @@ router.put('/books/:id', updateBook);
 router.delete('/books/:id', deleteBook);
 router.get('/books', getAdminBooks);
 router.get('/books/pending', getPendingBooks);
-// Approve/reject routes – frontend expects both POST and PUT
+// ✅ Approve/reject routes – frontend expects both POST and PUT
 router.post('/books/:id/approve', approveBook);
 router.put('/books/:id/approve', approveBook);
 router.post('/books/:id/reject', rejectBook);
@@ -219,6 +216,19 @@ router.post('/campaigns/:id/reject', rejectCampaign);
 router.post('/campaigns/:id/verify-manual', verifyManualPayment);
 router.post('/campaigns/:id/refund', refundCampaign);
 
+// ==================== FILE UPLOADS ====================
+// NOTE: uploadImage/uploadFile controllers read `req.files` (plural array).
+// upload.single() only populates `req.file` (singular), which left req.files
+// undefined and made every upload fail — on a slow connection this surfaced
+// to the user as a generic "Invalid response" toast instead of a real error.
+// upload.any() populates req.files, matching what the controllers expect.
+
+// Cover image upload: field name must be "image"
+router.post('/upload', upload.any(), uploadImage);
+
+// PDF file upload: field name must be "file"
+router.post('/upload-file', upload.any(), uploadFile);
+
 // ==================== PLATFORM STATS ====================
 router.get('/platform-stats', getPlatformStats);
 
@@ -228,9 +238,5 @@ router.delete('/posts/:id', deletePostByAdmin);
 // ==================== REVENUE ANALYTICS ====================
 router.get('/analytics/revenue', getRevenueAnalytics);
 router.get('/revenue', getRevenueAnalytics);
-
-// ==================== NOTE: FILE UPLOAD ROUTES ARE DEFINED IN index.ts
-// They use upload.any() to avoid field-name conflicts.
-// ================================================================
 
 export default router;
