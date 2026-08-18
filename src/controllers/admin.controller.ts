@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE UPDATED)
+// FILE: src/controllers/admin.controller.ts (FINAL – WITH UPLOAD FIXES)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -1680,6 +1680,7 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
       console.log(`💾 Saved locally: ${url}`);
     }
 
+    // ─── FORCE A CLEAN JSON RESPONSE ──────────────────────────────────
     const responsePayload = {
       success: true,
       data: {
@@ -1692,9 +1693,9 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
     };
 
     console.log('📤 Sending response:', JSON.stringify(responsePayload));
-    // Ensure proper Content-Type
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.json(responsePayload);
+    // Use res.send to avoid any interference from res.json overrides
+    return res.send(JSON.stringify(responsePayload));
   } catch (err: any) {
     console.error('❌ Upload error:', err);
     // Clean up file if exists
@@ -1773,7 +1774,8 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
 
     console.log('📤 Sending response:', JSON.stringify(responsePayload));
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.json(responsePayload);
+    // Use res.send to avoid any interference from res.json overrides
+    return res.send(JSON.stringify(responsePayload));
   } catch (err: any) {
     console.error('❌ Upload error:', err);
     if (req.file?.path && fs.existsSync(req.file.path)) {
