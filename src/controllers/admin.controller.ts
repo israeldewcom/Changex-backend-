@@ -1673,7 +1673,9 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
       if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
       console.log(`✅ Cloudinary upload success: ${url}`);
     } else {
-      url = `/uploads/${path.basename(file.path)}`;
+      // For local files, we need to return an absolute URL so the frontend can use it
+      const baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+      url = `${baseUrl}/uploads/${path.basename(file.path)}`;
       storageMethod = 'local';
       console.log(`💾 Saved locally: ${url}`);
     }
@@ -1690,6 +1692,8 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
     };
 
     console.log('📤 Sending response:', JSON.stringify(responsePayload));
+    // Ensure proper Content-Type
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.json(responsePayload);
   } catch (err: any) {
     console.error('❌ Upload error:', err);
@@ -1750,7 +1754,8 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
       if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
       console.log(`✅ Cloudinary upload success: ${url}`);
     } else {
-      url = `/uploads/${path.basename(file.path)}`;
+      const baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 5000}`;
+      url = `${baseUrl}/uploads/${path.basename(file.path)}`;
       storageMethod = 'local';
       console.log(`💾 Saved locally: ${url}`);
     }
@@ -1767,6 +1772,7 @@ export const uploadFile = async (req: Request, res: Response, next: NextFunction
     };
 
     console.log('📤 Sending response:', JSON.stringify(responsePayload));
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.json(responsePayload);
   } catch (err: any) {
     console.error('❌ Upload error:', err);
