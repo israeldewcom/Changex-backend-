@@ -70,12 +70,16 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
       .limit(50)
       .lean();
 
+    // ─── Compute breakdown ──────────────────────────────────────────
     const breakdown: Record<string, number> = {
       referralEarnings: 0,
       courseBonuses: 0,
       affiliateCommissions: 0,
       instructorEarnings: 0,
       welcomeBonus: 0,
+      bookEarnings: 0,
+      adRevenue: 0,
+      campaignRevenue: 0,
       totalEarnings: 0,
     };
 
@@ -89,26 +93,55 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
         case 'referral_commission':
           breakdown.referralEarnings += amount;
           break;
+
         case 'bonus':
+          // Welcome bonus detection (case‑insensitive)
           if (tx.description?.toLowerCase().includes('welcome')) {
             breakdown.welcomeBonus += amount;
+          } else if (tx.description?.toLowerCase().includes('social engagement')) {
+            // Social earnings are handled separately; do not add to courseBonuses
+            break;
           } else {
+            // All other bonuses (e.g., challenge rewards, completion bonuses)
             breakdown.courseBonuses += amount;
           }
           break;
+
         case 'affiliate_commission':
           breakdown.affiliateCommissions += amount;
           break;
+
         case 'instructor_earning':
           breakdown.instructorEarnings += amount;
           break;
+
+        case 'book_author_earning':
+          breakdown.bookEarnings += amount;
+          break;
+
+        case 'ad_revenue':
+          breakdown.adRevenue += amount;
+          break;
+
+        case 'campaign_earning':
+          breakdown.campaignRevenue += amount;
+          break;
+
         default:
           break;
       }
     }
 
-    breakdown.totalEarnings = Object.values(breakdown).reduce((a, b) => a + b, 0);
+    breakdown.totalEarnings = breakdown.referralEarnings
+      + breakdown.courseBonuses
+      + breakdown.affiliateCommissions
+      + breakdown.instructorEarnings
+      + breakdown.welcomeBonus
+      + breakdown.bookEarnings
+      + breakdown.adRevenue
+      + breakdown.campaignRevenue;
 
+    // ─── Fetch social earnings separately ──────────────────────────
     const posts = await Post.find({ authorId: user._id }).select('_id');
     const postIds = posts.map(p => p._id);
     const socialEarningsAgg = await PostAnalytics.aggregate([
@@ -117,11 +150,14 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
     ]);
     const socialEarnings = socialEarningsAgg[0]?.total || 0;
 
+    // ─── Pending withdrawal ─────────────────────────────────────────
+    const pending = user.pendingWithdrawal || 0;
+
     res.json({
       success: true,
       data: {
         balance: Number(user.walletBalance) || 0,
-        pending: Number(user.pendingWithdrawal) || 0,
+        pending: Number(pending) || 0,
         earningsBreakdown: {
           ...breakdown,
           socialEarnings,
