@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FINAL – fixed upload for premium users)
+// FILE: src/index.ts (FULL UPDATED – with debugging and robust upload)
 // ============================================================
 
 import dotenv from 'dotenv';
