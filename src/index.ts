@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FULL UPDATED – with debugging and robust upload)
+// FILE: src/index.ts (FULL UPDATED)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -167,7 +167,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// ─── RAW REQUEST LOGGER (for debugging) ──────────────────────────────
+// ─── RAW REQUEST LOGGER (debugging) ──────────────────────────────────
 app.use((req, res, next) => {
   console.log(`🔍 ${req.method} ${req.url}`);
   console.log('  Headers:', JSON.stringify(req.headers, null, 2));
@@ -224,6 +224,17 @@ app.get('/debug/routes', (req, res) => {
 
 app.get('/health', (_, res) => res.json({ status: 'ok', uptime: process.uptime() }));
 
+// ─── JSON TEST ENDPOINT ──────────────────────────────────────────────
+app.get('/api/v1/debug-json', (req, res) => {
+  const testPayload = {
+    success: true,
+    message: 'JSON test works!',
+    timestamp: new Date().toISOString(),
+  };
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(JSON.stringify(testPayload));
+});
+
 // ─── PUBLIC ENDPOINTS (no auth) ─────────────────────────────────────
 app.get('/api/v1/check-referral/:code', async (req, res) => {
   try {
@@ -262,28 +273,14 @@ app.get('/api/v1/currency/rates', (req, res) => {
 // ROUTE REGISTRATION – ALL ROUTES MOUNTED
 // ═════════════════════════════════════════════════════════════════════
 
-// ─── AUTH (public) ──────────────────────────────────────────────────
 app.use('/api/v1/auth', authRoutes);
-
-// ─── WEBHOOKS (public) ──────────────────────────────────────────────
 app.use('/api/v1/webhooks', webhookRoutes);
-
-// ─── CONTACT (public) ───────────────────────────────────────────────
 app.use('/api/v1/contact', contactRoutes);
-
-// ─── SEO (public) ──────────────────────────────────────────────────
 app.use('/seo', seoRoutes);
-
-// ─── BOOKS (mixed – public + protected) ────────────────────────────
 app.use('/api/v1/books', bookRoutes);
-
-// ─── ARTICLES (mixed – public + protected) ──────────────────────────
 app.use('/api/v1/articles', articlesRoutes);
-
-// ─── COURSES (mixed – public + protected) ──────────────────────────
 app.use('/api/v1/courses', courseRoutes);
 
-// ─── PROTECTED ROUTES ────────────────────────────────────────────────
 app.use('/api/v1/users', authenticate, userRoutes);
 app.use('/api/v1/instructor', authenticate, authorize('instructor', 'admin'), instructorRoutes);
 app.use('/api/v1/admin', authenticate, authorize('admin'), adminRoutes);
@@ -292,17 +289,14 @@ app.use('/api/v1/affiliate', authenticate, affiliateRoutes);
 app.use('/api/v1/ai', authenticate, aiRoutes);
 app.use('/api/v1/feedback', authenticate, feedbackRoutes);
 
-// ─── SOCIAL FEATURES ─────────────────────────────────────────────────
 app.use('/api/v1/posts', postRoutes);
 app.use('/api/v1/follows', followRoutes);
 app.use('/api/v1/challenges', challengeRoutes);
 app.use('/api/v1/ads', adRoutes);
 app.use('/api/v1/interactive', authenticate, interactiveRoutes);
 
-// ─── CERTIFICATES ─────────────────────────────────────────────────────
 app.use('/api/v1/certificates', authenticate, certificateRoutes);
 
-// ─── NEW FEATURES ────────────────────────────────────────────────────
 app.use('/api/v1/video', authenticate, videoRoutes);
 app.use('/api/v1/messages', authenticate, messageRoutes);
 app.use('/api/v1/stories', authenticate, storyRoutes);
@@ -311,37 +305,33 @@ app.use('/api/v1/splits', authenticate, authorize('instructor', 'admin'), splitR
 app.use('/api/v1/cohorts', authenticate, authorize('instructor', 'admin'), cohortRoutes);
 app.use('/api/v1/analytics', authenticate, authorize('instructor', 'admin'), analyticsRoutes);
 
-// ─── SPONSORSHIP & CAMPAIGNS ────────────────────────────────────────
 app.use('/api/v1/campaigns', authenticate, campaignRoutes);
 app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
 
 // ═════════════════════════════════════════════════════════════════════
-// FILE UPLOAD ROUTES – WITH ERROR HANDLING AND DEBUG LOGGING
+// FILE UPLOAD ROUTES – ROBUST HANDLER WITH PURE JSON
 // ═════════════════════════════════════════════════════════════════════
 
-// Helper to wrap upload.any() with error handling and logging
 const uploadAnyHandler = (req: Request, res: Response, next: NextFunction) => {
   console.log('📥 Multer upload handler invoked');
   upload.any()(req, res, (err: any) => {
     if (err) {
       console.error('❌ Multer error:', err);
-      return res.status(400).json({ success: false, message: err.message });
+      const errorJson = JSON.stringify({ success: false, message: err.message });
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.status(400).send(errorJson);
+      return;
     }
     console.log('✅ Multer parsed files successfully');
     next();
   });
 };
 
-// Public routes (for all authenticated users)
 app.post('/api/v1/upload', authenticate, uploadAnyHandler, uploadImage);
 app.post('/api/v1/upload-file', authenticate, uploadAnyHandler, uploadFile);
 
-// Admin routes – now accessible to any authenticated user (including premium)
-// The frontend for book uploads uses these endpoints.
-// We removed authorize('admin') so that premium users can upload without 403.
 app.post('/api/v1/admin/upload', authenticate, uploadAnyHandler, uploadImage);
 app.post('/api/v1/admin/upload-file', authenticate, uploadAnyHandler, uploadFile);
-// ─────────────────────────────────────────────────────────────────────
 
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
