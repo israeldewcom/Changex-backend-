@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FULL UPDATED – with debugging and robust upload)
+// FILE: src/index.ts (FULL UPDATED – fixed admin upload for premium)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -336,9 +336,11 @@ const uploadAnyHandler = (req: Request, res: Response, next: NextFunction) => {
 app.post('/api/v1/upload', authenticate, uploadAnyHandler, uploadImage);
 app.post('/api/v1/upload-file', authenticate, uploadAnyHandler, uploadFile);
 
-// Admin routes (in case frontend still calls them)
-app.post('/api/v1/admin/upload', authenticate, authorize('admin'), uploadAnyHandler, uploadImage);
-app.post('/api/v1/admin/upload-file', authenticate, authorize('admin'), uploadAnyHandler, uploadFile);
+// Admin routes – now accessible to any authenticated user (including premium)
+// The frontend for book uploads uses these endpoints.
+// We removed authorize('admin') so that premium users can upload without 403.
+app.post('/api/v1/admin/upload', authenticate, uploadAnyHandler, uploadImage);
+app.post('/api/v1/admin/upload-file', authenticate, uploadAnyHandler, uploadFile);
 // ─────────────────────────────────────────────────────────────────────
 
 // ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
