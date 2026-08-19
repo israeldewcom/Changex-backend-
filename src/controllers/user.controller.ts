@@ -15,12 +15,12 @@ import PostAnalytics from '../models/PostAnalytics.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { getOrSetCache, invalidateCache } from '../services/cache.js';
 
+// ==================== PROFILE ====================
 export const getProfile = async (req: Request, res: Response) => {
   const user = req.user as IUser;
   res.json({ success: true, data: user });
 };
 
-// ==================== UPDATE PROFILE (FIXED – auto‑credits welcome bonus) ====================
 export const updateProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -61,16 +61,21 @@ export const uploadAvatar = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
+// ==================== WALLET (FULL BREAKDOWN) ====================
 export const getWallet = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
 
-    const transactions = await Transaction.find({ userId: user._id })
+    // ─── Fetch last 50 completed transactions ──────────────────────
+    const transactions = await Transaction.find({
+      userId: user._id,
+      status: 'completed',
+    })
       .sort('-createdAt')
       .limit(50)
       .lean();
 
-    // ─── Compute breakdown ──────────────────────────────────────────
+    // ─── Initialize breakdown with zeros ───────────────────────────
     const breakdown: Record<string, number> = {
       referralEarnings: 0,
       courseBonuses: 0,
@@ -83,10 +88,10 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
       totalEarnings: 0,
     };
 
+    // ─── Accumulate from transactions ──────────────────────────────
     for (const tx of transactions) {
-      if (tx.status !== 'completed') continue;
       const amount = tx.amount || 0;
-      if (amount <= 0) continue;
+      if (amount <= 0) continue; // only positive earnings (ignore withdrawals)
 
       switch (tx.type) {
         case 'referral_bonus':
@@ -132,6 +137,7 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
       }
     }
 
+    // ─── Compute total earnings (excludes social earnings) ─────────
     breakdown.totalEarnings = breakdown.referralEarnings
       + breakdown.courseBonuses
       + breakdown.affiliateCommissions
@@ -142,8 +148,8 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
       + breakdown.campaignRevenue;
 
     // ─── Fetch social earnings separately ──────────────────────────
-    const posts = await Post.find({ authorId: user._id }).select('_id');
-    const postIds = posts.map(p => p._id);
+    const userPosts = await Post.find({ authorId: user._id }).select('_id');
+    const postIds = userPosts.map(p => p._id);
     const socialEarningsAgg = await PostAnalytics.aggregate([
       { $match: { postId: { $in: postIds } } },
       { $group: { _id: null, total: { $sum: '$earnings' } } }
@@ -153,6 +159,7 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
     // ─── Pending withdrawal ─────────────────────────────────────────
     const pending = user.pendingWithdrawal || 0;
 
+    // ─── Build final response ──────────────────────────────────────
     res.json({
       success: true,
       data: {
@@ -170,6 +177,7 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
+// ==================== WITHDRAWAL ====================
 export const requestWithdrawal = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { amount } = req.body;
@@ -180,15 +188,24 @@ export const requestWithdrawal = async (req: Request, res: Response, next: NextF
     user.walletBalance -= amount;
     user.pendingWithdrawal += amount;
     await user.save();
-    await Transaction.create({ userId: user._id, type: 'withdrawal', amount: -amount, status: 'pending', description: 'Withdrawal request' });
+    await Transaction.create({
+      userId: user._id,
+      type: 'withdrawal',
+      amount: -amount,
+      status: 'pending',
+      description: 'Withdrawal request',
+    });
     res.json({ success: true, message: 'Withdrawal request submitted' });
   } catch (err) { next(err); }
 };
 
+// ==================== NOTIFICATIONS ====================
 export const getNotifications = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const notifications = await Notification.find({ userId: user._id }).sort('-createdAt').limit(100);
+    const notifications = await Notification.find({ userId: user._id })
+      .sort('-createdAt')
+      .limit(100);
     res.json({ success: true, data: notifications });
   } catch (err) { next(err); }
 };
@@ -203,11 +220,15 @@ export const markNotificationRead = async (req: Request, res: Response, next: Ne
 export const markAllNotificationsRead = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    await Notification.updateMany({ userId: user._id, read: false }, { read: true });
+    await Notification.updateMany(
+      { userId: user._id, read: false },
+      { read: true }
+    );
     res.json({ success: true });
   } catch (err) { next(err); }
 };
 
+// ==================== LEADERBOARD ====================
 export const getLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { type = 'xp', limit = 20 } = req.query;
@@ -226,10 +247,12 @@ export const getLeaderboard = async (req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 };
 
+// ==================== REFERRALS ====================
 export const getReferrals = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const referrals = await Referral.find({ referrerId: user._id }).populate('referredId', 'firstName lastName email');
+    const referrals = await Referral.find({ referrerId: user._id })
+      .populate('referredId', 'firstName lastName email');
     const formatted = referrals.map((r: any) => ({
       id: r._id,
       name: r.referredId ? `${r.referredId.firstName} ${r.referredId.lastName}` : 'User',
@@ -241,12 +264,14 @@ export const getReferrals = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
+// ==================== BADGES ====================
 export const getUserBadges = async (req: Request, res: Response, next: NextFunction) => {
   try {
     res.json({ success: true, data: [] });
   } catch (err) { next(err); }
 };
 
+// ==================== PREMIUM STATUS ====================
 export const updatePremiumStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { isPremium } = req.body;
@@ -261,19 +286,35 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
   } catch (err) { next(err); }
 };
 
+// ==================== WELCOME BONUS ====================
 export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if ((user as any).welcomeBonusClaimed) return res.status(400).json({ success: false, message: 'Bonus already claimed' });
-    if (!user.bio && !user.location) return res.status(400).json({ success: false, message: 'Complete your profile first' });
+    if ((user as any).welcomeBonusClaimed) {
+      return res.status(400).json({ success: false, message: 'Bonus already claimed' });
+    }
+    if (!user.bio && !user.location) {
+      return res.status(400).json({ success: false, message: 'Complete your profile first' });
+    }
     user.walletBalance += 500;
     (user as any).welcomeBonusClaimed = true;
     await user.save();
-    await Transaction.create({ userId: user._id, type: 'bonus', amount: 500, status: 'completed', description: 'Welcome bonus' });
-    res.json({ success: true, message: '₦500 added to your wallet', balance: user.walletBalance });
+    await Transaction.create({
+      userId: user._id,
+      type: 'bonus',
+      amount: 500,
+      status: 'completed',
+      description: 'Welcome bonus',
+    });
+    res.json({
+      success: true,
+      message: '₦500 added to your wallet',
+      balance: user.walletBalance,
+    });
   } catch (err) { next(err); }
 };
 
+// ==================== PUBLIC PROFILE ====================
 export const getUserProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params;
@@ -289,7 +330,7 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
     const courses = await Course.find({
       instructorId: userId,
       isPublished: true,
-      approvalStatus: 'approved'
+      approvalStatus: 'approved',
     })
       .populate('instructorId', 'firstName lastName avatarUrl')
       .sort('-createdAt');
@@ -301,7 +342,7 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
     if (req.user) {
       const follow = await Follow.findOne({
         followerId: (req.user as IUser)._id,
-        followingId: userId
+        followingId: userId,
       });
       isFollowing = !!follow;
     }
@@ -319,17 +360,21 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
         isFollowing,
         followersCount,
         followingCount,
-      }
+      },
     });
   } catch (err) {
     next(err);
   }
 };
 
+// ==================== TIER ====================
 export const getTier = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    res.json({ success: true, data: { tier: user.tier || 'free', isPremium: user.isPremium } });
+    res.json({
+      success: true,
+      data: { tier: user.tier || 'free', isPremium: user.isPremium },
+    });
   } catch (err) {
     next(err);
   }
