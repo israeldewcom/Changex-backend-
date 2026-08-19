@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/user.controller.ts (COMPLETE UPDATED)
+// FILE: src/controllers/user.controller.ts (FINAL – FULL BREAKDOWN)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -61,19 +61,16 @@ export const uploadAvatar = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
-// ==================== WALLET (FULL BREAKDOWN) ====================
+// ==================== WALLET (FULL BREAKDOWN – NO LIMIT ON SUMS) ====================
 export const getWallet = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
 
-    // ─── Fetch last 50 completed transactions ──────────────────────
-    const transactions = await Transaction.find({
+    // ─── Fetch ALL completed transactions (no limit) for accurate sums ──
+    const allTransactions = await Transaction.find({
       userId: user._id,
       status: 'completed',
-    })
-      .sort('-createdAt')
-      .limit(50)
-      .lean();
+    }).lean();
 
     // ─── Initialize breakdown with zeros ───────────────────────────
     const breakdown: Record<string, number> = {
@@ -88,8 +85,8 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
       totalEarnings: 0,
     };
 
-    // ─── Accumulate from transactions ──────────────────────────────
-    for (const tx of transactions) {
+    // ─── Accumulate from ALL transactions ──────────────────────────
+    for (const tx of allTransactions) {
       const amount = tx.amount || 0;
       if (amount <= 0) continue; // only positive earnings (ignore withdrawals)
 
@@ -159,6 +156,11 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
     // ─── Pending withdrawal ─────────────────────────────────────────
     const pending = user.pendingWithdrawal || 0;
 
+    // ─── Return only last 50 transactions for display ──────────────
+    const recentTransactions = allTransactions
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 50);
+
     // ─── Build final response ──────────────────────────────────────
     res.json({
       success: true,
@@ -169,7 +171,7 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
           ...breakdown,
           socialEarnings,
         },
-        transactions,
+        transactions: recentTransactions,
       }
     });
   } catch (err) {
