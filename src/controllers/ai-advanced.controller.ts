@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/ai-advanced.controller.ts
+// FILE: src/controllers/ai-advanced.controller.ts (FIXED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -11,7 +11,6 @@ import Course from '../models/Course.js';
 import Lesson from '../models/Lesson.js';
 import Enrollment from '../models/Enrollment.js';
 import { chatWithAI } from '../services/ai.js';
-import { getOrSetCache } from '../services/cache.js';
 import { v4 as uuidv4 } from 'uuid';
 
 // ─── ADVANCED AI CHAT WITH CONTEXT ──────────────────────────────────
@@ -24,7 +23,6 @@ export const advancedChat = async (req: Request, res: Response, next: NextFuncti
       return res.status(400).json({ success: false, message: 'Message is required' });
     }
 
-    // Ensure session exists
     let session = await AIConversation.findOne({ userId: user._id, sessionId });
     if (!session) {
       session = await AIConversation.create({
@@ -35,19 +33,16 @@ export const advancedChat = async (req: Request, res: Response, next: NextFuncti
       });
     }
 
-    // Add user message to history
     session.messages.push({
       role: 'user',
       content: message,
       timestamp: new Date(),
     });
 
-    // Limit history to last 10 messages
     if (session.messages.length > 20) {
       session.messages = session.messages.slice(-20);
     }
 
-    // Build context for AI
     let aiContext = '';
     if (session.context?.courseId) {
       const course = await Course.findById(session.context.courseId);
@@ -63,12 +58,9 @@ export const advancedChat = async (req: Request, res: Response, next: NextFuncti
     }
 
     const fullPrompt = `${aiContext}User's question: ${message}`;
-
-    // Get AI response
     const isPremium = user.isPremium || false;
     const aiResponse = await chatWithAI(fullPrompt, isPremium, user);
 
-    // Add assistant response
     session.messages.push({
       role: 'assistant',
       content: aiResponse,
@@ -76,7 +68,6 @@ export const advancedChat = async (req: Request, res: Response, next: NextFuncti
     });
     await session.save();
 
-    // Log usage
     await AIUsage.create({
       userId: user._id,
       action: 'chat',
@@ -107,19 +98,21 @@ export const generatePractice = async (req: Request, res: Response, next: NextFu
     }
 
     const prompt = `Generate ${count} practice questions on "${topic}" at ${difficulty} difficulty. Include multiple choice options and the correct answer.`;
-
     const aiResponse = await chatWithAI(prompt, true, user);
 
-    // Parse response (simplified)
-    const questions = aiResponse.split('\n\n').filter(Boolean).map((block, idx) => {
+    // Parse response – add explicit types
+    const blocks = aiResponse.split('\n\n').filter(Boolean);
+    const questions = blocks.map((block: string, idx: number) => {
       const lines = block.split('\n');
       const question = lines[0] || `Question ${idx + 1}`;
-      const options = lines.filter(l => l.match(/^[A-D]\)/)).map(l => l.replace(/^[A-D]\)\s*/, ''));
-      const answer = lines.find(l => l.includes('Answer:'))?.replace('Answer:', '').trim() || 'A';
-      return { question, options, correct: answer };
+      const options = lines
+        .filter((l: string) => l.match(/^[A-D]\)/))
+        .map((l: string) => l.replace(/^[A-D]\)\s*/, ''));
+      const answerLine = lines.find((l: string) => l.includes('Answer:'));
+      const correct = answerLine ? answerLine.replace('Answer:', '').trim() : 'A';
+      return { question, options, correct };
     });
 
-    // Log usage
     await AIUsage.create({
       userId: user._id,
       action: 'practice',
@@ -150,7 +143,6 @@ export const evaluateAnswer = async (req: Request, res: Response, next: NextFunc
     }
 
     const prompt = `Evaluate the following answer to the question: "${question}". Expected answer: "${expectedAnswer}". Student's answer: "${answer}". Provide feedback, score out of 10, and suggestions for improvement.`;
-
     const aiResponse = await chatWithAI(prompt, true, user);
 
     await AIUsage.create({
