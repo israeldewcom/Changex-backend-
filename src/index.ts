@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (UPDATED – indexes on startup)
+// FILE: src/index.ts (FULLY UPDATED – calls ensureIndexes)
 // ============================================================
 
 import dotenv from 'dotenv';
