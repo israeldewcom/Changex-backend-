@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/Course.ts (UPDATED)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ICourse extends Document {
@@ -34,6 +38,9 @@ export interface ICourse extends Document {
     }>;
     passingScore: number;
   }>;
+  // ─── NEW ACADEMY FIELDS ──────────────────────────────────────
+  academyId?: mongoose.Types.ObjectId;         // If course belongs to an academy
+  academyOnly?: boolean;                       // If true, only academy members can access
   createdAt: Date;
   updatedAt: Date;
 }
@@ -75,12 +82,17 @@ const CourseSchema = new Schema<ICourse>(
         passingScore: { type: Number, default: 60 }
       }],
       default: []
-    }
+    },
+    // ─── NEW FIELDS ──────────────────────────────────────────────
+    academyId: { type: Schema.Types.ObjectId, ref: 'Academy' },
+    academyOnly: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
 CourseSchema.index({ isPublished: 1, approvalStatus: 1 });
 CourseSchema.index({ category: 1 });
+CourseSchema.index({ academyId: 1 });
+CourseSchema.index({ academyOnly: 1 });
 
 export default mongoose.model<ICourse>('Course', CourseSchema);
