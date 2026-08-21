@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FULLY UPDATED – calls ensureIndexes)
+// FILE: src/index.ts (UPDATED - use consolidated routes)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -20,66 +20,8 @@ import { connectDB, ensureIndexes } from './config/db.js';
 import { connectRedis } from './config/redis.js';
 import { initializePassport } from './config/passport.js';
 
-// ─── AUTH ────────────────────────────────────────────────────────────
-import authRoutes from './routes/auth.routes.js';
-
-// ─── USER & PROFILE ──────────────────────────────────────────────────
-import userRoutes from './routes/user.routes.js';
-
-// ─── COURSES ─────────────────────────────────────────────────────────
-import courseRoutes from './routes/course.routes.js';
-import instructorRoutes from './routes/instructor.routes.js';
-
-// ─── ADMIN ───────────────────────────────────────────────────────────
-import adminRoutes from './routes/admin.routes.js';
-
-// ─── PAYMENTS ────────────────────────────────────────────────────────
-import paymentRoutes from './routes/payment.routes.js';
-
-// ─── AFFILIATE ───────────────────────────────────────────────────────
-import affiliateRoutes from './routes/affiliate.routes.js';
-
-// ─── AI ──────────────────────────────────────────────────────────────
-import aiRoutes from './routes/ai.routes.js';
-
-// ─── WEBHOOKS ────────────────────────────────────────────────────────
-import webhookRoutes from './routes/webhook.routes.js';
-
-// ─── FEEDBACK & CONTACT ─────────────────────────────────────────────
-import feedbackRoutes from './routes/feedback.routes.js';
-import contactRoutes from './routes/contact.routes.js';
-
-// ─── SOCIAL FEATURES ─────────────────────────────────────────────────
-import postRoutes from './routes/post.routes.js';
-import followRoutes from './routes/follow.routes.js';
-import challengeRoutes from './routes/challenge.routes.js';
-import adRoutes from './routes/ad.routes.js';
-import interactiveRoutes from './routes/interactive.routes.js';
-
-// ─── CERTIFICATES ────────────────────────────────────────────────────
-import certificateRoutes from './routes/certificate.routes.js';
-
-// ─── BOOKS ──────────────────────────────────────────────────────────
-import bookRoutes from './routes/book.routes.js';
-
-// ─── ARTICLES ───────────────────────────────────────────────────────
-import articlesRoutes from './routes/articles.routes.js';
-
-// ─── SEO ─────────────────────────────────────────────────────────────
-import seoRoutes from './routes/seo.routes.js';
-
-// ─── NEW FEATURES ────────────────────────────────────────────────────
-import videoRoutes from './routes/video.routes.js';
-import messageRoutes from './routes/message.routes.js';
-import storyRoutes from './routes/story.routes.js';
-import groupRoutes from './routes/group.routes.js';
-import splitRoutes from './routes/split.routes.js';
-import cohortRoutes from './routes/cohort.routes.js';
-import analyticsRoutes from './routes/analytics.routes.js';
-
-// ─── SPONSORSHIP & CAMPAIGNS ────────────────────────────────────────
-import campaignRoutes from './routes/campaign.routes.js';
-import sponsorshipRoutes from './routes/sponsorship.routes.js';
+// ─── IMPORT CONSOLIDATED ROUTES ────────────────────────────────────────
+import routes from './routes/index.js';
 
 // ─── MIDDLEWARE ──────────────────────────────────────────────────────
 import { errorHandler } from './middlewares/errorHandler.js';
@@ -207,6 +149,11 @@ app.get('/debug/version', (req, res) => {
       analytics: true,
       campaigns: true,
       sponsorships: true,
+      academies: true,
+      gamification: true,
+      liveSessions: true,
+      advancedAI: true,
+      offlineSupport: true,
     },
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
@@ -270,48 +217,11 @@ app.get('/api/v1/currency/rates', (req, res) => {
 });
 
 // ═════════════════════════════════════════════════════════════════════
-// ROUTE REGISTRATION – ALL ROUTES MOUNTED
+// ROUTE REGISTRATION – ALL ROUTES MOUNTED UNDER /api/v1
 // ═════════════════════════════════════════════════════════════════════
+app.use('/api/v1', routes);
 
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/webhooks', webhookRoutes);
-app.use('/api/v1/contact', contactRoutes);
-app.use('/seo', seoRoutes);
-app.use('/api/v1/books', bookRoutes);
-app.use('/api/v1/articles', articlesRoutes);
-app.use('/api/v1/courses', courseRoutes);
-
-app.use('/api/v1/users', authenticate, userRoutes);
-app.use('/api/v1/instructor', authenticate, authorize('instructor', 'admin'), instructorRoutes);
-app.use('/api/v1/admin', authenticate, authorize('admin'), adminRoutes);
-app.use('/api/v1/payments', authenticate, paymentRoutes);
-app.use('/api/v1/affiliate', authenticate, affiliateRoutes);
-app.use('/api/v1/ai', authenticate, aiRoutes);
-app.use('/api/v1/feedback', authenticate, feedbackRoutes);
-
-app.use('/api/v1/posts', postRoutes);
-app.use('/api/v1/follows', followRoutes);
-app.use('/api/v1/challenges', challengeRoutes);
-app.use('/api/v1/ads', adRoutes);
-app.use('/api/v1/interactive', authenticate, interactiveRoutes);
-
-app.use('/api/v1/certificates', authenticate, certificateRoutes);
-
-app.use('/api/v1/video', authenticate, videoRoutes);
-app.use('/api/v1/messages', authenticate, messageRoutes);
-app.use('/api/v1/stories', authenticate, storyRoutes);
-app.use('/api/v1/groups', authenticate, groupRoutes);
-app.use('/api/v1/splits', authenticate, authorize('instructor', 'admin'), splitRoutes);
-app.use('/api/v1/cohorts', authenticate, authorize('instructor', 'admin'), cohortRoutes);
-app.use('/api/v1/analytics', authenticate, authorize('instructor', 'admin'), analyticsRoutes);
-
-app.use('/api/v1/campaigns', authenticate, campaignRoutes);
-app.use('/api/v1/sponsorships', authenticate, sponsorshipRoutes);
-
-// ═════════════════════════════════════════════════════════════════════
-// FILE UPLOAD ROUTES – ROBUST HANDLER WITH PURE JSON
-// ═════════════════════════════════════════════════════════════════════
-
+// ─── FILE UPLOAD ROUTES ──────────────────────────────────────────────
 const uploadAnyHandler = (req: Request, res: Response, next: NextFunction) => {
   console.log('📥 Multer upload handler invoked');
   upload.any()(req, res, (err: any) => {
@@ -329,14 +239,13 @@ const uploadAnyHandler = (req: Request, res: Response, next: NextFunction) => {
 
 app.post('/api/v1/upload', authenticate, uploadAnyHandler, uploadImage);
 app.post('/api/v1/upload-file', authenticate, uploadAnyHandler, uploadFile);
-
 app.post('/api/v1/admin/upload', authenticate, uploadAnyHandler, uploadImage);
 app.post('/api/v1/admin/upload-file', authenticate, uploadAnyHandler, uploadFile);
 
-// ─── SERVE STATIC FILES (for uploaded files) ────────────────────────
+// ─── SERVE STATIC FILES ──────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-// ─── CATCH‑ALL ROUTE (SPA) – gracefully handle missing static files ──
+// ─── CATCH‑ALL ROUTE (SPA) ──────────────────────────────────────────
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ success: false, message: 'API route not found' });
@@ -391,7 +300,7 @@ async function cleanupCorruptedData() {
 async function bootstrap() {
   try {
     await connectDB();
-    await ensureIndexes();          // <-- ADDED: create indexes on startup
+    await ensureIndexes();
     await connectRedis();
     await cleanupCorruptedData();
     startWorkers();
@@ -401,7 +310,7 @@ async function bootstrap() {
       logger.info(`✅ Debug: http://localhost:${PORT}/debug/version`);
       logger.info(`📍 Routes: http://localhost:${PORT}/debug/routes`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO, Video, DMs, Stories, Groups, Splits, Cohorts, Analytics, Campaigns, Sponsorships, Paid Articles`);
+      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO, Video, DMs, Stories, Groups, Splits, Cohorts, Analytics, Campaigns, Sponsorships, Paid Articles, Academies, Gamification, Live Sessions, Advanced AI, Offline`);
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
