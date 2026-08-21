@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/Comment.ts (UPDATED)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IComment extends Document {
@@ -7,6 +11,8 @@ export interface IComment extends Document {
   content: string;
   likes: number;
   isEdited: boolean;
+  // ─── NEW ACADEMY FIELDS ──────────────────────────────────────
+  academyId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,11 +25,14 @@ const CommentSchema = new Schema<IComment>(
     content: { type: String, required: true },
     likes: { type: Number, default: 0 },
     isEdited: { type: Boolean, default: false },
+    // ─── NEW ──────────────────────────────────────────────────────
+    academyId: { type: Schema.Types.ObjectId, ref: 'Academy' },
   },
   { timestamps: true }
 );
 
 CommentSchema.index({ postId: 1, createdAt: -1 });
 CommentSchema.index({ parentId: 1 });
+CommentSchema.index({ academyId: 1 });
 
 export default mongoose.model<IComment>('Comment', CommentSchema);
