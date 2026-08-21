@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Meeting.ts (FIXED – prevents overwrite)
+// FILE: src/models/Meeting.ts (UPDATED)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -14,6 +14,9 @@ export interface IMeeting extends Document {
   price: number;
   meetingUrl: string;
   status: 'scheduled' | 'booked' | 'completed' | 'cancelled';
+  // ─── NEW LIVE STREAMING FIELDS ──────────────────────────────
+  streamKey?: string;
+  recordingUrl?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -33,13 +36,15 @@ const MeetingSchema = new Schema<IMeeting>(
       enum: ['scheduled', 'booked', 'completed', 'cancelled'],
       default: 'scheduled',
     },
+    // ─── NEW ──────────────────────────────────────────────────────
+    streamKey: String,
+    recordingUrl: String,
   },
   { timestamps: true }
 );
 
 MeetingSchema.index({ hostId: 1, startTime: -1 });
 
-// ✅ Prevent overwrite
 const Meeting = mongoose.models.Meeting || mongoose.model<IMeeting>('Meeting', MeetingSchema);
 
 export default Meeting;
