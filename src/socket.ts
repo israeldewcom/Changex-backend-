@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/socket.ts (UPDATED – added validation)
+// FILE: src/socket.ts (UPDATED - added WebRTC signalling)
 // ============================================================
 
 import { Server as SocketIOServer, Socket } from 'socket.io';
@@ -43,16 +43,14 @@ export const setupSocket = (server: SocketIOServer) => {
       socket.join(`user:${user._id}`);
       console.log(`User ${user._id} connected`);
 
-      // ─── Update user online status ──────────────────────────────
+      // Update online status
       User.findByIdAndUpdate(user._id, { online: true, lastSeen: new Date() }).catch(() => {});
       io.emit('user_online', { userId: user._id, online: true });
 
-      // ─── Send Message ────────────────────────────────────────────
+      // ─── Send Message (unchanged) ────────────────────────────────────
       socket.on('send_message', async (data) => {
         try {
           const { conversationId, content, type, fileUrl } = data;
-
-          // ✅ Validation
           if (!content || content.trim().length === 0) {
             socket.emit('error', { message: 'Message content cannot be empty' });
             return;
@@ -61,14 +59,11 @@ export const setupSocket = (server: SocketIOServer) => {
             socket.emit('error', { message: 'Message too long (max 5000 chars)' });
             return;
           }
-
-          // Verify user is in conversation
           const conversation = await Conversation.findById(conversationId);
           if (!conversation || !conversation.participants.includes(user._id)) {
             socket.emit('error', { message: 'Not a participant in this conversation' });
             return;
           }
-
           const message = await Message.create({
             conversationId,
             senderId: user._id,
@@ -77,16 +72,12 @@ export const setupSocket = (server: SocketIOServer) => {
             fileUrl: fileUrl || '',
             readBy: [],
           });
-
           await Conversation.findByIdAndUpdate(conversationId, {
             lastMessage: message._id,
             lastMessageAt: new Date(),
           });
-
           const populatedMessage = await Message.findById(message._id)
             .populate('senderId', 'firstName lastName avatarUrl');
-
-          // Emit to all participants
           for (const participantId of conversation.participants) {
             if (participantId.toString() !== user._id.toString()) {
               io.to(`user:${participantId}`).emit('new_message', populatedMessage);
@@ -106,7 +97,7 @@ export const setupSocket = (server: SocketIOServer) => {
         }
       });
 
-      // ─── Typing indicator ─────────────────────────────────────────
+      // ─── Typing indicator (unchanged) ────────────────────────────────
       socket.on('typing', (data) => {
         const { conversationId, isTyping } = data;
         socket.to(`conversation:${conversationId}`).emit('typing', {
@@ -116,7 +107,7 @@ export const setupSocket = (server: SocketIOServer) => {
         });
       });
 
-      // ─── Mark message as read ─────────────────────────────────────
+      // ─── Mark message as read (unchanged) ──────────────────────────────
       socket.on('mark_read', async (data) => {
         try {
           const { messageId } = data;
@@ -128,9 +119,8 @@ export const setupSocket = (server: SocketIOServer) => {
         }
       });
 
-      // ─── Join conversation room ──────────────────────────────────
+      // ─── Join conversation room (unchanged) ────────────────────────────
       socket.on('join_conversation', async (conversationId) => {
-        // ✅ Verify user is participant
         const conversation = await Conversation.findById(conversationId);
         if (!conversation || !conversation.participants.includes(user._id)) {
           socket.emit('error', { message: 'Not authorized to join this conversation' });
@@ -139,12 +129,11 @@ export const setupSocket = (server: SocketIOServer) => {
         socket.join(`conversation:${conversationId}`);
       });
 
-      // ─── Leave conversation room ──────────────────────────────────
       socket.on('leave_conversation', (conversationId) => {
         socket.leave(`conversation:${conversationId}`);
       });
 
-      // ─── Video call events ──────────────────────────────────────
+      // ─── Video call events (WebRTC signalling) ────────────────────────
       socket.on('join_video_room', (roomId) => {
         socket.join(`video:${roomId}`);
         socket.to(`video:${roomId}`).emit('user_joined_video', { userId: user._id, name: `${user.firstName} ${user.lastName}` });
@@ -160,7 +149,7 @@ export const setupSocket = (server: SocketIOServer) => {
         io.to(`user:${toUserId}`).emit('video_signal', { signal, fromUserId: user._id });
       });
 
-      // ─── Disconnect ──────────────────────────────────────────────
+      // ─── Disconnect (unchanged) ────────────────────────────────────────
       socket.on('disconnect', () => {
         if (user) {
           console.log(`User ${user._id} disconnected`);
