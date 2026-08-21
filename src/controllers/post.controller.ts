@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/post.controller.ts (FULLY UPDATED)
+// FILE: src/controllers/post.controller.ts (FULLY UPDATED WITH CACHING)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -10,7 +10,7 @@ import Notification from '../models/Notification.js';
 import Follow from '../models/Follow.js';
 import Course from '../models/Course.js';
 import PostAnalytics from '../models/PostAnalytics.js';
-import ArticlePurchase from '../models/ArticlePurchase.js';   // ✅ For purchased articles
+import ArticlePurchase from '../models/ArticlePurchase.js';
 import Transaction from '../models/Transaction.js';
 import { IUser } from '../models/User.js';
 import { getIO } from '../socket.js';
@@ -465,61 +465,155 @@ export const getUserPosts = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── FOLLOWING FEED ──────────────────────────────────────────────────
+// ─── FOLLOWING FEED (CACHED) ────────────────────────────────────────
 export const getFollowingFeed = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
 
-    const follows = await Follow.find({ followerId: user._id }).select('followingId');
-    const followedIds = follows.map(f => f.followingId);
+    const cacheKey = `feed:following:${user._id}:${req.query.page || 1}`;
+    const data = await getOrSetCache(cacheKey, async () => {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 10;
+      const skip = (page - 1) * limit;
 
-    if (followedIds.length === 0) {
-      return res.json({ success: true, data: [] });
-    }
+      const follows = await Follow.find({ followerId: user._id }).select('followingId');
+      const followedIds = follows.map(f => f.followingId);
 
-    const posts = await Post.find({
-      authorId: { $in: followedIds },
-      isPublished: true
-    })
-      .populate('authorId', 'firstName lastName avatarUrl')
-      .sort({ createdAt: -1 })
-      .limit(20)
-      .lean();
+      if (followedIds.length === 0) {
+        return { posts: [], total: 0 };
+      }
 
-    const courses = await Course.find({
-      instructorId: { $in: followedIds },
-      isPublished: true,
-      approvalStatus: 'approved'
-    })
-      .populate('instructorId', 'firstName lastName avatarUrl')
-      .sort({ createdAt: -1 })
-      .limit(20)
-      .lean();
+      const filter = { authorId: { $in: followedIds }, isPublished: true };
+      const posts = await Post.find(filter)
+        .populate('authorId', 'firstName lastName avatarUrl')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
 
-    const postIds = posts.map(p => p._id);
-    const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
-    const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
-    const postsWithEarnings = posts.map(p => ({ ...p, earnings: earningsMap[p._id.toString()] || 0 }));
+      const total = await Post.countDocuments(filter);
 
-    const feed = [
-      ...postsWithEarnings.map(p => ({
+      const courses = await Course.find({
+        instructorId: { $in: followedIds },
+        isPublished: true,
+        approvalStatus: 'approved'
+      })
+        .populate('instructorId', 'firstName lastName avatarUrl')
+        .sort({ createdAt: -1 })
+        .limit(limit)
+        .lean();
+
+      const postIds = posts.map(p => p._id);
+      const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
+      const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
+      const postsWithEarnings = posts.map(p => ({ ...p, earnings: earningsMap[p._id.toString()] || 0 }));
+
+      const feed = [
+        ...postsWithEarnings.map(p => ({
+          ...p,
+          type: 'post',
+          date: p.publishedAt || p.createdAt,
+          author: p.authorId,
+        })),
+        ...courses.map(c => ({
+          ...c,
+          type: 'course',
+          date: c.createdAt,
+          author: c.instructorId,
+        }))
+      ];
+
+      feed.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      return { posts: feed, total };
+    }, 60); // cache for 60 seconds
+
+    res.json({ success: true, data: data.posts, meta: { total: data.total } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── PERSONALIZED FEED (CACHED) ────────────────────────────────────
+export const getPersonalizedFeed = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
+
+    const { page = 1, limit = 10 } = req.query;
+    const cacheKey = `feed:personalized:${user._id}:${page}:${limit}`;
+
+    const result = await getOrSetCache(cacheKey, async () => {
+      const likes = await Like.find({ userId: user._id, targetType: 'post' }).populate('targetId');
+      const likedPostIds = likes.map(l => l.targetId);
+      const likedPosts = await Post.find({ _id: { $in: likedPostIds } });
+      const userTags = likedPosts.flatMap(p => p.tags || []);
+      const tagFrequency: Record<string, number> = {};
+      userTags.forEach(tag => { tagFrequency[tag] = (tagFrequency[tag] || 0) + 1; });
+      const topTags = Object.entries(tagFrequency)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([tag]) => tag);
+
+      const filter: any = { isPublished: true };
+      const posts = await Post.find(filter)
+        .populate('authorId', 'firstName lastName avatarUrl bio')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      const follows = await Follow.find({ followerId: user._id }).select('followingId');
+      const followedIds = follows.map(f => f.followingId.toString());
+
+      const scored = posts.map(post => {
+        let score = 0;
+        const authorId = (post.authorId as any)?._id?.toString();
+        if (authorId && followedIds.includes(authorId)) {
+          score += 0.2;
+        }
+        const postTags = post.tags || [];
+        const tagOverlap = postTags.filter(t => topTags.includes(t)).length;
+        score += (tagOverlap / (topTags.length || 1)) * 0.3;
+        const daysAgo = (Date.now() - new Date(post.publishedAt || post.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+        const recency = Math.max(0, 1 - daysAgo / 30);
+        score += recency * 0.2;
+        const engagement = (post.likes || 0) + (post.commentsCount || 0) + (post.shares || 0);
+        const maxEngagement = 1000;
+        score += Math.min(1, engagement / maxEngagement) * 0.3;
+        return { ...post, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+
+      const start = (Number(page) - 1) * Number(limit);
+      const end = start + Number(limit);
+      const paginated = scored.slice(start, end);
+
+      const postIds = paginated.map(p => p._id);
+      const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
+      const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
+
+      const resultPosts = paginated.map(p => ({
         ...p,
-        type: 'post',
-        date: p.publishedAt || p.createdAt,
-        author: p.authorId,
-      })),
-      ...courses.map(c => ({
-        ...c,
-        type: 'course',
-        date: c.createdAt,
-        author: c.instructorId,
-      }))
-    ];
+        earnings: earningsMap[p._id.toString()] || 0
+      }));
 
-    feed.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const total = await Post.countDocuments(filter);
+      return { posts: resultPosts, total };
+    }, 60);
 
-    res.json({ success: true, data: feed });
+    res.json({
+      success: true,
+      data: {
+        posts: result.posts,
+        pagination: {
+          total: result.total,
+          page: Number(page),
+          limit: Number(limit),
+          pages: Math.ceil(result.total / Number(limit))
+        }
+      }
+    });
   } catch (err) {
     next(err);
   }
@@ -581,85 +675,6 @@ export const getMyPostTitles = async (req: Request, res: Response, next: NextFun
     const posts = await Post.find({ authorId: user._id }).select('title').lean();
     const titles = posts.map(p => p.title);
     res.json({ success: true, data: titles });
-  } catch (err) {
-    next(err);
-  }
-};
-
-// ─── PERSONALIZED FEED ──────────────────────────────────────────────
-export const getPersonalizedFeed = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const user = req.user as IUser;
-    if (!user) return res.status(401).json({ success: false, message: 'Not authenticated' });
-
-    const { page = 1, limit = 10 } = req.query;
-
-    const likes = await Like.find({ userId: user._id, targetType: 'post' }).populate('targetId');
-    const likedPostIds = likes.map(l => l.targetId);
-    const likedPosts = await Post.find({ _id: { $in: likedPostIds } });
-    const userTags = likedPosts.flatMap(p => p.tags || []);
-    const tagFrequency: Record<string, number> = {};
-    userTags.forEach(tag => { tagFrequency[tag] = (tagFrequency[tag] || 0) + 1; });
-    const topTags = Object.entries(tagFrequency)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
-      .map(([tag]) => tag);
-
-    const filter: any = { isPublished: true };
-    const posts = await Post.find(filter)
-      .populate('authorId', 'firstName lastName avatarUrl bio')
-      .sort({ createdAt: -1 })
-      .lean();
-
-    const follows = await Follow.find({ followerId: user._id }).select('followingId');
-    const followedIds = follows.map(f => f.followingId.toString());
-
-    const scored = posts.map(post => {
-      let score = 0;
-      const authorId = (post.authorId as any)?._id?.toString();
-      if (authorId && followedIds.includes(authorId)) {
-        score += 0.2;
-      }
-      const postTags = post.tags || [];
-      const tagOverlap = postTags.filter(t => topTags.includes(t)).length;
-      score += (tagOverlap / (topTags.length || 1)) * 0.3;
-      const daysAgo = (Date.now() - new Date(post.publishedAt || post.createdAt).getTime()) / (1000 * 60 * 60 * 24);
-      const recency = Math.max(0, 1 - daysAgo / 30);
-      score += recency * 0.2;
-      const engagement = (post.likes || 0) + (post.commentsCount || 0) + (post.shares || 0);
-      const maxEngagement = 1000;
-      score += Math.min(1, engagement / maxEngagement) * 0.3;
-      return { ...post, score };
-    });
-
-    scored.sort((a, b) => b.score - a.score);
-
-    const start = (Number(page) - 1) * Number(limit);
-    const end = start + Number(limit);
-    const paginated = scored.slice(start, end);
-
-    const postIds = paginated.map(p => p._id);
-    const analytics = await PostAnalytics.find({ postId: { $in: postIds } });
-    const earningsMap = analytics.reduce((acc, a) => { acc[a.postId.toString()] = a.earnings; return acc; }, {} as Record<string, number>);
-
-    const result = paginated.map(p => ({
-      ...p,
-      earnings: earningsMap[p._id.toString()] || 0
-    }));
-
-    const total = await Post.countDocuments(filter);
-    res.json({
-      success: true,
-      data: {
-        posts: result,
-        pagination: {
-          total,
-          page: Number(page),
-          limit: Number(limit),
-          pages: Math.ceil(total / Number(limit))
-        }
-      }
-    });
   } catch (err) {
     next(err);
   }
