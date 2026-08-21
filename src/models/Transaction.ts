@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/Transaction.ts (UPDATED)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITransaction extends Document {
@@ -8,6 +12,8 @@ export interface ITransaction extends Document {
   description?: string;
   reference?: string;
   metadata?: Record<string, any>;
+  // ─── NEW ACADEMY FIELDS ──────────────────────────────────────
+  academyId?: mongoose.Types.ObjectId;
   createdAt: Date;
 }
 
@@ -25,8 +31,10 @@ const TransactionSchema = new Schema<ITransaction>(
         'bonus',
         'subscription',
         'book_purchase',
-        'book_author_earning',   // NEW
-        'platform_fee',          // NEW
+        'book_author_earning',
+        'platform_fee',
+        'academy_subscription',
+        'academy_sale',
       ],
       required: true
     },
@@ -35,8 +43,13 @@ const TransactionSchema = new Schema<ITransaction>(
     description: String,
     reference: String,
     metadata: Schema.Types.Mixed,
+    // ─── NEW ──────────────────────────────────────────────────────
+    academyId: { type: Schema.Types.ObjectId, ref: 'Academy' },
   },
   { timestamps: true }
 );
+
+TransactionSchema.index({ userId: 1, createdAt: -1 });
+TransactionSchema.index({ academyId: 1 });
 
 export default mongoose.model<ITransaction>('Transaction', TransactionSchema);
