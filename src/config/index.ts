@@ -1,6 +1,7 @@
-// ============================================
-// FILE: src/config/index.ts
-// ============================================
+// ============================================================
+// FILE: src/config/index.ts (UPDATED - added new configs)
+// ============================================================
+
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -93,4 +94,30 @@ export const config = {
   twoFactorAppName: process.env.TWO_FACTOR_APP_NAME || 'ChangeXAcademy',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3001',
   backendUrl: process.env.BACKEND_URL || process.env.FRONTEND_URL,
+
+  // ─── NEW CONFIGURATIONS ──────────────────────────────────────────────
+  academy: {
+    defaultSubscriptionPrice: parseInt(process.env.ACADEMY_SUBSCRIPTION_PRICE || '5000'),
+    maxAcademiesPerUser: parseInt(process.env.MAX_ACADEMIES_PER_USER || '5'),
+    allowCustomDomains: process.env.ALLOW_CUSTOM_DOMAINS === 'true',
+  },
+
+  gamification: {
+    xpMultiplier: parseFloat(process.env.XP_MULTIPLIER || '1'),
+    levelXpBase: parseInt(process.env.LEVEL_XP_BASE || '1000'),
+    streakBonusMultiplier: parseFloat(process.env.STREAK_BONUS_MULTIPLIER || '0.1'),
+  },
+
+  live: {
+    provider: process.env.LIVE_PROVIDER || 'daily', // daily, zoom, etc.
+    dailyApiKey: process.env.DAILY_API_KEY || '',
+    dailyApiUrl: process.env.DAILY_API_URL || 'https://api.daily.co/v1',
+    zoomClientId: process.env.ZOOM_CLIENT_ID || '',
+    zoomClientSecret: process.env.ZOOM_CLIENT_SECRET || '',
+  },
+
+  offline: {
+    maxOfflineLessons: parseInt(process.env.MAX_OFFLINE_LESSONS || '50'),
+    syncInterval: parseInt(process.env.OFFLINE_SYNC_INTERVAL || '300'), // seconds
+  },
 };
