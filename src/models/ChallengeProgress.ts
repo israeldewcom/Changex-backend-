@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/ChallengeProgress.ts (UPDATED)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IChallengeProgress extends Document {
@@ -10,6 +14,9 @@ export interface IChallengeProgress extends Document {
   completedAt?: Date;
   adminNote?: string;
   rewardClaimed: boolean;
+  // ─── NEW GAMIFICATION FIELDS ──────────────────────────────────
+  streakBonus?: number;
+  streakMultiplier?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,6 +36,9 @@ const ChallengeProgressSchema = new Schema<IChallengeProgress>(
     completedAt: Date,
     adminNote: String,
     rewardClaimed: { type: Boolean, default: false },
+    // ─── NEW ──────────────────────────────────────────────────────
+    streakBonus: { type: Number, default: 0 },
+    streakMultiplier: { type: Number, default: 1 },
   },
   { timestamps: true }
 );
