@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/LiveSession.ts (UPDATED)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ILiveSession extends Document {
@@ -6,12 +10,15 @@ export interface ILiveSession extends Document {
   hostId: mongoose.Types.ObjectId;
   startTime: Date;
   endTime: Date;
-  type: 'webinar' | 'office_hours' | 'one_on_one';
+  type: 'webinar' | 'office_hours' | 'one_on_one' | 'class';
   price: number;
   maxAttendees: number;
   attendees: mongoose.Types.ObjectId[];
   recordingUrl: string;
   status: 'scheduled' | 'live' | 'ended' | 'recorded';
+  reminded: boolean;
+  // For academy scoping
+  academyId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -23,17 +30,20 @@ const LiveSessionSchema = new Schema<ILiveSession>(
     hostId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     startTime: { type: Date, required: true },
     endTime: { type: Date, required: true },
-    type: { type: String, enum: ['webinar', 'office_hours', 'one_on_one'], default: 'webinar' },
+    type: { type: String, enum: ['webinar', 'office_hours', 'one_on_one', 'class'], default: 'webinar' },
     price: { type: Number, default: 0 },
     maxAttendees: { type: Number, default: 100 },
     attendees: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     recordingUrl: String,
     status: { type: String, enum: ['scheduled', 'live', 'ended', 'recorded'], default: 'scheduled' },
+    reminded: { type: Boolean, default: false },
+    academyId: { type: Schema.Types.ObjectId, ref: 'Academy' },
   },
   { timestamps: true }
 );
 
 LiveSessionSchema.index({ hostId: 1, startTime: -1 });
 LiveSessionSchema.index({ status: 1 });
+LiveSessionSchema.index({ academyId: 1 });
 
 export default mongoose.model<ILiveSession>('LiveSession', LiveSessionSchema);
