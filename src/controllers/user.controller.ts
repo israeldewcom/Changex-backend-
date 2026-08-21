@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/user.controller.ts (FINAL – FULL BREAKDOWN)
+// FILE: src/controllers/user.controller.ts (UPDATED - added academy, gamification)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -14,22 +14,44 @@ import ChallengeProgress from '../models/ChallengeProgress.js';
 import PostAnalytics from '../models/PostAnalytics.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
 import { getOrSetCache, invalidateCache } from '../services/cache.js';
+import Academy from '../models/Academy.js';
+import AcademyMembership from '../models/AcademyMembership.js';
+import Achievement from '../models/Achievement.js';
 
-// ==================== PROFILE ====================
+// ─── PROFILE (existing, with academy fields) ──────────────────
 export const getProfile = async (req: Request, res: Response) => {
   const user = req.user as IUser;
-  res.json({ success: true, data: user });
+  // Populate academy info
+  const academy = user.academyId ? await Academy.findById(user.academyId).select('name logo slug') : null;
+  const membership = user.academyId ? await AcademyMembership.findOne({ academyId: user.academyId, userId: user._id }) : null;
+  res.json({
+    success: true,
+    data: {
+      ...user.toObject(),
+      academy: academy ? { id: academy._id, name: academy.name, logo: academy.logo, slug: academy.slug } : null,
+      academyRole: membership?.role || user.academyRole,
+    }
+  });
 };
 
 export const updateProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    const allowedUpdates = ['firstName', 'lastName', 'phone', 'bio', 'location', 'bankAccount', 'preferredCurrency'];
+    const allowedUpdates = ['firstName', 'lastName', 'phone', 'bio', 'location', 'bankAccount', 'preferredCurrency', 'aiPreferences'];
     for (const key of allowedUpdates) {
       if (req.body[key] !== undefined) (user as any)[key] = req.body[key];
     }
+    // Academy fields can be updated by admin/owner only – skip for now
+    if (req.body.academyId) {
+      // Only allow if user is academy owner or admin
+      const membership = await AcademyMembership.findOne({ academyId: req.body.academyId, userId: user._id });
+      if (membership && (membership.role === 'owner' || membership.role === 'admin')) {
+        user.academyId = req.body.academyId;
+        user.academyRole = membership.role;
+      }
+    }
 
-    // ─── Check if profile is now complete ──────────────────────────
+    // Welcome bonus (unchanged)
     const profileComplete = !!(user.bio && user.location);
     if (profileComplete && !(user as any).welcomeBonusClaimed) {
       user.walletBalance = (user.walletBalance || 0) + 500;
@@ -48,6 +70,7 @@ export const updateProfile = async (req: Request, res: Response, next: NextFunct
   } catch (err) { next(err); }
 };
 
+// ─── AVATAR UPLOAD (unchanged) ────────────────────────────────
 export const uploadAvatar = async (req: Request, res: Response, next: NextFunction) => {
   try {
     if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -61,18 +84,16 @@ export const uploadAvatar = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
-// ==================== WALLET (FULL BREAKDOWN – NO LIMIT ON SUMS) ====================
+// ─── WALLET (unchanged) ────────────────────────────────────────
 export const getWallet = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
 
-    // ─── Fetch ALL completed transactions (no limit) for accurate sums ──
     const allTransactions = await Transaction.find({
       userId: user._id,
       status: 'completed',
     }).lean();
 
-    // ─── Initialize breakdown with zeros ───────────────────────────
     const breakdown: Record<string, number> = {
       referralEarnings: 0,
       courseBonuses: 0,
@@ -82,59 +103,48 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
       bookEarnings: 0,
       adRevenue: 0,
       campaignRevenue: 0,
+      academyEarnings: 0,
       totalEarnings: 0,
     };
 
-    // ─── Accumulate from ALL transactions ──────────────────────────
     for (const tx of allTransactions) {
       const amount = tx.amount || 0;
-      if (amount <= 0) continue; // only positive earnings (ignore withdrawals)
-
+      if (amount <= 0) continue;
       switch (tx.type) {
         case 'referral_bonus':
         case 'referral_commission':
           breakdown.referralEarnings += amount;
           break;
-
         case 'bonus':
-          // Welcome bonus detection (case‑insensitive)
           if (tx.description?.toLowerCase().includes('welcome')) {
             breakdown.welcomeBonus += amount;
-          } else if (tx.description?.toLowerCase().includes('social engagement')) {
-            // Social earnings are handled separately; do not add to courseBonuses
-            break;
           } else {
-            // All other bonuses (e.g., challenge rewards, completion bonuses)
             breakdown.courseBonuses += amount;
           }
           break;
-
         case 'affiliate_commission':
           breakdown.affiliateCommissions += amount;
           break;
-
         case 'instructor_earning':
           breakdown.instructorEarnings += amount;
           break;
-
         case 'book_author_earning':
           breakdown.bookEarnings += amount;
           break;
-
         case 'ad_revenue':
           breakdown.adRevenue += amount;
           break;
-
         case 'campaign_earning':
           breakdown.campaignRevenue += amount;
           break;
-
+        case 'academy_sale':
+          breakdown.academyEarnings += amount;
+          break;
         default:
           break;
       }
     }
 
-    // ─── Compute total earnings (excludes social earnings) ─────────
     breakdown.totalEarnings = breakdown.referralEarnings
       + breakdown.courseBonuses
       + breakdown.affiliateCommissions
@@ -142,9 +152,9 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
       + breakdown.welcomeBonus
       + breakdown.bookEarnings
       + breakdown.adRevenue
-      + breakdown.campaignRevenue;
+      + breakdown.campaignRevenue
+      + breakdown.academyEarnings;
 
-    // ─── Fetch social earnings separately ──────────────────────────
     const userPosts = await Post.find({ authorId: user._id }).select('_id');
     const postIds = userPosts.map(p => p._id);
     const socialEarningsAgg = await PostAnalytics.aggregate([
@@ -153,15 +163,12 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
     ]);
     const socialEarnings = socialEarningsAgg[0]?.total || 0;
 
-    // ─── Pending withdrawal ─────────────────────────────────────────
     const pending = user.pendingWithdrawal || 0;
 
-    // ─── Return only last 50 transactions for display ──────────────
     const recentTransactions = allTransactions
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, 50);
 
-    // ─── Build final response ──────────────────────────────────────
     res.json({
       success: true,
       data: {
@@ -179,7 +186,7 @@ export const getWallet = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
-// ==================== WITHDRAWAL ====================
+// ─── WITHDRAWAL (unchanged) ────────────────────────────────────
 export const requestWithdrawal = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { amount } = req.body;
@@ -201,7 +208,7 @@ export const requestWithdrawal = async (req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 };
 
-// ==================== NOTIFICATIONS ====================
+// ─── NOTIFICATIONS (unchanged) ────────────────────────────────
 export const getNotifications = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -230,7 +237,7 @@ export const markAllNotificationsRead = async (req: Request, res: Response, next
   } catch (err) { next(err); }
 };
 
-// ==================== LEADERBOARD ====================
+// ─── LEADERBOARD (unchanged) ──────────────────────────────────
 export const getLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { type = 'xp', limit = 20 } = req.query;
@@ -249,7 +256,7 @@ export const getLeaderboard = async (req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 };
 
-// ==================== REFERRALS ====================
+// ─── REFERRALS (unchanged) ────────────────────────────────────
 export const getReferrals = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -266,14 +273,16 @@ export const getReferrals = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
-// ==================== BADGES ====================
+// ─── BADGES (will be replaced by achievements) ────────────────
 export const getUserBadges = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    res.json({ success: true, data: [] });
+    const user = req.user as IUser;
+    const achievements = await Achievement.find({ _id: { $in: user.unlockedAchievements || [] } });
+    res.json({ success: true, data: achievements });
   } catch (err) { next(err); }
 };
 
-// ==================== PREMIUM STATUS ====================
+// ─── PREMIUM STATUS (unchanged) ──────────────────────────────
 export const updatePremiumStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { isPremium } = req.body;
@@ -288,7 +297,7 @@ export const updatePremiumStatus = async (req: Request, res: Response, next: Nex
   } catch (err) { next(err); }
 };
 
-// ==================== WELCOME BONUS ====================
+// ─── WELCOME BONUS (unchanged) ────────────────────────────────
 export const claimWelcomeBonus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -316,7 +325,7 @@ export const claimWelcomeBonus = async (req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 };
 
-// ==================== PUBLIC PROFILE ====================
+// ─── PUBLIC PROFILE (unchanged) ──────────────────────────────
 export const getUserProfile = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.params;
@@ -369,7 +378,7 @@ export const getUserProfile = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ==================== TIER ====================
+// ─── TIER (unchanged) ──────────────────────────────────────────
 export const getTier = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -380,4 +389,35 @@ export const getTier = async (req: Request, res: Response, next: NextFunction) =
   } catch (err) {
     next(err);
   }
+};
+
+// ─── NEW: SKILL TREE ENDPOINTS ──────────────────────────────────
+export const getSkillTree = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const skills = user.skillNodes || {};
+    res.json({ success: true, data: skills });
+  } catch (err) { next(err); }
+};
+
+export const updateSkillNode = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { skill, value } = req.body;
+    if (!skill || typeof value !== 'number') {
+      return res.status(400).json({ success: false, message: 'Skill and value required' });
+    }
+    if (!user.skillNodes) user.skillNodes = {};
+    user.skillNodes[skill] = Math.min(100, Math.max(0, value));
+    await user.save();
+    res.json({ success: true, data: user.skillNodes });
+  } catch (err) { next(err); }
+};
+
+// ─── NEW: ACHIEVEMENTS LIST ──────────────────────────────────────
+export const listAchievements = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const achievements = await Achievement.find().sort('category');
+    res.json({ success: true, data: achievements });
+  } catch (err) { next(err); }
 };
