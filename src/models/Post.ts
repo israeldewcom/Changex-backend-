@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Post.ts (UPDATED – added adImpressions, adClicks, adRevenue)
+// FILE: src/models/Post.ts (UPDATED)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -28,10 +28,11 @@ export interface IPost extends Document {
   isPaid: boolean;
   price: number;
   previewContent: string;
-  // ─── NEW AD FIELDS ──────────────────────────────────────────
   adImpressions: number;
   adClicks: number;
-  adRevenue: number;  // total revenue credited to author from this post
+  adRevenue: number;
+  // ─── NEW ACADEMY FIELDS ──────────────────────────────────────
+  academyId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -61,10 +62,11 @@ const PostSchema = new Schema<IPost>(
     isPaid: { type: Boolean, default: false },
     price: { type: Number, default: 0 },
     previewContent: { type: String, default: '' },
-    // ─── AD FIELDS ─────────────────────────────────────────────
     adImpressions: { type: Number, default: 0 },
     adClicks: { type: Number, default: 0 },
     adRevenue: { type: Number, default: 0 },
+    // ─── NEW ──────────────────────────────────────────────────────
+    academyId: { type: Schema.Types.ObjectId, ref: 'Academy' },
   },
   { timestamps: true }
 );
@@ -75,5 +77,6 @@ PostSchema.index({ createdAt: -1 });
 PostSchema.index({ authorId: 1, createdAt: -1 });
 PostSchema.index({ type: 1, isPublished: 1 });
 PostSchema.index({ isPaid: 1 });
+PostSchema.index({ academyId: 1 });
 
 export default mongoose.model<IPost>('Post', PostSchema);
