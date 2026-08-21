@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/Lesson.ts (UPDATED)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ILesson extends Document {
@@ -11,13 +15,21 @@ export interface ILesson extends Document {
   xpReward: number;
   resources: { title: string; url: string }[];
   notes?: string;
-  // NEW FIELDS:
   hasCodeEditor?: boolean;
   initialCode?: string;
   hasCalculator?: boolean;
   calculatorConfig?: {
     theme: 'light' | 'dark';
     operations: string[];
+  };
+  // ─── NEW OFFLINE FIELDS ──────────────────────────────────────
+  downloadable?: boolean;
+  downloadableUrl?: string;
+  // ─── NEW AI CONTEXT ──────────────────────────────────────────
+  aiContext?: {
+    summary?: string;
+    keyConcepts?: string[];
+    sampleQuestions?: string[];
   };
   createdAt: Date;
   updatedAt: Date;
@@ -35,15 +47,23 @@ const LessonSchema = new Schema<ILesson>(
     xpReward: { type: Number, default: 50 },
     resources: [{ title: String, url: String }],
     notes: String,
-    // NEW FIELDS:
     hasCodeEditor: { type: Boolean, default: false },
     initialCode: { type: String, default: '' },
     hasCalculator: { type: Boolean, default: false },
     calculatorConfig: { type: Object, default: { theme: 'dark', operations: ['+', '-', '*', '/'] } },
+    // ─── NEW ──────────────────────────────────────────────────────
+    downloadable: { type: Boolean, default: false },
+    downloadableUrl: String,
+    aiContext: {
+      summary: String,
+      keyConcepts: [String],
+      sampleQuestions: [String],
+    },
   },
   { timestamps: true }
 );
 
 LessonSchema.index({ courseId: 1, order: 1 });
+LessonSchema.index({ downloadable: 1 });
 
 export default mongoose.model<ILesson>('Lesson', LessonSchema);
