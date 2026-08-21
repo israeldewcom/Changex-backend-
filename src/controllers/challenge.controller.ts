@@ -1,16 +1,35 @@
+// ============================================================
+// FILE: src/controllers/challenge.controller.ts (UPDATED - advanced challenge logic)
+// ============================================================
+
 import { Request, Response, NextFunction } from 'express';
 import Challenge from '../models/Challenge.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
 import { IUser } from '../models/User.js';
+import User from '../models/User.js';
+import Transaction from '../models/Transaction.js';
+import Notification from '../models/Notification.js';
+import { getIO } from '../socket.js';
+import Academy from '../models/Academy.js';
+import AcademyMembership from '../models/AcademyMembership.js';
 
 export const getActiveChallenges = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const now = new Date();
-    const challenges = await Challenge.find({
+    const filter: any = {
       status: 'active',
       startDate: { $lte: now },
       endDate: { $gte: now }
-    }).sort('-startDate');
+    };
+    // Academy scope
+    const user = req.user as IUser;
+    if (user && user.academyId) {
+      filter.$or = [
+        { academyId: user.academyId },
+        { academyId: { $exists: false } }
+      ];
+    }
+    const challenges = await Challenge.find(filter).sort('-startDate');
     res.json({ success: true, data: challenges });
   } catch (err) { next(err); }
 };
@@ -18,10 +37,18 @@ export const getActiveChallenges = async (req: Request, res: Response, next: Nex
 export const getUpcomingChallenges = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const now = new Date();
-    const challenges = await Challenge.find({
+    const filter: any = {
       status: 'upcoming',
       startDate: { $gt: now }
-    }).sort('startDate');
+    };
+    const user = req.user as IUser;
+    if (user && user.academyId) {
+      filter.$or = [
+        { academyId: user.academyId },
+        { academyId: { $exists: false } }
+      ];
+    }
+    const challenges = await Challenge.find(filter).sort('startDate');
     res.json({ success: true, data: challenges });
   } catch (err) { next(err); }
 };
@@ -32,6 +59,11 @@ export const getChallengeById = async (req: Request, res: Response, next: NextFu
     const challenge = await Challenge.findById(id);
     if (!challenge) {
       return res.status(404).json({ success: false, message: 'Challenge not found' });
+    }
+    // Academy check
+    const user = req.user as IUser;
+    if (challenge.academyId && (!user || !user.academyId || challenge.academyId.toString() !== user.academyId.toString())) {
+      return res.status(403).json({ success: false, message: 'This challenge belongs to a private academy' });
     }
     res.json({ success: true, data: challenge });
   } catch (err) { next(err); }
@@ -48,17 +80,21 @@ export const joinChallenge = async (req: Request, res: Response, next: NextFunct
     if (challenge.status !== 'active') {
       return res.status(400).json({ success: false, message: 'Challenge is not active' });
     }
-    // Check if already enrolled via progress
+    // Academy check
+    if (challenge.academyId) {
+      const membership = await AcademyMembership.findOne({ academyId: challenge.academyId, userId: user._id });
+      if (!membership || membership.status !== 'active') {
+        return res.status(403).json({ success: false, message: 'You must be a member of this academy to join this challenge' });
+      }
+    }
     const existing = await ChallengeProgress.findOne({ challengeId: id, userId: user._id });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Already enrolled' });
     }
-    // Add to participants array (for backward compatibility)
     if (!challenge.participants.includes(user._id)) {
       challenge.participants.push(user._id);
       await challenge.save();
     }
-    // Create progress entry
     await ChallengeProgress.create({
       challengeId: id,
       userId: user._id,
@@ -83,7 +119,7 @@ export const getUserChallengeProgress = async (req: Request, res: Response, next
   try {
     const user = req.user as IUser;
     const progress = await ChallengeProgress.find({ userId: user._id })
-      .populate('challengeId', 'title description startDate endDate rewardXP rewardAmount rewardPremiumDays completionCriteria')
+      .populate('challengeId', 'title description startDate endDate rewardXP rewardAmount rewardPremiumDays completionCriteria challengeType')
       .sort('-createdAt');
     res.json({ success: true, data: progress });
   } catch (err) { next(err); }
