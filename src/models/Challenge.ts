@@ -1,6 +1,9 @@
+// ============================================================
+// FILE: src/models/Challenge.ts (UPDATED)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
-// Define a sub-schema for completion criteria
 const CompletionCriteriaSchema = new Schema({
   type: {
     type: String,
@@ -35,6 +38,11 @@ export interface IChallenge extends Document {
     courseId?: mongoose.Types.ObjectId;
     targetCount: number;
   };
+  // ─── NEW FIELDS FOR ADVANCED GAMIFICATION ──────────────────
+  challengeType?: 'daily' | 'weekly' | 'monthly' | 'special';
+  recurrence?: 'daily' | 'weekly' | 'monthly';
+  // ─── ACADEMY SCOPING ────────────────────────────────────────
+  academyId?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,16 +65,21 @@ const ChallengeSchema = new Schema<IChallenge>(
       default: 'upcoming',
     },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    // ✅ Use the sub-schema
     completionCriteria: {
       type: CompletionCriteriaSchema,
       required: false,
     },
+    // ─── NEW ──────────────────────────────────────────────────────
+    challengeType: { type: String, enum: ['daily', 'weekly', 'monthly', 'special'] },
+    recurrence: { type: String, enum: ['daily', 'weekly', 'monthly'] },
+    academyId: { type: Schema.Types.ObjectId, ref: 'Academy' },
   },
   { timestamps: true }
 );
 
 ChallengeSchema.index({ status: 1, startDate: 1 });
 ChallengeSchema.index({ endDate: 1 });
+ChallengeSchema.index({ challengeType: 1 });
+ChallengeSchema.index({ academyId: 1 });
 
 export default mongoose.model<IChallenge>('Challenge', ChallengeSchema);
