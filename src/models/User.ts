@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/User.ts (UPDATED – notification preferences)
+// FILE: src/models/User.ts (UPDATED)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -47,13 +47,11 @@ export interface IUser extends Document {
   lastSeen?: Date;
   storyHighlights?: string[];
   adEarnings: number;
-  // ─── NEW: Notification preferences ──────────────────────────
   notificationPreferences: {
     email: boolean;
     sms: boolean;
     push: boolean;
   };
-  // ─── NEW: Push subscription for web push ────────────────────
   pushSubscription?: {
     endpoint: string;
     keys: {
@@ -61,6 +59,19 @@ export interface IUser extends Document {
       auth: string;
     };
   };
+  // ─── NEW ACADEMY FIELDS ──────────────────────────────────────
+  academyId?: mongoose.Types.ObjectId;         // If user belongs to an academy
+  academyRole?: 'owner' | 'admin' | 'instructor' | 'moderator' | 'student' | 'finance' | 'content';
+  // ─── GAMIFICATION FIELDS ─────────────────────────────────────
+  skillNodes?: Record<string, number>;          // skill -> mastery level (0-100)
+  unlockedAchievements?: mongoose.Types.ObjectId[]; // references to Achievement
+  // ─── AI FIELDS ──────────────────────────────────────────────
+  aiPreferences?: {
+    learningGoal?: string;
+    studyFrequency?: number;
+    interests?: string[];
+  };
+  skillGaps?: string[];                         // Skills identified as gaps
   createdAt: Date;
   updatedAt: Date;
 }
@@ -73,7 +84,7 @@ const UserSchema = new Schema<IUser>(
     lastName: { type: String, required: true },
     phone: String,
     avatarUrl: String,
-    roles: { type: [String], enum: ['student', 'instructor', 'admin'], default: ['student'] },
+    roles: { type: [String], enum: ['student', 'instructor', 'admin', 'academy_owner'], default: ['student'] },
     isApprovedInstructor: { type: Boolean, default: false },
     isPremium: { type: Boolean, default: false },
     subscriptionExpires: Date,
@@ -113,7 +124,6 @@ const UserSchema = new Schema<IUser>(
     lastSeen: { type: Date, default: Date.now },
     storyHighlights: { type: [String], default: [] },
     adEarnings: { type: Number, default: 0 },
-    // ─── Notification preferences ──────────────────────────────
     notificationPreferences: {
       email: { type: Boolean, default: true },
       sms: { type: Boolean, default: false },
@@ -126,6 +136,17 @@ const UserSchema = new Schema<IUser>(
         auth: String,
       },
     },
+    // ─── NEW FIELDS ──────────────────────────────────────────────
+    academyId: { type: Schema.Types.ObjectId, ref: 'Academy' },
+    academyRole: { type: String, enum: ['owner', 'admin', 'instructor', 'moderator', 'student', 'finance', 'content'] },
+    skillNodes: { type: Map, of: Number, default: {} },
+    unlockedAchievements: [{ type: Schema.Types.ObjectId, ref: 'Achievement' }],
+    aiPreferences: {
+      learningGoal: String,
+      studyFrequency: Number,
+      interests: [String],
+    },
+    skillGaps: [String],
   },
   { timestamps: true }
 );
@@ -137,6 +158,7 @@ UserSchema.index({ tier: 1 });
 UserSchema.index({ online: 1 });
 UserSchema.index({ lastSeen: -1 });
 UserSchema.index({ lastActivity: -1 });
+UserSchema.index({ academyId: 1, academyRole: 1 });
 
 UserSchema.pre('save', function (next) {
   if (!this.seoSlug && this.firstName && this.lastName) {
