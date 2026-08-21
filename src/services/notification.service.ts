@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/services/notification.service.ts (FIXED)
+// FILE: src/services/notification.service.ts (UPDATED - added academy & gamification)
 // ============================================================
 
 import User, { IUser } from '../models/User.js';
@@ -18,19 +18,18 @@ interface NotificationPayload {
   type?: string;
   data?: any;
   channels?: Channel[];
+  academyId?: string;
 }
 
 export const sendNotification = async (payload: NotificationPayload): Promise<void> => {
-  const { userId, title, message, type = 'system', data, channels: requestedChannels = ['email', 'push'] } = payload;
+  const { userId, title, message, type = 'system', data, channels: requestedChannels = ['email', 'push'], academyId } = payload;
 
-  // 1. Get user and preferences
   const user = await User.findById(userId);
   if (!user) {
     logger.error(`User ${userId} not found for notification`);
     return;
   }
 
-  // 2. Determine which channels to actually use
   const prefs = user.notificationPreferences || { email: true, sms: false, push: true };
   const channels: Channel[] = requestedChannels.filter(ch => prefs[ch as keyof typeof prefs] !== false);
 
@@ -39,7 +38,6 @@ export const sendNotification = async (payload: NotificationPayload): Promise<vo
     return;
   }
 
-  // 3. Create notification document
   const notification = await Notification.create({
     userId,
     title,
@@ -48,9 +46,9 @@ export const sendNotification = async (payload: NotificationPayload): Promise<vo
     data,
     channels,
     sent: { email: false, sms: false, push: false },
+    academyId: academyId || user.academyId,
   });
 
-  // 4. Send via each channel
   const results = await Promise.allSettled(
     channels.map(async (channel) => {
       let success = false;
@@ -76,7 +74,6 @@ export const sendNotification = async (payload: NotificationPayload): Promise<vo
     })
   );
 
-  // 5. Update sent statuses
   const sentUpdates: any = {};
   results.forEach((result, index) => {
     const channel = channels[index];
@@ -89,7 +86,6 @@ export const sendNotification = async (payload: NotificationPayload): Promise<vo
     await Notification.findByIdAndUpdate(notification._id, { $set: sentUpdates });
   }
 
-  // 6. Also emit via Socket.io if user is online
   const io = (await import('../socket.js')).getIO();
   if (io) {
     io.to(`user:${userId}`).emit('notification', {
@@ -98,6 +94,7 @@ export const sendNotification = async (payload: NotificationPayload): Promise<vo
       message,
       type,
       data,
+      academyId: academyId || user.academyId,
       createdAt: notification.createdAt,
       read: false,
     });
