@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FULL UPDATED)
+// FILE: src/index.ts (UPDATED – indexes on startup)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -16,7 +16,7 @@ import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { connectDB } from './config/db.js';
+import { connectDB, ensureIndexes } from './config/db.js';
 import { connectRedis } from './config/redis.js';
 import { initializePassport } from './config/passport.js';
 
@@ -391,6 +391,7 @@ async function cleanupCorruptedData() {
 async function bootstrap() {
   try {
     await connectDB();
+    await ensureIndexes();          // <-- ADDED: create indexes on startup
     await connectRedis();
     await cleanupCorruptedData();
     startWorkers();
