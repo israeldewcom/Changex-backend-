@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/config/db.ts (UPDATED – with index creation)
+// FILE: src/config/db.ts (UPDATED – with index creation & maxTimeMS)
 // ============================================================
 
 import mongoose from 'mongoose';
@@ -14,7 +14,9 @@ export const connectDB = async () => {
       socketTimeoutMS: 45000,
       family: 4,
     });
-    logger.info('MongoDB connected with connection pool');
+    // Set maxTimeMS globally for all queries (15 seconds)
+    mongoose.set('maxTimeMS', 15000);
+    logger.info('MongoDB connected with connection pool and maxTimeMS=15s');
   } catch (error) {
     logger.error('MongoDB connection error:', error);
     process.exit(1);
