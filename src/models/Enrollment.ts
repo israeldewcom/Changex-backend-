@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Enrollment.ts (UPDATED – added cohortId, dropoutAt, lastActivityAt)
+// FILE: src/models/Enrollment.ts (UPDATED)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -14,6 +14,19 @@ export interface IEnrollment extends Document {
   cohortId?: mongoose.Types.ObjectId;
   dropoutAt?: Date;
   lastActivityAt?: Date;
+  // ─── NEW ACADEMY FIELDS ──────────────────────────────────────
+  academyId?: mongoose.Types.ObjectId;
+  // ─── NEW LIVE CLASS FIELDS ──────────────────────────────────
+  attendance?: Array<{
+    sessionId: mongoose.Types.ObjectId;
+    attended: boolean;
+    attendedAt?: Date;
+  }>;
+  // ─── NEW OFFLINE FIELDS ──────────────────────────────────────
+  offlineProgress?: {
+    syncedAt: Date;
+    lessonsCompletedOffline: mongoose.Types.ObjectId[];
+  };
 }
 
 const EnrollmentSchema = new Schema<IEnrollment>(
@@ -26,6 +39,19 @@ const EnrollmentSchema = new Schema<IEnrollment>(
     cohortId: { type: Schema.Types.ObjectId, ref: 'Cohort' },
     dropoutAt: Date,
     lastActivityAt: { type: Date, default: Date.now },
+    // ─── NEW ──────────────────────────────────────────────────────
+    academyId: { type: Schema.Types.ObjectId, ref: 'Academy' },
+    attendance: [
+      {
+        sessionId: { type: Schema.Types.ObjectId, ref: 'LiveSession' },
+        attended: { type: Boolean, default: false },
+        attendedAt: Date,
+      },
+    ],
+    offlineProgress: {
+      syncedAt: Date,
+      lessonsCompletedOffline: [{ type: Schema.Types.ObjectId, ref: 'Lesson' }],
+    },
   },
   { timestamps: { createdAt: 'startedAt', updatedAt: false } }
 );
@@ -34,5 +60,6 @@ EnrollmentSchema.index({ userId: 1, courseId: 1 }, { unique: true });
 EnrollmentSchema.index({ cohortId: 1 });
 EnrollmentSchema.index({ status: 1 });
 EnrollmentSchema.index({ lastActivityAt: -1 });
+EnrollmentSchema.index({ academyId: 1 });
 
 export default mongoose.model<IEnrollment>('Enrollment', EnrollmentSchema);
