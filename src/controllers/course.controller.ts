@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/course.controller.ts (COMPLETE UPDATED – bonus ₦300)
+// FILE: src/controllers/course.controller.ts (UPDATED - academy scoping)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -19,8 +19,10 @@ import User from '../models/User.js';
 import Question from '../models/Question.js';
 import { getIO } from '../socket.js';
 import { getOrSetCache, invalidateCache } from '../services/cache.js';
+import Academy from '../models/Academy.js';
+import AcademyMembership from '../models/AcademyMembership.js';
 
-// ─── Helper: auto‑complete challenge ──────────────────────────────────
+// ─── Helper: auto‑complete challenge (unchanged) ──────────────
 async function completeChallengeAndReward(challengeId: string, userId: string, adminNote: string = 'Auto‑completed') {
   const progress = await ChallengeProgress.findOne({ challengeId, userId });
   if (!progress) return;
@@ -78,21 +80,31 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
-// ==================== GET PUBLISHED COURSES (CACHED) ====================
+// ==================== GET PUBLISHED COURSES (CACHED, with academy filter) ====================
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { category, level, search, limit = 20, offset = 0 } = req.query;
+    const { category, level, search, limit = 20, offset = 0, academyId } = req.query;
     const filter: any = { isPublished: true, approvalStatus: 'approved' };
     if (category) filter.category = category;
     if (level) filter.level = level;
     if (search) filter.title = { $regex: search, $options: 'i' };
+    // Academy filter: if academyId provided, show only courses that belong to that academy OR are public
+    if (academyId) {
+      filter.$or = [
+        { academyId: academyId },
+        { academyOnly: { $ne: true } } // public courses not restricted to any academy
+      ];
+    } else {
+      // If no academy, only show public courses (not academyOnly)
+      filter.academyOnly = { $ne: true };
+    }
 
-    const cacheKey = `courses:${JSON.stringify({ category, level, search, limit, offset })}`;
+    const cacheKey = `courses:${JSON.stringify({ category, level, search, limit, offset, academyId })}`;
     const data = await getOrSetCache(cacheKey, async () => {
       const courses = await Course.find(filter)
         .skip(Number(offset))
         .limit(Number(limit))
-        .select('title price thumbnail level slug instructorId totalStudents avgRating')
+        .select('title price thumbnail level slug instructorId totalStudents avgRating academyId academyOnly')
         .populate('instructorId', 'firstName lastName')
         .lean();
       const total = await Course.countDocuments(filter);
@@ -105,7 +117,7 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
   }
 };
 
-// ==================== GET SINGLE COURSE (CACHED) ====================
+// ==================== GET SINGLE COURSE (CACHED, with academy check) ====================
 export const getCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -132,10 +144,22 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
         lessons,
         ratings,
       };
-    }, 7200); // 2 hours
+    }, 7200);
 
     if (!course) {
       return res.status(404).json({ success: false, message: 'Course not found' });
+    }
+
+    // ─── Academy access check ──────────────────────────────────────────
+    if (course.academyOnly && course.academyId) {
+      const user = req.user as IUser;
+      if (!user) {
+        return res.status(403).json({ success: false, message: 'This course is only available to academy members' });
+      }
+      const membership = await AcademyMembership.findOne({ academyId: course.academyId, userId: user._id });
+      if (!membership || membership.status !== 'active') {
+        return res.status(403).json({ success: false, message: 'You are not a member of this academy' });
+      }
     }
 
     let enrollment = null;
@@ -162,17 +186,20 @@ export const invalidateCourseCache = async (courseId: string) => {
   await invalidateCache('courses:*');
 };
 
-// ─── Other functions ──────────────────────────────────────────────────────
+// ─── GET USER ENROLLMENTS (with academy scope) ─────────────────────
 export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
     if (!user || !user._id) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
-    const enrollments = await Enrollment.find({ userId: user._id })
+    const filter: any = { userId: user._id };
+    // If user belongs to an academy, only show those enrollments? Or all?
+    // We'll show all, but include academy info
+    const enrollments = await Enrollment.find(filter)
       .populate({
         path: 'courseId',
-        select: 'title thumbnail totalLessons price rating level instructorId',
+        select: 'title thumbnail totalLessons price rating level instructorId academyId academyOnly',
       })
       .lean();
     const formatted = enrollments.map(enrollment => ({
@@ -184,6 +211,7 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
       startedAt: enrollment.startedAt,
       completedAt: enrollment.completedAt,
       courseId: enrollment.courseId?._id || enrollment.courseId,
+      academyId: enrollment.academyId,
     }));
     res.json({ success: true, data: formatted });
   } catch (err) {
@@ -191,6 +219,7 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
   }
 };
 
+// ─── ENROLL COURSE (with academy check) ─────────────────────────────
 export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -202,6 +231,15 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     if (!course || !course.isPublished) {
       return res.status(404).json({ success: false, message: 'Course not available' });
     }
+
+    // ─── Academy access check ──────────────────────────────────────────
+    if (course.academyOnly && course.academyId) {
+      const membership = await AcademyMembership.findOne({ academyId: course.academyId, userId: user._id });
+      if (!membership || membership.status !== 'active') {
+        return res.status(403).json({ success: false, message: 'This course is only available to academy members' });
+      }
+    }
+
     const existing = await Enrollment.findOne({ userId: user._id, courseId: course._id });
     if (existing) {
       return res.status(400).json({ success: false, message: 'Already enrolled' });
@@ -209,7 +247,11 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     if (course.price > 0) {
       return res.json({ success: true, requirePayment: true, price: course.salePrice || course.price });
     }
-    await Enrollment.create({ userId: user._id, courseId: course._id });
+    await Enrollment.create({
+      userId: user._id,
+      courseId: course._id,
+      academyId: course.academyId || undefined,
+    });
     course.totalStudents += 1;
     await course.save();
     await invalidateCourseCache(course._id.toString());
@@ -223,6 +265,7 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
         course: newEnrollment?.courseId,
         progress: 0,
         status: 'active',
+        academyId: course.academyId,
       },
     });
   } catch (err: any) {
@@ -233,7 +276,7 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ==================== UPDATE LESSON PROGRESS (FIXED – ₦300 bonus) ====================
+// ─── UPDATE LESSON PROGRESS (unchanged, but adds academyId to progress) ──
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -255,15 +298,12 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
       progress.timeSpent += timeSpent || 0;
     }
 
-    // ─── XP & completion logic (relaxed time check) ──────────────
     if (completed && progress.completed) {
       const lesson = await Lesson.findById(lessonId);
       if (lesson) {
         const durationMinutes = lesson.duration || 0;
         const requiredMinutes = durationMinutes * 0.8;
         const timeSpentMinutes = (progress.timeSpent || 0) / 60;
-
-        // Always mark complete; award XP only if time requirement met
         progress.completed = true;
         if (durationMinutes === 0 || timeSpentMinutes >= requiredMinutes) {
           user.xp = (user.xp || 0) + (lesson.xpReward || 50);
@@ -274,14 +314,12 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
 
     await progress.save();
 
-    // ─── Recalculate enrollment progress ────────────────────
     const totalLessons = await Lesson.countDocuments({ courseId: enrollment.courseId });
     const completedLessons = await LessonProgress.countDocuments({ enrollmentId: enrollment._id, completed: true });
     enrollment.progress = Math.round((completedLessons / totalLessons) * 100);
     if (enrollment.progress === 100 && enrollment.status !== 'completed') {
       enrollment.status = 'completed';
       enrollment.completedAt = new Date();
-      // ₦300 course completion bonus
       user.walletBalance = (user.walletBalance || 0) + 300;
       await user.save();
       await Transaction.create({
@@ -294,7 +332,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
     }
     await enrollment.save();
 
-    // Auto‑complete challenges
+    // Auto‑complete challenges (unchanged)
     const activeChallenges = await ChallengeProgress.find({
       userId: user._id,
       status: 'enrolled',
@@ -306,7 +344,6 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
         const challenge = cp.challengeId as any;
         if (!challenge || !challenge.completionCriteria) continue;
         const progressValue = (cp as any).progressValue || 0;
-
         if (challenge.completionCriteria.type === 'lessons') {
           const criteriaCourseId = challenge.completionCriteria.courseId?.toString();
           if (criteriaCourseId && lesson.courseId && lesson.courseId.toString() === criteriaCourseId) {
@@ -336,6 +373,7 @@ export const updateLessonProgress = async (req: Request, res: Response, next: Ne
   }
 };
 
+// ─── RATE COURSE (unchanged) ──────────────────────────────────────
 export const rateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -365,6 +403,7 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
   }
 };
 
+// ─── ASK QUESTION (unchanged) ──────────────────────────────────────
 export const askQuestion = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
