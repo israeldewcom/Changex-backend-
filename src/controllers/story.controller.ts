@@ -3,6 +3,7 @@
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
+import fs from 'fs';
 import { IUser } from '../models/User.js';
 import Story from '../models/Story.js';
 import StoryView from '../models/StoryView.js';
@@ -21,9 +22,11 @@ export const createStory = async (req: Request, res: Response, next: NextFunctio
     const isVideo = mediaType === 'video' || req.file.mimetype.startsWith('video/');
     const resourceType = isVideo ? 'video' : 'image';
 
-    const result = await uploadToCloudinary(req.file.buffer, 'stories', {
+    const result = await uploadToCloudinary(req.file.path, 'stories', {
       resource_type: resourceType,
     });
+
+    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
 
     const story = await Story.create({
       userId: user._id,
