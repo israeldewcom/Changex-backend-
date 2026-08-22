@@ -117,6 +117,7 @@ export const sendMessage = async (req: Request, res: Response, next: NextFunctio
 
     // Emit to all participants
     for (const participantId of conversation.participants) {
+      if (!participantId) continue; // skip broken/deleted-user references
       if (participantId.toString() !== user._id.toString()) {
         getIO().to(`user:${participantId}`).emit('new_message', populated);
         await Notification.create({
