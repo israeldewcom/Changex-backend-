@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/GroupLike.ts (NEW)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IGroupLike extends Document {
