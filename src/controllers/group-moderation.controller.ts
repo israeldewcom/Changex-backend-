@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/group-moderation.controller.ts (COMPLETE FIXED)
+// FILE: src/controllers/group-moderation.controller.ts (FIXED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
