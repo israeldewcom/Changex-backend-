@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/group.controller.ts (COMPLETE FIXED)
+// FILE: src/controllers/group.controller.ts (FIXED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -177,8 +177,9 @@ export const deleteGroup = async (req: Request, res: Response, next: NextFunctio
 
     await GroupMember.deleteMany({ groupId: id });
     await GroupPost.deleteMany({ groupId: id });
-    await GroupComment.deleteMany({ postId: { $in: await GroupPost.find({ groupId: id }).distinct('_id') } });
-    await GroupLike.deleteMany({ targetId: { $in: await GroupPost.find({ groupId: id }).distinct('_id') } });
+    const postIds = await GroupPost.find({ groupId: id }).distinct('_id');
+    await GroupComment.deleteMany({ postId: { $in: postIds } });
+    await GroupLike.deleteMany({ targetId: { $in: postIds } });
     await GroupBan.deleteMany({ groupId: id });
     await GroupReport.deleteMany({ groupId: id });
     await GroupAnalytics.deleteMany({ groupId: id });
