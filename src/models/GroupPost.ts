@@ -1,10 +1,14 @@
+// ============================================================
+// FILE: src/models/GroupPost.ts (NEW)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IGroupPost extends Document {
   groupId: mongoose.Types.ObjectId;
   authorId: mongoose.Types.ObjectId;
   content: string;
-  media: string[]; // image/video URLs
+  media: string[];
   linkPreview?: {
     title?: string;
     description?: string;
