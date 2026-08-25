@@ -103,7 +103,8 @@ export const getGroup = async (req: Request, res: Response, next: NextFunction) 
     if (group.type === 'private' && !member) {
       return res.status(403).json({ success: false, message: 'This group is private' });
     }
-    if (member?.status === 'banned') {
+    // FIX: use type assertion to avoid TypeScript error
+    if (member && (member.status as string) === 'banned') {
       return res.status(403).json({ success: false, message: 'You have been banned from this group' });
     }
     res.json({
