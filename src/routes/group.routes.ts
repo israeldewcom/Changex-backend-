@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/group.routes.ts (COMPLETE FIXED)
+// FILE: src/routes/group.routes.ts (FIXED)
 // ============================================================
 
 import { Router } from 'express';
