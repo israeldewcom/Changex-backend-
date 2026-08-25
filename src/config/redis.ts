@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/config/redis.ts (FIXED – TypeScript error resolved)
+// FILE: src/config/redis.ts (FIXED – TypeScript errors resolved)
 // ============================================================
 
 import Redis from 'ioredis';
@@ -9,7 +9,9 @@ import logger from '../utils/logger.js';
 let redisInstance: RedisClient | null = null;
 
 export const getRedisClient = (): RedisClient => {
-  if (redisInstance) return redisInstance;
+  if (redisInstance) {
+    return redisInstance;
+  }
 
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
@@ -17,17 +19,17 @@ export const getRedisClient = (): RedisClient => {
   }
 
   redisInstance = new Redis(redisUrl, {
-    maxRetriesPerRequest: 1,           // fail fast to avoid client floods
+    maxRetriesPerRequest: 1,
     enableReadyCheck: false,
-    lazyConnect: true,                 // connect only on first command
-    retryStrategy: (times) => {
+    lazyConnect: true,
+    retryStrategy: (times: number) => {
       if (times > 3) {
         logger.error(`Redis connection failed after ${times} retries`);
-        return null;                   // stop retrying
+        return null;
       }
       return Math.min(times * 100, 2000);
     },
-    reconnectOnError: (err) => {
+    reconnectOnError: (err: Error) => {
       const targetErrors = ['READONLY', 'ETIMEDOUT', 'ECONNRESET'];
       return targetErrors.some(e => err.message.includes(e));
     },
@@ -35,7 +37,7 @@ export const getRedisClient = (): RedisClient => {
 
   redisInstance.on('connect', () => logger.info('Redis connecting...'));
   redisInstance.on('ready', () => logger.info('Redis ready'));
-  redisInstance.on('error', (err) => {
+  redisInstance.on('error', (err: Error) => {
     if (err.message.includes('ERR max number of clients')) {
       logger.warn('Redis client limit reached – consider increasing maxclients on server');
     } else {
@@ -46,7 +48,7 @@ export const getRedisClient = (): RedisClient => {
   return redisInstance;
 };
 
-export const connectRedis = async () => {
+export const connectRedis = async (): Promise<RedisClient> => {
   const client = getRedisClient();
   try {
     await client.ping();
