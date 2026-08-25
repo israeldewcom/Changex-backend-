@@ -1,5 +1,5 @@
-  // ============================================================
-// FILE: src/index.ts (UPDATED – Non‑blocking Redis, full resilience)
+// ============================================================
+// FILE: src/index.ts (FIXED – ES module compatible)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -17,7 +17,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { connectDB, ensureIndexes } from './config/db.js';
-import { connectRedis } from './config/redis.js'; // ✅ now returns boolean, never throws
+import { connectRedis } from './config/redis.js';
 import { initializePassport } from './config/passport.js';
 
 // ─── ROUTES ────────────────────────────────────────────────────────────
@@ -38,7 +38,7 @@ import logger from './utils/logger.js';
 
 // ─── MONGOOSE & REDIS ────────────────────────────────────────────────
 import mongoose from 'mongoose';
-import redis from './config/redis.js'; // default export (the client, may be null)
+import redis from './config/redis.js';
 
 // ─── MODELS (for cleanup) ───────────────────────────────────────────
 import Enrollment from './models/Enrollment.js';
@@ -271,13 +271,15 @@ app.get('*', (req, res) => {
 app.use(errorHandler);
 
 // ─── SOCKET.IO ───────────────────────────────────────────────────────
+// Use default memory adapter – works for single instance.
+// If you need Redis adapter for multiple instances, install @socket.io/redis-adapter
+// and conditionally import it inside an async block.
 const io = new SocketIOServer(server, {
   cors: { origin: true, credentials: true },
-  // ✅ If Redis is down, Socket.IO uses memory adapter – still works
-  adapter: (redis ? require('socket.io-redis') : undefined)?.({
-    pubClient: redis || undefined,
-    subClient: redis || undefined,
-  }),
+  // adapter: (redis ? require('socket.io-redis') : undefined)?.({
+  //   pubClient: redis || undefined,
+  //   subClient: redis || undefined,
+  // }),
 });
 setupSocket(io);
 
@@ -309,13 +311,8 @@ async function bootstrap() {
     await connectDB();
     await ensureIndexes();
 
-    // ✅ Redis is now NON‑BLOCKING – even if it fails, the app starts.
-    const redisOk = await connectRedis();
-    if (redisOk) {
-      logger.info('✅ Redis connection established');
-    } else {
-      logger.warn('⚠️ Redis unavailable – continuing with in‑memory caching');
-    }
+    // Redis is non‑blocking – we already have a client (real or fake)
+    await connectRedis();
 
     await cleanupCorruptedData();
     startWorkers();
