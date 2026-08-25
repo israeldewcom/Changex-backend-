@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/GroupMember.ts (UPDATED)
+// FILE: src/models/GroupMember.ts (FIXED)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
