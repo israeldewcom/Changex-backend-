@@ -1,15 +1,22 @@
 // ============================================================
-// FILE: src/controllers/group.controller.ts (UPDATED)
+// FILE: src/controllers/group.controller.ts (COMPLETE FIXED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
 import { IUser } from '../models/User.js';
 import Group from '../models/Group.js';
 import GroupMember from '../models/GroupMember.js';
+import GroupResource from '../models/GroupResource.js';
+import GroupEvent from '../models/GroupEvent.js';
+import GroupPost from '../models/GroupPost.js';
+import GroupComment from '../models/GroupComment.js';
+import GroupLike from '../models/GroupLike.js';
+import GroupBan from '../models/GroupBan.js';
+import GroupReport from '../models/GroupReport.js';
+import GroupAnalytics from '../models/GroupAnalytics.js';
 import Conversation from '../models/Conversation.js';
 import Notification from '../models/Notification.js';
 import { getIO } from '../socket.js';
-import mongoose from 'mongoose';
 
 // ─── CREATE GROUP ────────────────────────────────────────────────────
 export const createGroup = async (req: Request, res: Response, next: NextFunction) => {
@@ -21,7 +28,6 @@ export const createGroup = async (req: Request, res: Response, next: NextFunctio
       return res.status(400).json({ success: false, message: 'Group name is required' });
     }
 
-    // Create group
     const group = await Group.create({
       name,
       description: description || '',
@@ -32,7 +38,6 @@ export const createGroup = async (req: Request, res: Response, next: NextFunctio
       memberCount: 1,
     });
 
-    // Create conversation for group chat
     const conversation = await Conversation.create({
       participants: [user._id],
       isGroup: true,
@@ -45,7 +50,6 @@ export const createGroup = async (req: Request, res: Response, next: NextFunctio
     group.conversationId = conversation._id;
     await group.save();
 
-    // Add creator as admin
     await GroupMember.create({
       groupId: group._id,
       userId: user._id,
@@ -53,8 +57,6 @@ export const createGroup = async (req: Request, res: Response, next: NextFunctio
       status: 'active',
       joinedAt: new Date(),
     });
-
-    // Update user's academyId if not already set? (optional)
 
     res.status(201).json({ success: true, data: group });
   } catch (err) {
@@ -66,7 +68,6 @@ export const createGroup = async (req: Request, res: Response, next: NextFunctio
 export const getGroups = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    // Show public groups + groups user is a member of
     const userGroups = await GroupMember.find({ userId: user._id }).distinct('groupId');
     const filter = {
       $or: [
@@ -75,7 +76,6 @@ export const getGroups = async (req: Request, res: Response, next: NextFunction)
       ],
     };
     const groups = await Group.find(filter).sort('-createdAt');
-    // Attach membership status
     const groupsWithMembership = await Promise.all(groups.map(async (g) => {
       const member = await GroupMember.findOne({ groupId: g._id, userId: user._id });
       return {
@@ -99,12 +99,10 @@ export const getGroup = async (req: Request, res: Response, next: NextFunction) 
     if (!group) {
       return res.status(404).json({ success: false, message: 'Group not found' });
     }
-    // Check if user can view (public or member)
     const member = await GroupMember.findOne({ groupId: id, userId: user._id });
     if (group.type === 'private' && !member) {
       return res.status(403).json({ success: false, message: 'This group is private' });
     }
-    // Also check if user is banned
     if (member?.status === 'banned') {
       return res.status(403).json({ success: false, message: 'You have been banned from this group' });
     }
@@ -148,7 +146,6 @@ export const updateGroup = async (req: Request, res: Response, next: NextFunctio
 
     await group.save();
 
-    // If name changed, update conversation groupName
     if (name && group.conversationId) {
       await Conversation.findByIdAndUpdate(group.conversationId, { groupName: name });
     }
@@ -174,12 +171,10 @@ export const deleteGroup = async (req: Request, res: Response, next: NextFunctio
       return res.status(404).json({ success: false, message: 'Group not found' });
     }
 
-    // Delete associated conversation
     if (group.conversationId) {
       await Conversation.findByIdAndDelete(group.conversationId);
     }
 
-    // Delete all members, posts, comments, likes, etc.
     await GroupMember.deleteMany({ groupId: id });
     await GroupPost.deleteMany({ groupId: id });
     await GroupComment.deleteMany({ postId: { $in: await GroupPost.find({ groupId: id }).distinct('_id') } });
@@ -214,7 +209,6 @@ export const joinGroup = async (req: Request, res: Response, next: NextFunction)
       return res.status(400).json({ success: false, message: 'Already a member' });
     }
 
-    // If group requires approval, set status to pending
     const status = group.settings?.postApproval ? 'pending' : 'active';
     const member = await GroupMember.create({
       groupId: id,
@@ -226,14 +220,12 @@ export const joinGroup = async (req: Request, res: Response, next: NextFunction)
 
     await Group.findByIdAndUpdate(id, { $inc: { memberCount: 1 } });
 
-    // Add user to conversation
     if (group.conversationId) {
       await Conversation.findByIdAndUpdate(group.conversationId, {
         $addToSet: { participants: user._id }
       });
     }
 
-    // Notify admins if pending
     if (status === 'pending') {
       const admins = await GroupMember.find({ groupId: id, role: 'admin' });
       for (const admin of admins) {
@@ -273,7 +265,6 @@ export const leaveGroup = async (req: Request, res: Response, next: NextFunction
     await member.deleteOne();
     await Group.findByIdAndUpdate(id, { $inc: { memberCount: -1 } });
 
-    // Remove from conversation
     const group = await Group.findById(id);
     if (group?.conversationId) {
       await Conversation.findByIdAndUpdate(group.conversationId, {
