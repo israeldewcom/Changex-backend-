@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/group-post.controller.ts (COMPLETE FIXED)
+// FILE: src/controllers/group-post.controller.ts (FIXED)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -109,7 +109,10 @@ export const getGroupPosts = async (req: Request, res: Response, next: NextFunct
 
     const postIds = posts.map(p => p._id);
     const likes = await GroupLike.find({ userId: user._id, targetId: { $in: postIds }, targetType: 'post' });
-    const likedMap = likes.reduce((acc, l) => { acc[l.targetId.toString()] = true; return acc; }, {} as Record<string, boolean>);
+    const likedMap = likes.reduce<Record<string, boolean>>((acc, l) => {
+      acc[l.targetId.toString()] = true;
+      return acc;
+    }, {});
 
     const postsWithLikes = posts.map(p => ({
       ...p.toObject(),
