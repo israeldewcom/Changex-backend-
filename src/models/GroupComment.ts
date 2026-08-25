@@ -1,3 +1,7 @@
+// ============================================================
+// FILE: src/models/GroupComment.ts (NEW)
+// ============================================================
+
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IGroupComment extends Document {
