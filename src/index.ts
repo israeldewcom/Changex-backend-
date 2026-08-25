@@ -1,5 +1,5 @@
-// ============================================================
-// FILE: src/index.ts (UPDATED - use consolidated routes)
+  // ============================================================
+// FILE: src/index.ts (UPDATED – Non‑blocking Redis, full resilience)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -17,15 +17,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { connectDB, ensureIndexes } from './config/db.js';
-import { connectRedis } from './config/redis.js';
+import { connectRedis } from './config/redis.js'; // ✅ now returns boolean, never throws
 import { initializePassport } from './config/passport.js';
 
-// ─── IMPORT CONSOLIDATED ROUTES ────────────────────────────────────────
+// ─── ROUTES ────────────────────────────────────────────────────────────
 import routes from './routes/index.js';
 
 // ─── MIDDLEWARE ──────────────────────────────────────────────────────
 import { errorHandler } from './middlewares/errorHandler.js';
-import { authenticate, authorize } from './middlewares/auth.js';
+import { authenticate } from './middlewares/auth.js';
 
 // ─── SOCKET ──────────────────────────────────────────────────────────
 import { setupSocket } from './socket.js';
@@ -38,7 +38,7 @@ import logger from './utils/logger.js';
 
 // ─── MONGOOSE & REDIS ────────────────────────────────────────────────
 import mongoose from 'mongoose';
-import redis from './config/redis.js';
+import redis from './config/redis.js'; // default export (the client, may be null)
 
 // ─── MODELS (for cleanup) ───────────────────────────────────────────
 import Enrollment from './models/Enrollment.js';
@@ -158,7 +158,7 @@ app.get('/debug/version', (req, res) => {
     timestamp: new Date().toISOString(),
     env: process.env.NODE_ENV,
     mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    redis: redis.status === 'ready' ? 'connected' : 'disconnected',
+    redis: redis && (redis as any).status === 'ready' ? 'connected' : 'disconnected',
   });
 });
 
@@ -271,7 +271,14 @@ app.get('*', (req, res) => {
 app.use(errorHandler);
 
 // ─── SOCKET.IO ───────────────────────────────────────────────────────
-const io = new SocketIOServer(server, { cors: { origin: true, credentials: true } });
+const io = new SocketIOServer(server, {
+  cors: { origin: true, credentials: true },
+  // ✅ If Redis is down, Socket.IO uses memory adapter – still works
+  adapter: (redis ? require('socket.io-redis') : undefined)?.({
+    pubClient: redis || undefined,
+    subClient: redis || undefined,
+  }),
+});
 setupSocket(io);
 
 // ─── CATCH‑ALL 404 ──────────────────────────────────────────────────
@@ -301,9 +308,18 @@ async function bootstrap() {
   try {
     await connectDB();
     await ensureIndexes();
-    await connectRedis();
+
+    // ✅ Redis is now NON‑BLOCKING – even if it fails, the app starts.
+    const redisOk = await connectRedis();
+    if (redisOk) {
+      logger.info('✅ Redis connection established');
+    } else {
+      logger.warn('⚠️ Redis unavailable – continuing with in‑memory caching');
+    }
+
     await cleanupCorruptedData();
     startWorkers();
+
     const PORT = process.env.PORT || 5000;
     server.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`);
@@ -323,7 +339,9 @@ process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
   server.close(async () => {
     await mongoose.connection.close();
-    await redis.quit();
+    if (redis && (redis as any).quit) {
+      try { await (redis as any).quit(); } catch (_) {}
+    }
     process.exit(0);
   });
 });
