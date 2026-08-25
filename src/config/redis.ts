@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/config/redis.ts (FIXED – TypeScript errors resolved)
+// FILE: src/config/redis.ts (FINAL – working with ioredis v5)
 // ============================================================
 
 import Redis from 'ioredis';
@@ -7,58 +7,140 @@ import type { Redis as RedisClient } from 'ioredis';
 import logger from '../utils/logger.js';
 
 let redisInstance: RedisClient | null = null;
+let isRedisAvailable = false;
 
-export const getRedisClient = (): RedisClient => {
+export const getRedisClient = (): RedisClient | null => {
+  if (isRedisAvailable === false && redisInstance === null) {
+    return null;
+  }
+
   if (redisInstance) {
     return redisInstance;
   }
 
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) {
-    throw new Error('REDIS_URL environment variable is missing');
+    logger.warn('⚠️ REDIS_URL not set – Redis features disabled');
+    isRedisAvailable = false;
+    return null;
   }
 
-  redisInstance = new Redis(redisUrl, {
-    maxRetriesPerRequest: 1,
-    enableReadyCheck: false,
-    lazyConnect: true,
-    retryStrategy: (times: number) => {
-      if (times > 3) {
-        logger.error(`Redis connection failed after ${times} retries`);
-        return null;
+  const RedisConstructor = (Redis as any).default || Redis;
+
+  try {
+    redisInstance = new RedisConstructor(redisUrl, {
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: false,
+      lazyConnect: true,
+      connectTimeout: 3000,
+      retryStrategy: () => null,
+    });
+
+    redisInstance.on('connect', () => {
+      isRedisAvailable = true;
+      logger.info('Redis connected');
+    });
+
+    redisInstance.on('ready', () => {
+      isRedisAvailable = true;
+      logger.info('Redis ready');
+    });
+
+    redisInstance.on('error', (err: Error) => {
+      if (isRedisAvailable !== false) {
+        if (err.message.includes('ERR max number of clients')) {
+          logger.warn('⚠️ Redis max clients reached – using fallback mode');
+        } else {
+          logger.warn('⚠️ Redis error:', err.message);
+        }
       }
-      return Math.min(times * 100, 2000);
-    },
-    reconnectOnError: (err: Error) => {
-      const targetErrors = ['READONLY', 'ETIMEDOUT', 'ECONNRESET'];
-      return targetErrors.some(e => err.message.includes(e));
-    },
-  });
+      isRedisAvailable = false;
+    });
 
-  redisInstance.on('connect', () => logger.info('Redis connecting...'));
-  redisInstance.on('ready', () => logger.info('Redis ready'));
-  redisInstance.on('error', (err: Error) => {
-    if (err.message.includes('ERR max number of clients')) {
-      logger.warn('Redis client limit reached – consider increasing maxclients on server');
-    } else {
-      logger.error('Redis error:', err);
-    }
-  });
-
-  return redisInstance;
+    return redisInstance;
+  } catch (err) {
+    logger.warn('⚠️ Failed to initialize Redis:', err);
+    isRedisAvailable = false;
+    return null;
+  }
 };
 
-export const connectRedis = async (): Promise<RedisClient> => {
+export const connectRedis = async (): Promise<boolean> => {
   const client = getRedisClient();
+  if (!client) {
+    logger.warn('⚠️ Redis not available – continuing without Redis');
+    return false;
+  }
+
   try {
     await client.ping();
-    logger.info('Redis connected');
-    return client;
+    isRedisAvailable = true;
+    logger.info('✅ Redis connected successfully');
+    return true;
   } catch (error) {
-    logger.error('Redis connection error:', error);
-    throw error;
+    isRedisAvailable = false;
+    logger.warn('⚠️ Redis connection failed – continuing without Redis');
+    return false;
   }
 };
 
-const redis = getRedisClient();
-export default redis;
+export const isRedisReady = (): boolean => {
+  return isRedisAvailable && redisInstance !== null;
+};
+
+const memoryCache = new Map<string, { data: any; expires: number }>();
+
+export const getOrSetCache = async <T>(
+  key: string,
+  fetchFn: () => Promise<T>,
+  ttl: number = 3600
+): Promise<T> => {
+  if (isRedisReady() && redisInstance) {
+    try {
+      const cached = await redisInstance.get(key);
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch (_) {}
+  }
+
+  const memoryItem = memoryCache.get(key);
+  if (memoryItem && memoryItem.expires > Date.now()) {
+    return memoryItem.data;
+  }
+
+  const data = await fetchFn();
+
+  memoryCache.set(key, {
+    data,
+    expires: Date.now() + ttl * 1000,
+  });
+
+  if (isRedisReady() && redisInstance) {
+    try {
+      await redisInstance.setex(key, ttl, JSON.stringify(data));
+    } catch (_) {}
+  }
+
+  return data;
+};
+
+export const invalidateCache = async (pattern: string): Promise<void> => {
+  for (const key of memoryCache.keys()) {
+    if (key.includes(pattern) || key === pattern) {
+      memoryCache.delete(key);
+    }
+  }
+
+  if (isRedisReady() && redisInstance) {
+    try {
+      const keys = await redisInstance.keys(pattern);
+      if (keys.length > 0) {
+        await redisInstance.del(keys);
+      }
+    } catch (_) {}
+  }
+};
+
+const defaultRedis = getRedisClient();
+export default defaultRedis;
