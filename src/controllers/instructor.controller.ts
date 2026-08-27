@@ -208,6 +208,9 @@ export const submitForReview = async (req: Request, res: Response, next: NextFun
     if (lessonCount < 20) return res.status(400).json({ success: false, message: 'Need at least 20 lessons' });
     if (!course.title || !course.description) return res.status(400).json({ success: false, message: 'Title and description required' });
 
+    // Keep totalLessons in sync with the real count at the moment of submission,
+    // so approved courses can never display a stale/zero lesson count.
+    course.totalLessons = lessonCount;
     course.approvalStatus = 'pending';
     await course.save();
     res.json({ success: true, message: 'Submitted for review' });
