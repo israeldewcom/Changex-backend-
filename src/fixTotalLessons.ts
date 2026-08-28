@@ -13,8 +13,8 @@
 // ============================================================
 
 import mongoose from 'mongoose';
-import Course from './models/Course';
-import Lesson from './models/Lesson';
+import Course from './models/Course.js';
+import Lesson from './models/Lesson.js';
 
 async function fixTotalLessons() {
   const uri = process.env.MONGODB_URI;
