@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – ES module compatible)
+// FILE: src/index.ts (FIXED – index.html in root)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -246,7 +246,7 @@ app.post('/api/v1/admin/upload-file', authenticate, uploadAnyHandler, uploadFile
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // ═════════════════════════════════════════════════════════════════════
-// SPA CATCH‑ALL ROUTE – MUST BE AFTER ALL API ROUTES
+// SPA CATCH‑ALL ROUTE – SERVES index.html FROM PROJECT ROOT
 // ═════════════════════════════════════════════════════════════════════
 app.get('*', (req, res) => {
   // If the request is for an API route, but we haven't matched it, return 404
@@ -254,22 +254,22 @@ app.get('*', (req, res) => {
     return res.status(404).json({ success: false, message: 'API route not found' });
   }
 
-  // Serve the SPA's index.html for all other GET requests
-  const indexPath = path.join(__dirname, '../public/index.html');
+  // ─── Serve index.html from the project root ──────────────────────
+  const indexPath = path.join(process.cwd(), 'index.html');
+  
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    // If index.html is missing (e.g., in development with separate frontend)
-    // Redirect to the frontend URL defined in environment
-    const frontendUrl = process.env.FRONTEND_URL || 'https://changex.academy';
+    // If index.html is missing, fallback to a helpful response
+    logger.error(`❌ index.html not found at ${indexPath}`);
     if (process.env.NODE_ENV === 'production') {
-      // In production, we expect the file to exist, so return a clear error
       res.status(404).json({
         success: false,
         message: 'Frontend asset not found. Please check your deployment.',
       });
     } else {
-      // In development, redirect to the frontend dev server
+      // In development, redirect to the frontend URL
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
       res.redirect(frontendUrl);
     }
   }
