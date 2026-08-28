@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/index.ts (FIXED – index.html in root)
+// FILE: src/index.ts (Backend‑only – no frontend serving)
 // ============================================================
 
 import dotenv from 'dotenv';
@@ -15,7 +15,6 @@ import rateLimit from 'express-rate-limit';
 import compression from 'compression';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import fs from 'fs';
 import { connectDB, ensureIndexes } from './config/db.js';
 import { connectRedis } from './config/redis.js';
 import { initializePassport } from './config/passport.js';
@@ -106,19 +105,6 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     }
     return oldJson(body);
   };
-  next();
-});
-
-// ─── RAW REQUEST LOGGER (debugging) ──────────────────────────────────
-app.use((req, res, next) => {
-  console.log(`🔍 ${req.method} ${req.url}`);
-  console.log('  Headers:', JSON.stringify(req.headers, null, 2));
-  if (req.body && Object.keys(req.body).length) {
-    console.log('  Body:', req.body);
-  }
-  if (req.headers['content-type']?.includes('multipart/form-data')) {
-    console.log('  ⚠️ Multipart request – file will be handled by multer');
-  }
   next();
 });
 
@@ -242,11 +228,11 @@ app.post('/api/v1/upload-file', authenticate, uploadAnyHandler, uploadFile);
 app.post('/api/v1/admin/upload', authenticate, uploadAnyHandler, uploadImage);
 app.post('/api/v1/admin/upload-file', authenticate, uploadAnyHandler, uploadFile);
 
-// ─── SERVE STATIC FILES ──────────────────────────────────────────────
+// ─── SERVE STATIC FILES (if any) ──────────────────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // ═════════════════════════════════════════════════════════════════════
-// SPA CATCH‑ALL ROUTE – SERVES index.html FROM PROJECT ROOT
+// CATCH‑ALL FOR NON‑API REQUESTS – RETURN 404 OR REDIRECT
 // ═════════════════════════════════════════════════════════════════════
 app.get('*', (req, res) => {
   // If the request is for an API route, but we haven't matched it, return 404
@@ -254,24 +240,24 @@ app.get('*', (req, res) => {
     return res.status(404).json({ success: false, message: 'API route not found' });
   }
 
-  // ─── Serve index.html from the project root ──────────────────────
-  const indexPath = path.join(process.cwd(), 'index.html');
+  // For any other request (frontend routes), redirect to the frontend URL
+  // or return a 404. Choose based on your setup.
+  const frontendUrl = process.env.FRONTEND_URL || 'https://changex.academy';
   
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
+  // In production, you might want to return a 404 instead of redirecting
+  // if the frontend is on a different service.
+  if (process.env.NODE_ENV === 'production') {
+    // Option 1: Redirect to frontend (if same domain, this creates a loop)
+    // res.redirect(frontendUrl);
+    
+    // Option 2: Return a clear 404 JSON for non‑API routes
+    res.status(404).json({
+      success: false,
+      message: 'This is an API server. Please visit the frontend at ' + frontendUrl,
+    });
   } else {
-    // If index.html is missing, fallback to a helpful response
-    logger.error(`❌ index.html not found at ${indexPath}`);
-    if (process.env.NODE_ENV === 'production') {
-      res.status(404).json({
-        success: false,
-        message: 'Frontend asset not found. Please check your deployment.',
-      });
-    } else {
-      // In development, redirect to the frontend URL
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3001';
-      res.redirect(frontendUrl);
-    }
+    // In development, redirect to your frontend dev server
+    res.redirect(frontendUrl);
   }
 });
 
@@ -284,7 +270,7 @@ const io = new SocketIOServer(server, {
 });
 setupSocket(io);
 
-// ─── CATCH‑ALL 404 ──────────────────────────────────────────────────
+// ─── CATCH‑ALL 404 (fallback) ─────────────────────────────────────────
 app.use('*', (req, res) => {
   logger.warn(`[404] Route not found: ${req.method} ${req.originalUrl}`);
   res.status(404).json({ success: false, message: 'Route not found' });
