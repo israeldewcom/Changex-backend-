@@ -245,24 +245,32 @@ app.post('/api/v1/admin/upload-file', authenticate, uploadAnyHandler, uploadFile
 // ─── SERVE STATIC FILES ──────────────────────────────────────────────
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
-// ─── CATCH‑ALL ROUTE (SPA) ──────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════
+// SPA CATCH‑ALL ROUTE – MUST BE AFTER ALL API ROUTES
+// ═════════════════════════════════════════════════════════════════════
 app.get('*', (req, res) => {
+  // If the request is for an API route, but we haven't matched it, return 404
   if (req.path.startsWith('/api/')) {
     return res.status(404).json({ success: false, message: 'API route not found' });
   }
 
+  // Serve the SPA's index.html for all other GET requests
   const indexPath = path.join(__dirname, '../public/index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
+    // If index.html is missing (e.g., in development with separate frontend)
+    // Redirect to the frontend URL defined in environment
     const frontendUrl = process.env.FRONTEND_URL || 'https://changex.academy';
     if (process.env.NODE_ENV === 'production') {
+      // In production, we expect the file to exist, so return a clear error
       res.status(404).json({
         success: false,
-        message: 'Frontend not served by this API. Please use the main application URL.',
+        message: 'Frontend asset not found. Please check your deployment.',
       });
     } else {
-      res.status(404).json({ success: false, message: 'Static file not found' });
+      // In development, redirect to the frontend dev server
+      res.redirect(frontendUrl);
     }
   }
 });
@@ -271,15 +279,8 @@ app.get('*', (req, res) => {
 app.use(errorHandler);
 
 // ─── SOCKET.IO ───────────────────────────────────────────────────────
-// Use default memory adapter – works for single instance.
-// If you need Redis adapter for multiple instances, install @socket.io/redis-adapter
-// and conditionally import it inside an async block.
 const io = new SocketIOServer(server, {
   cors: { origin: true, credentials: true },
-  // adapter: (redis ? require('socket.io-redis') : undefined)?.({
-  //   pubClient: redis || undefined,
-  //   subClient: redis || undefined,
-  // }),
 });
 setupSocket(io);
 
@@ -311,9 +312,7 @@ async function bootstrap() {
     await connectDB();
     await ensureIndexes();
 
-    // Redis is non‑blocking – we already have a client (real or fake)
     await connectRedis();
-
     await cleanupCorruptedData();
     startWorkers();
 
@@ -323,7 +322,7 @@ async function bootstrap() {
       logger.info(`✅ Debug: http://localhost:${PORT}/debug/version`);
       logger.info(`📍 Routes: http://localhost:${PORT}/debug/routes`);
       logger.info(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      logger.info(`📦 Features: Posts, Follows, Challenges, Ads, Interactive, Certificates, Books, Currency, SEO, Video, DMs, Stories, Groups, Splits, Cohorts, Analytics, Campaigns, Sponsorships, Paid Articles, Academies, Gamification, Live Sessions, Advanced AI, Offline`);
+      logger.info(`📦 Features: All active`);
     });
   } catch (error) {
     logger.error('❌ Failed to start server:', error);
