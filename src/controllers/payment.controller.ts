@@ -345,7 +345,54 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
         balance: user.walletBalance,
       });
 
-      if (referralCode) {
+      // Affiliate commission (mirrors course purchase logic)
+      let bookAffiliateCommission = 0;
+      let bookAffiliateUserId = null;
+      if (affiliateCode) {
+        const affiliateLink = await AffiliateLink.findOne({ code: affiliateCode });
+        if (affiliateLink) {
+          const percent = book.affiliatePercent || 0;
+          if (percent > 0) {
+            bookAffiliateCommission = (book.price || 0) * (percent / 100);
+            affiliateLink.conversions += 1;
+            affiliateLink.totalEarned = (affiliateLink.totalEarned || 0) + bookAffiliateCommission;
+            await affiliateLink.save();
+            bookAffiliateUserId = affiliateLink.userId;
+          }
+        }
+      }
+
+      if (bookAffiliateUserId && bookAffiliateCommission > 0) {
+        const bookAffiliate = await User.findById(bookAffiliateUserId);
+        if (bookAffiliate) {
+          bookAffiliate.walletBalance = (bookAffiliate.walletBalance || 0) + bookAffiliateCommission;
+          await bookAffiliate.save();
+          await Transaction.create({
+            userId: bookAffiliate._id,
+            type: 'affiliate_commission',
+            amount: bookAffiliateCommission,
+            status: 'completed',
+            description: `Commission for book: ${book.title}`,
+            reference,
+            metadata: { bookId: book._id },
+            academyId: academyId,
+          });
+          getIO().to(`user:${bookAffiliate._id}`).emit('wallet_updated', {
+            userId: bookAffiliate._id,
+            balance: bookAffiliate.walletBalance,
+          });
+          await Notification.create({
+            userId: bookAffiliate._id,
+            title: '💰 Affiliate Commission Earned',
+            message: `You earned ₦${bookAffiliateCommission.toFixed(2)} commission for a book sale!`,
+            type: 'affiliate',
+            data: { bookId: book._id, amount: bookAffiliateCommission }
+          });
+        }
+      }
+
+      // Only fall back to flat referral bonus if no affiliate commission was paid
+      if (!bookAffiliateUserId && referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== user._id.toString()) {
           const bonus = (book.price || 0) * 0.1;
