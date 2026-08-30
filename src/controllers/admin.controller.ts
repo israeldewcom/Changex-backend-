@@ -1070,8 +1070,42 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
       book.downloads = (book.downloads || 0) + 1;
       await book.save();
 
+      let bookAffiliateCommission = 0;
+      let bookAffiliateUserId = null;
+      const bookAffiliateCode = payment.metadata?.affiliateCode;
+      if (bookAffiliateCode) {
+        const affiliateLink = await AffiliateLink.findOne({ code: bookAffiliateCode });
+        if (affiliateLink) {
+          const percent = book.affiliatePercent || 0;
+          if (percent > 0) {
+            bookAffiliateCommission = (book.price || 0) * (percent / 100);
+            affiliateLink.conversions += 1;
+            affiliateLink.totalEarned = (affiliateLink.totalEarned || 0) + bookAffiliateCommission;
+            await affiliateLink.save();
+            bookAffiliateUserId = affiliateLink.userId;
+          }
+        }
+      }
+
+      if (bookAffiliateUserId && bookAffiliateCommission > 0) {
+        const bookAffiliate = await User.findById(bookAffiliateUserId);
+        if (bookAffiliate) {
+          bookAffiliate.walletBalance = (bookAffiliate.walletBalance || 0) + bookAffiliateCommission;
+          await bookAffiliate.save();
+          await Transaction.create({
+            userId: bookAffiliate._id,
+            type: 'affiliate_commission',
+            amount: bookAffiliateCommission,
+            status: 'completed',
+            description: `Commission for book: ${book.title} (manual)`,
+            reference: payment.reference,
+            metadata: { bookId: book._id },
+          });
+        }
+      }
+
       const referralCode = payment.metadata?.referralCode;
-      if (referralCode) {
+      if (!bookAffiliateUserId && referralCode) {
         const referrer = await User.findOne({ referralCode: { $regex: `^${referralCode}$`, $options: 'i' } });
         if (referrer && referrer._id.toString() !== payment.userId.toString()) {
           const bonus = (book.price || 0) * 0.1;
