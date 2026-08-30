@@ -143,9 +143,16 @@ export const trackAffiliateClick = async (req: Request, res: Response, next: Nex
     await link.save();
 
     // Set affiliate cookie for tracking purchases (30-day expiry)
+    // NOTE: httpOnly is intentionally false — the frontend reads this cookie
+    // via document.cookie (getAffiliateCodeFromCookie()) to attach the code
+    // to manual payments and Paystack metadata. sameSite:'none' + secure:true
+    // are required because the frontend and API run on different origins;
+    // without them the browser silently drops the cookie on cross-site requests.
     res.cookie('affiliate_code', code, {
       maxAge: 30 * 24 * 60 * 60 * 1000,
-      httpOnly: true,
+      httpOnly: false,
+      sameSite: 'none',
+      secure: true,
       path: '/',
     });
 
