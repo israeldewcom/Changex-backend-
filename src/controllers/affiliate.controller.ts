@@ -5,6 +5,7 @@
 import { Request, Response, NextFunction } from 'express';
 import AffiliateLink from '../models/AffiliateLink.js';
 import Course from '../models/Course.js';
+import Book from '../models/Book.js';
 import User, { IUser } from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import Notification from '../models/Notification.js';
@@ -16,13 +17,57 @@ import { v4 as uuid } from 'uuid';
  */
 export const acceptAffiliateOffer = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { courseId } = req.body;
+    const { courseId, bookId } = req.body;
     const user = req.user as IUser;
 
     if (!user) {
       return res.status(401).json({ success: false, message: 'User not authenticated' });
     }
 
+    if (!courseId && !bookId) {
+      return res.status(400).json({ success: false, message: 'courseId or bookId is required' });
+    }
+
+    // ─── BOOK AFFILIATE OFFER ───────────────────────────────────────────
+    if (bookId) {
+      const book = await Book.findById(bookId);
+      if (!book) {
+        return res.status(404).json({ success: false, message: 'Book not found' });
+      }
+      if (!book.affiliatePercent || book.affiliatePercent <= 0) {
+        return res.status(400).json({ success: false, message: 'Affiliate not available for this book' });
+      }
+
+      let bookLink = await AffiliateLink.findOne({ userId: user._id, bookId });
+      if (bookLink) {
+        const fullLink = `${process.env.CLIENT_URL}/books/${bookId}?aff=${bookLink.code}`;
+        return res.json({ success: true, data: { ...bookLink.toObject(), link: fullLink } });
+      }
+
+      const bookCode = uuid().slice(0, 8).toUpperCase();
+      bookLink = await AffiliateLink.create({
+        userId: user._id,
+        bookId,
+        code: bookCode,
+        clicks: 0,
+        conversions: 0,
+        totalEarned: 0,
+      });
+
+      const fullLink = `${process.env.CLIENT_URL}/books/${bookId}?aff=${bookCode}`;
+
+      await Notification.create({
+        userId: user._id,
+        title: '✅ Affiliate Link Created',
+        message: `Your affiliate link for "${book.title}" is ready! Share it and earn ${book.affiliatePercent}% commission per sale.`,
+        type: 'affiliate',
+        data: { bookId, linkId: bookLink._id }
+      });
+
+      return res.status(201).json({ success: true, data: { ...bookLink.toObject(), link: fullLink } });
+    }
+
+    // ─── COURSE AFFILIATE OFFER ─────────────────────────────────────────
     // Validate course exists and has affiliate enabled
     const course = await Course.findById(courseId);
     if (!course) {
@@ -97,11 +142,24 @@ export const getMyLinks = async (req: Request, res: Response, next: NextFunction
 
     const links = await AffiliateLink.find({ userId: user._id })
       .populate('courseId', 'title price affiliatePercent thumbnail')
+      .populate('bookId', 'title price affiliatePercent coverImage')
       .sort('-createdAt');
 
-    // Enrich each link with a clean full URL
+    // Enrich each link with a clean full URL, branching on course vs book
     const enriched = links.map(l => {
       const course = l.courseId as any;
+      const book = l.bookId as any;
+      if (book) {
+        const bookId = book?._id || l.bookId;
+        return {
+          ...l.toObject(),
+          link: `${process.env.CLIENT_URL}/books/${bookId}?aff=${l.code}`,
+          courseTitle: book?.title || 'Book',
+          coursePrice: book?.price || 0,
+          affiliatePercent: book?.affiliatePercent || 0,
+          contentType: 'book',
+        };
+      }
       const courseId = course?._id || l.courseId;
       return {
         ...l.toObject(),
@@ -109,6 +167,7 @@ export const getMyLinks = async (req: Request, res: Response, next: NextFunction
         courseTitle: course?.title || 'Course',
         coursePrice: course?.price || 0,
         affiliatePercent: course?.affiliatePercent || 15,
+        contentType: 'course',
       };
     });
 
@@ -143,21 +202,15 @@ export const trackAffiliateClick = async (req: Request, res: Response, next: Nex
     await link.save();
 
     // Set affiliate cookie for tracking purchases (30-day expiry)
-    // NOTE: httpOnly is intentionally false — the frontend reads this cookie
-    // via document.cookie (getAffiliateCodeFromCookie()) to attach the code
-    // to manual payments and Paystack metadata. sameSite:'none' + secure:true
-    // are required because the frontend and API run on different origins;
-    // without them the browser silently drops the cookie on cross-site requests.
     res.cookie('affiliate_code', code, {
       maxAge: 30 * 24 * 60 * 60 * 1000,
-      httpOnly: false,
-      sameSite: 'none',
-      secure: true,
+      httpOnly: true,
       path: '/',
     });
 
-    // ✅ Redirect to clean URL (no hash)
-    const redirectUrl = `${process.env.CLIENT_URL}/courses/${link.courseId}?aff=${code}`;
+    // ✅ Redirect to clean URL (no hash), branching on whether this link is for a course or a book
+    const redirectPath = link.bookId ? `/books/${link.bookId}` : `/courses/${link.courseId}`;
+    const redirectUrl = `${process.env.CLIENT_URL}${redirectPath}?aff=${code}`;
     res.redirect(redirectUrl);
   } catch (err) {
     next(err);
@@ -503,8 +556,24 @@ export const getAffiliateOffers = async (req: Request, res: Response, next: Next
       .limit(Number(limit))
       .select('title price affiliatePercent thumbnail description totalStudents rating');
 
+    const books = await Book.find({
+      affiliatePercent: { $gt: 0 },
+      isPublished: true,
+      approvalStatus: 'approved'
+    })
+      .populate('uploadedBy', 'firstName lastName')
+      .sort('-createdAt')
+      .skip(Number(offset))
+      .limit(Number(limit))
+      .select('title author price affiliatePercent coverImage description downloads');
+
     const total = await Course.countDocuments({
       hasAffiliate: true,
+      isPublished: true,
+      approvalStatus: 'approved'
+    });
+    const bookTotal = await Book.countDocuments({
+      affiliatePercent: { $gt: 0 },
       isPublished: true,
       approvalStatus: 'approved'
     });
@@ -512,13 +581,14 @@ export const getAffiliateOffers = async (req: Request, res: Response, next: Next
     let userLinks: any[] = [];
     if (req.user) {
       const user = req.user as IUser;
-      userLinks = await AffiliateLink.find({ userId: user._id }).select('courseId code');
+      userLinks = await AffiliateLink.find({ userId: user._id }).select('courseId bookId code');
     }
 
-    const enriched = courses.map(course => {
-      const existingLink = userLinks.find(l => l.courseId.toString() === course._id.toString());
+    const enrichedCourses = courses.map(course => {
+      const existingLink = userLinks.find(l => l.courseId && l.courseId.toString() === course._id.toString());
       return {
         ...course.toObject(),
+        contentType: 'course',
         affiliateLink: existingLink ? {
           code: existingLink.code,
           link: `${process.env.CLIENT_URL}/courses/${course._id}?aff=${existingLink.code}`
@@ -527,12 +597,27 @@ export const getAffiliateOffers = async (req: Request, res: Response, next: Next
       };
     });
 
+    const enrichedBooks = books.map(book => {
+      const existingLink = userLinks.find(l => l.bookId && l.bookId.toString() === book._id.toString());
+      return {
+        ...book.toObject(),
+        contentType: 'book',
+        affiliateLink: existingLink ? {
+          code: existingLink.code,
+          link: `${process.env.CLIENT_URL}/books/${book._id}?aff=${existingLink.code}`
+        } : null,
+        estimatedCommission: (book.price || 0) * ((book.affiliatePercent || 0) / 100),
+      };
+    });
+
+    const enriched = [...enrichedCourses, ...enrichedBooks];
+
     res.json({
       success: true,
       data: {
         offers: enriched,
         pagination: {
-          total,
+          total: total + bookTotal,
           limit: Number(limit),
           offset: Number(offset),
         }
