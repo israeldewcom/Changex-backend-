@@ -17,6 +17,8 @@ router.get('/leaderboard', userController.getLeaderboard);
 // ─── AUTHENTICATED ROUTES ──────────────────────────────────────
 router.use(authenticate);
 
+router.get('/search', userController.searchUsers);
+
 // ─── Profile ──────────────────────────────────────────────────
 router.get('/profile', userController.getProfile);
 router.put('/profile', userController.updateProfile);
