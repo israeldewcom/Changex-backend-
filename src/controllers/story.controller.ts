@@ -9,7 +9,6 @@ import Story from '../models/Story.js';
 import StoryView from '../models/StoryView.js';
 import Follow from '../models/Follow.js';
 import { uploadToCloudinary } from '../services/cloudinary.js';
-import { invalidateCache } from '../services/cache.js';
 
 export const createStory = async (req: Request, res: Response, next: NextFunction) => {
   try {
