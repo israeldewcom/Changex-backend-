@@ -256,6 +256,26 @@ export const getLeaderboard = async (req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 };
 
+// ─── SEARCH USERS (for starting new conversations) ─────────────
+export const searchUsers = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = req.user as IUser;
+    const { q, limit = 15 } = req.query;
+    if (!q || String(q).trim().length < 2) {
+      return res.json({ success: true, data: [] });
+    }
+    const regex = new RegExp(String(q).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const users = await User.find({
+      _id: { $ne: user._id },
+      $or: [{ firstName: regex }, { lastName: regex }, { email: regex }],
+    })
+      .limit(Number(limit))
+      .select('firstName lastName avatarUrl email')
+      .lean();
+    res.json({ success: true, data: users });
+  } catch (err) { next(err); }
+};
+
 // ─── REFERRALS (unchanged) ────────────────────────────────────
 export const getReferrals = async (req: Request, res: Response, next: NextFunction) => {
   try {
