@@ -60,8 +60,18 @@ export const getOrSetCache = async <T>(
 // ─── Invalidate cache (Redis + memory) ──────────────────────
 export const invalidateCache = async (pattern: string): Promise<void> => {
   // 1. Clear memory cache
+  // `pattern` may be a glob like "courses:*" (wildcard) or an exact key
+  // like "course:123". `key.includes(pattern)` never matches wildcard
+  // patterns because the literal "*" character never appears inside a
+  // real cache key, so those entries were never being cleared. Convert
+  // the glob to a regex (same approach as the FakeRedis client) so both
+  // wildcard and exact patterns are honored.
+  const isGlob = pattern.includes('*');
+  const regex = isGlob
+    ? new RegExp('^' + pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$')
+    : null;
   for (const key of memoryCache.keys()) {
-    if (key.includes(pattern) || key === pattern) {
+    if (regex ? regex.test(key) : key === pattern) {
       memoryCache.delete(key);
     }
   }
