@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/course.controller.ts (UPDATED - academy scoping + live lesson counts + course preview data)
+// FILE: src/controllers/course.controller.ts (UPDATED - academy scoping + live lesson counts + course preview data + view tracking)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -125,13 +125,13 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
     const data = await getOrSetCache(cacheKey, async () => {
       // NOTE: totalLessons is intentionally NOT selected from Course here —
       // it's a cached field that can drift out of sync. We select the
-      // fields that ARE safe to trust as-is, plus the new preview fields
+      // fields that ARE safe to trust as-is, plus the new preview field
       // (whatYouWillLearn) so the Explore list can show a short teaser,
       // then attach a live, always-correct lesson count below.
       const courses = await Course.find(filter)
         .skip(Number(offset))
         .limit(Number(limit))
-        .select('title price salePrice thumbnail level slug instructorId totalStudents avgRating academyId academyOnly whatYouWillLearn')
+        .select('title price salePrice thumbnail level slug instructorId totalStudents avgRating academyId academyOnly whatYouWillLearn views')
         .populate('instructorId', 'firstName lastName')
         .lean();
       const coursesWithLessonCounts = await attachLiveLessonCounts(courses);
@@ -489,6 +489,31 @@ export const rateCourse = async (req: Request, res: Response, next: NextFunction
     await course.save();
     await invalidateCourseCache(course._id.toString());
     res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── TRACK COURSE VIEW ────────────────────────────────────────────
+// The frontend calls POST /courses/:id/view on every course open
+// (openBuyCourse, curriculum navigation). This makes that call actually
+// work — no auth required, since view counts should reflect all
+// visitors, not just logged-in users.
+export const trackCourseView = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const course = await Course.findByIdAndUpdate(
+      id,
+      { $inc: { views: 1 } },
+      { new: true, select: 'views' }
+    );
+    if (!course) {
+      return res.status(404).json({ success: false, message: 'Course not found' });
+    }
+    // Invalidate the cached list/detail views so the new count shows up
+    // without waiting out the existing 3600s/7200s cache TTLs.
+    await invalidateCourseCache(id);
+    res.json({ success: true, data: { views: course.views } });
   } catch (err) {
     next(err);
   }
