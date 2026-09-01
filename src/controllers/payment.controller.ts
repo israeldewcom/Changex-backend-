@@ -70,6 +70,20 @@ export const verifyTransaction = async (req: Request, res: Response, next: NextF
     const user = req.user as IUser;
     if (!reference) return res.status(400).json({ success: false, message: 'Reference required' });
 
+    // ─── IDEMPOTENCY GUARD ─────────────────────────────────────────────
+    // Paystack keeps returning "success" every time you verify an
+    // already-successful reference. Without this check, calling this
+    // endpoint twice (double-click, page refresh, retry, or a deliberate
+    // repeat call) would re-run enrollment + wallet credits + affiliate
+    // and instructor commissions again on every call. This must run
+    // before any writes below. The unique index on Transaction.reference
+    // (see model change) is the backstop for the rare race where two
+    // requests both pass this check at nearly the same instant.
+    const existingTx = await Transaction.findOne({ reference, status: 'completed' });
+    if (existingTx) {
+      return res.json({ success: true, message: 'Payment already verified', data: existingTx });
+    }
+
     const verification = await axios.get(`${PAYSTACK_BASE}/transaction/verify/${reference}`, {
       headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` },
     });
@@ -595,17 +609,27 @@ export const withdraw = async (req: Request, res: Response, next: NextFunction) 
     if (amount < 5000) {
       return res.status(400).json({ success: false, message: 'Minimum withdrawal is ₦5,000' });
     }
-    if (amount > user.walletBalance) {
-      return res.status(400).json({ success: false, message: 'Insufficient balance' });
-    }
 
     const feeRate = 0.1;
     const fee = amount * feeRate;
     const netAmount = amount - fee;
 
-    user.walletBalance -= amount;
-    user.pendingWithdrawal += netAmount;
-    await user.save();
+    // ─── ATOMIC BALANCE CHECK-AND-DEDUCT ───────────────────────────────
+    // The previous version read user.walletBalance, checked it in JS, then
+    // saved separately. Two withdrawal requests fired close together (a
+    // double-tap, a retry, or a deliberate script) could both read the same
+    // starting balance before either write landed, so both would pass the
+    // check and the second withdrawal would push the balance negative.
+    // Doing the check and the decrement as one atomic DB operation closes
+    // that gap: only one of two simultaneous requests can succeed.
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: user._id, walletBalance: { $gte: amount } },
+      { $inc: { walletBalance: -amount, pendingWithdrawal: netAmount } },
+      { new: true }
+    );
+    if (!updatedUser) {
+      return res.status(400).json({ success: false, message: 'Insufficient balance' });
+    }
 
     await Transaction.create({
       userId: user._id,
