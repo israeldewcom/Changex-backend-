@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/course.controller.ts (UPDATED - academy scoping + totalLessons fix)
+// FILE: src/controllers/course.controller.ts (UPDATED - academy scoping + live lesson counts + course preview data)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -80,29 +80,23 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
-// ─── Helper: attach a LIVE lesson count to one or many course objects ──────
+// ─── Helper: attach LIVE lesson counts to a list of course objects ────────
 // totalLessons on the Course document is a cached counter that is only
 // ever incremented/decremented by instructor.controller.ts's
 // createLesson/deleteLesson. Any lesson that enters or leaves the
 // database another way (seed script, bulk import, direct DB edit) makes
 // that cached number wrong without touching the real Lesson collection.
-// These helpers compute the true count directly from Lesson on every
-// read, so the number shown to users can never drift out of sync again,
-// regardless of how lessons were created.
-async function attachLiveLessonCount(course: any) {
-  const liveCount = await Lesson.countDocuments({ courseId: course._id });
-  return { ...course, totalLessons: liveCount };
-}
-
+// This computes the true count directly from Lesson on every read, so
+// the number shown to users can never drift out of sync again.
 async function attachLiveLessonCounts(courses: any[]) {
   if (courses.length === 0) return courses;
-  const courseIds = courses.map(c => c._id);
+  const courseIds = courses.map((c) => c._id);
   const counts = await Lesson.aggregate([
     { $match: { courseId: { $in: courseIds } } },
     { $group: { _id: '$courseId', count: { $sum: 1 } } },
   ]);
-  const countMap = new Map(counts.map(c => [c._id.toString(), c.count]));
-  return courses.map(c => ({
+  const countMap = new Map(counts.map((c) => [c._id.toString(), c.count]));
+  return courses.map((c) => ({
     ...c,
     totalLessons: countMap.get(c._id.toString()) || 0,
   }));
@@ -130,12 +124,14 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
     const cacheKey = `courses:${JSON.stringify({ category, level, search, limit, offset, academyId })}`;
     const data = await getOrSetCache(cacheKey, async () => {
       // NOTE: totalLessons is intentionally NOT selected from Course here —
-      // it's a cached field that can drift. We select the fields that ARE
-      // safe to trust, then attach a live, always-correct lesson count below.
+      // it's a cached field that can drift out of sync. We select the
+      // fields that ARE safe to trust as-is, plus the new preview fields
+      // (whatYouWillLearn) so the Explore list can show a short teaser,
+      // then attach a live, always-correct lesson count below.
       const courses = await Course.find(filter)
         .skip(Number(offset))
         .limit(Number(limit))
-        .select('title price thumbnail level slug instructorId totalStudents avgRating academyId academyOnly')
+        .select('title price salePrice thumbnail level slug instructorId totalStudents avgRating academyId academyOnly whatYouWillLearn')
         .populate('instructorId', 'firstName lastName')
         .lean();
       const coursesWithLessonCounts = await attachLiveLessonCounts(courses);
@@ -149,7 +145,7 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
   }
 };
 
-// ==================== GET SINGLE COURSE (CACHED, with academy check) ====================
+// ==================== GET SINGLE COURSE (CACHED, with academy check + curriculum preview) ====================
 export const getCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -199,15 +195,46 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
     }
 
     let enrollment = null;
-    if (req.user) {
-      const user = req.user as IUser;
-      enrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id });
+    const reqUser = req.user as IUser | undefined;
+    if (reqUser) {
+      enrollment = await Enrollment.findOne({ userId: reqUser._id, courseId: course._id });
     }
+
+    // ─── Curriculum preview for non-enrolled users ──────────────────────
+    // Previously this endpoint returned the FULL lesson objects (including
+    // videoUrl and content) to anyone who hit it, enrolled or not — that
+    // was a content-leak bug in the opposite direction of the "0 lessons"
+    // problem. Now: a free course, or a course the user is enrolled in,
+    // still returns full lesson content as before. A paid course being
+    // viewed by someone who hasn't enrolled/paid gets a preview version of
+    // each lesson — title, type, order, duration — so buyers can see the
+    // full curriculum shape and know exactly what they're paying for,
+    // without being able to access the actual video/text/assignment content
+    // before purchase.
+    const isFreeCourse = !course.price || course.price === 0;
+    const hasAccess = !!enrollment || isFreeCourse;
+
+    const lessonsForResponse = hasAccess
+      ? course.lessons
+      : (course.lessons || []).map((l: any) => ({
+          _id: l._id,
+          title: l.title,
+          type: l.type,
+          duration: l.duration,
+          order: l.order,
+          locked: true,
+        }));
 
     res.json({
       success: true,
       data: {
         ...course,
+        lessons: lessonsForResponse,
+        hasAccess,
+        // whatYouWillLearn, requirements, and targetAudience are already
+        // present on `course` via the ...found.toObject() spread above,
+        // once they're set on the Course document (see Course.ts schema
+        // update) — no extra work needed here to surface them.
         enrollment: enrollment ? { progress: enrollment.progress, status: enrollment.status } : null,
       },
     });
@@ -222,7 +249,7 @@ export const invalidateCourseCache = async (courseId: string) => {
   await invalidateCache('courses:*');
 };
 
-// ─── GET USER ENROLLMENTS (with academy scope) ─────────────────────
+// ─── GET USER ENROLLMENTS (with academy scope + live lesson counts) ────
 export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
@@ -239,8 +266,8 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
       })
       .lean();
 
-    // Replace each populated course's cached totalLessons with a live count,
-    // same reasoning as getPublishedCourses above.
+    // Replace each populated course's cached totalLessons with a live
+    // count, same reasoning as attachLiveLessonCounts above.
     const courseIds = enrollments
       .map((e: any) => e.courseId?._id)
       .filter(Boolean);
@@ -248,7 +275,7 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
       { $match: { courseId: { $in: courseIds } } },
       { $group: { _id: '$courseId', count: { $sum: 1 } } },
     ]);
-    const countMap = new Map(counts.map(c => [c._id.toString(), c.count]));
+    const countMap = new Map(counts.map((c) => [c._id.toString(), c.count]));
 
     const formatted = enrollments.map(enrollment => {
       const course = enrollment.courseId as any;
@@ -256,25 +283,34 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
         course.totalLessons = countMap.get(course._id.toString()) || 0;
       }
       return {
-        ...enrollment,
-        courseId: course,
+        _id: enrollment._id,
+        userId: enrollment.userId,
+        course: course,
+        progress: enrollment.progress || 0,
+        status: enrollment.status,
+        startedAt: enrollment.startedAt,
+        completedAt: enrollment.completedAt,
+        courseId: course?._id || enrollment.courseId,
+        academyId: enrollment.academyId,
       };
     });
-
     res.json({ success: true, data: formatted });
   } catch (err) {
     next(err);
   }
 };
 
-// ─── ENROLL IN COURSE (unchanged apart from totalLessons fix below) ────
-export const enrollInCourse = async (req: Request, res: Response, next: NextFunction) => {
+// ─── ENROLL COURSE (with academy check + live lesson count on response) ─
+export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
+    if (!user || !user._id) {
+      console.error('[ENROLL] Unauthenticated attempt. Headers:', req.headers.authorization);
+      return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
+    }
     const course = await Course.findById(req.params.id);
-    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
-    if (!course.isPublished) {
-      return res.status(400).json({ success: false, message: 'Course is not published' });
+    if (!course || !course.isPublished) {
+      return res.status(404).json({ success: false, message: 'Course not available' });
     }
 
     // ─── Academy access check ──────────────────────────────────────────
@@ -303,11 +339,13 @@ export const enrollInCourse = async (req: Request, res: Response, next: NextFunc
     const newEnrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id })
       .populate('courseId', 'title thumbnail totalLessons price rating level');
 
-    // Attach a live lesson count to the populated course before responding.
+    // Attach a live lesson count to the populated course before responding,
+    // same reasoning as everywhere else in this file.
     let responseCourse: any = newEnrollment?.courseId;
     if (responseCourse && responseCourse._id) {
       const liveCount = await Lesson.countDocuments({ courseId: responseCourse._id });
-      responseCourse = { ...responseCourse.toObject?.() ?? responseCourse, totalLessons: liveCount };
+      const plain = typeof responseCourse.toObject === 'function' ? responseCourse.toObject() : responseCourse;
+      responseCourse = { ...plain, totalLessons: liveCount };
     }
 
     res.json({
@@ -329,7 +367,7 @@ export const enrollInCourse = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-// ─── UPDATE LESSON PROGRESS (unchanged) ──────────────────────────────
+// ─── UPDATE LESSON PROGRESS (unchanged, but adds academyId to progress) ──
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
