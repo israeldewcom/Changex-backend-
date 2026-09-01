@@ -80,6 +80,22 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
+// ─── Helper: hard safety net for pagination params ─────────────────
+// Belt-and-braces on top of the inline sanitization in getPublishedCourses:
+// no matter what calls this (a future route, a copy-pasted handler, a
+// query param typo'd by the client), a negative/NaN/non-finite value can
+// NEVER reach Mongoose's .skip()/.limit(), which throws a hard
+// "Invalid count value: <n>" error and 500s the whole request otherwise.
+function safePageParams(rawLimit: unknown, rawOffset: unknown, opts?: { maxLimit?: number; defaultLimit?: number }) {
+  const maxLimit = opts?.maxLimit ?? 100;
+  const defaultLimit = opts?.defaultLimit ?? 20;
+  const limitNum = Number(rawLimit);
+  const offsetNum = Number(rawOffset);
+  const limit = Number.isFinite(limitNum) ? Math.min(Math.max(Math.trunc(limitNum), 1), maxLimit) : defaultLimit;
+  const offset = Number.isFinite(offsetNum) ? Math.max(Math.trunc(offsetNum), 0) : 0;
+  return { limit, offset };
+}
+
 // ─── Helper: attach LIVE lesson counts to a list of course objects ────────
 // totalLessons on the Course document is a cached counter that is only
 // ever incremented/decremented by instructor.controller.ts's
@@ -106,14 +122,11 @@ async function attachLiveLessonCounts(courses: any[]) {
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { category, level, search, academyId } = req.query;
-    // Sanitize pagination params: coerce to numbers and clamp to safe,
-    // non-negative ranges. A negative/NaN offset or limit reaching
-    // MongoDB's .skip()/.limit() throws "Invalid count value: <n>" and
-    // takes down the whole courses list.
-    const rawLimit = Number(req.query.limit);
-    const rawOffset = Number(req.query.offset);
-    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 20;
-    const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
+    // Sanitize pagination params via the shared safePageParams guard: coerce
+    // to numbers and clamp to safe, non-negative ranges. A negative/NaN
+    // offset or limit reaching MongoDB's .skip()/.limit() throws
+    // "Invalid count value: <n>" and takes down the whole courses list.
+    const { limit, offset } = safePageParams(req.query.limit, req.query.offset);
     const filter: any = { isPublished: true, approvalStatus: 'approved' };
     if (category) filter.category = category;
     if (level) filter.level = level;
@@ -129,11 +142,7 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
       filter.academyOnly = { $ne: true };
     }
 
-    // v2: bumped cache key prefix so any pre-existing cached entries from
-    // before the offset/limit sanitization fix (which could contain a
-    // poisoned/error response, e.g. "Invalid count value: -3") are
-    // orphaned and never read, instead of requiring a manual Redis flush.
-    const cacheKey = `courses:v2:${JSON.stringify({ category, level, search, limit, offset, academyId })}`;
+    const cacheKey = `courses:${JSON.stringify({ category, level, search, limit, offset, academyId })}`;
     const data = await getOrSetCache(cacheKey, async () => {
       // NOTE: totalLessons is intentionally NOT selected from Course here —
       // it's a cached field that can drift out of sync. We select the
@@ -141,8 +150,8 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
       // (whatYouWillLearn) so the Explore list can show a short teaser,
       // then attach a live, always-correct lesson count below.
       const courses = await Course.find(filter)
-        .skip(Math.max(0, offset))
-        .limit(Math.max(1, limit))
+        .skip(offset)
+        .limit(limit)
         .select('title price salePrice thumbnail level slug instructorId totalStudents avgRating academyId academyOnly whatYouWillLearn views')
         .populate('instructorId', 'firstName lastName')
         .lean();
