@@ -13,6 +13,22 @@ interface CacheItem {
 
 const memoryCache = new Map<string, CacheItem>();
 
+// A hung/half-open Redis connection (e.g. lazyConnect negotiating with an
+// unreachable or slow host) can leave a command's promise neither
+// resolved nor rejected, so ioredis's own connectTimeout doesn't help —
+// that only bounds the TCP handshake, not a stuck command. Racing every
+// Redis call against a short local timeout guarantees callers always
+// fall through to memory/Mongo instead of hanging the request forever.
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> => {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Redis call timed out after ${ms}ms`)), ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+};
+
 // ─── Get cached data (tries Redis, then memory) ──────────────
 export const getOrSetCache = async <T>(
   key: string,
@@ -21,12 +37,12 @@ export const getOrSetCache = async <T>(
 ): Promise<T> => {
   // 1. Try Redis
   try {
-    const cached = await redisClient.get(key);
+    const cached = await withTimeout(redisClient.get(key), 2000);
     if (cached) {
       return JSON.parse(cached) as T;
     }
   } catch (err) {
-    // Redis error – fall through to memory
+    // Redis error or timeout – fall through to memory
     logger.debug(`Redis get error for key ${key}:`, err);
   }
 
@@ -48,9 +64,9 @@ export const getOrSetCache = async <T>(
   // 5. Store in Redis (if available)
   try {
     const safeTtl = Number.isFinite(ttl) && ttl > 0 ? Math.floor(ttl) : 3600;
-    await redisClient.setex(key, safeTtl, JSON.stringify(data));
+    await withTimeout(redisClient.setex(key, safeTtl, JSON.stringify(data)), 2000);
   } catch (err) {
-    // Redis error – ignore, we have memory fallback
+    // Redis error or timeout – ignore, we have memory fallback
     logger.debug(`Redis set error for key ${key}:`, err);
   }
 
@@ -78,12 +94,12 @@ export const invalidateCache = async (pattern: string): Promise<void> => {
 
   // 2. Clear Redis
   try {
-    const keys = await redisClient.keys(pattern);
+    const keys = await withTimeout(redisClient.keys(pattern), 2000);
     if (keys.length > 0) {
-      await redisClient.del(keys);
+      await withTimeout(redisClient.del(keys), 2000);
     }
   } catch (err) {
-    // Redis error – ignore
+    // Redis error or timeout – ignore
     logger.debug(`Redis invalidate error for pattern ${pattern}:`, err);
   }
 };
@@ -107,7 +123,7 @@ export const setCache = async <T>(
 
   // Redis
   try {
-    await redisClient.setex(key, ttl, JSON.stringify(value));
+    await withTimeout(redisClient.setex(key, ttl, JSON.stringify(value)), 2000);
   } catch (err) {
     logger.debug(`Redis set error for key ${key}:`, err);
   }
@@ -117,7 +133,7 @@ export const setCache = async <T>(
 export const getCache = async <T>(key: string): Promise<T | null> => {
   // Redis first
   try {
-    const cached = await redisClient.get(key);
+    const cached = await withTimeout(redisClient.get(key), 2000);
     if (cached) {
       return JSON.parse(cached) as T;
     }
@@ -136,7 +152,7 @@ export const getCache = async <T>(key: string): Promise<T | null> => {
 export const deleteCache = async (key: string): Promise<void> => {
   memoryCache.delete(key);
   try {
-    await redisClient.del(key);
+    await withTimeout(redisClient.del(key), 2000);
   } catch (_) {}
 };
 
@@ -144,9 +160,9 @@ export const deleteCache = async (key: string): Promise<void> => {
 export const clearAllCache = async (): Promise<void> => {
   memoryCache.clear();
   try {
-    const keys = await redisClient.keys('*');
+    const keys = await withTimeout(redisClient.keys('*'), 2000);
     if (keys.length > 0) {
-      await redisClient.del(keys);
+      await withTimeout(redisClient.del(keys), 2000);
     }
   } catch (_) {}
 };
