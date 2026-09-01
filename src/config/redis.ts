@@ -103,13 +103,11 @@ if (!redisUrl) {
     });
 
     client.on('error', (err: Error) => {
-      if (err.message.includes('ERR max number of clients')) {
-        logger.warn('⚠️ Redis max clients reached – switching to in‑memory fallback');
-        // Switch to fake client on error
-        redisClient = new FakeRedis() as unknown as RedisClient;
-      } else {
-        logger.warn('⚠️ Redis error:', err.message);
-      }
+      logger.warn(`⚠️ Redis error – switching to in‑memory fallback: ${err.message}`);
+      // Switch to fake client on ANY redis error (connection resets,
+      // protocol errors during reconnect, max-clients, etc.) so a
+      // transient Redis hiccup never bubbles up as a raw error to users.
+      redisClient = new FakeRedis() as unknown as RedisClient;
     });
 
     redisClient = client as RedisClient;
