@@ -185,6 +185,18 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
     }
 };
 
+// ─── TRACK COURSE VIEW ─────────────────────────────────────────────
+export const trackCourseView = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { id } = req.params;
+        await Course.findByIdAndUpdate(id, { $inc: { views: 1 } });
+        await invalidateCourseCache(id);
+        res.json({ success: true });
+    } catch (err) {
+        next(err);
+    }
+};
+
 // ─── GET USER ENROLLMENTS ──────────────────────────────────────────
 export const getUserEnrollments = async (req: Request, res: Response, next: NextFunction) => {
     try {
