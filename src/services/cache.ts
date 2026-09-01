@@ -47,7 +47,8 @@ export const getOrSetCache = async <T>(
 
   // 5. Store in Redis (if available)
   try {
-    await redisClient.setex(key, ttl, JSON.stringify(data));
+    const safeTtl = Number.isFinite(ttl) && ttl > 0 ? Math.floor(ttl) : 3600;
+    await redisClient.setex(key, safeTtl, JSON.stringify(data));
   } catch (err) {
     // Redis error – ignore, we have memory fallback
     logger.debug(`Redis set error for key ${key}:`, err);
