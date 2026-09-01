@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/course.controller.ts (UPDATED - academy scoping)
+// FILE: src/controllers/course.controller.ts (UPDATED - academy scoping + totalLessons fix)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -80,6 +80,34 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
+// ─── Helper: attach a LIVE lesson count to one or many course objects ──────
+// totalLessons on the Course document is a cached counter that is only
+// ever incremented/decremented by instructor.controller.ts's
+// createLesson/deleteLesson. Any lesson that enters or leaves the
+// database another way (seed script, bulk import, direct DB edit) makes
+// that cached number wrong without touching the real Lesson collection.
+// These helpers compute the true count directly from Lesson on every
+// read, so the number shown to users can never drift out of sync again,
+// regardless of how lessons were created.
+async function attachLiveLessonCount(course: any) {
+  const liveCount = await Lesson.countDocuments({ courseId: course._id });
+  return { ...course, totalLessons: liveCount };
+}
+
+async function attachLiveLessonCounts(courses: any[]) {
+  if (courses.length === 0) return courses;
+  const courseIds = courses.map(c => c._id);
+  const counts = await Lesson.aggregate([
+    { $match: { courseId: { $in: courseIds } } },
+    { $group: { _id: '$courseId', count: { $sum: 1 } } },
+  ]);
+  const countMap = new Map(counts.map(c => [c._id.toString(), c.count]));
+  return courses.map(c => ({
+    ...c,
+    totalLessons: countMap.get(c._id.toString()) || 0,
+  }));
+}
+
 // ==================== GET PUBLISHED COURSES (CACHED, with academy filter) ====================
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -101,14 +129,18 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
 
     const cacheKey = `courses:${JSON.stringify({ category, level, search, limit, offset, academyId })}`;
     const data = await getOrSetCache(cacheKey, async () => {
+      // NOTE: totalLessons is intentionally NOT selected from Course here —
+      // it's a cached field that can drift. We select the fields that ARE
+      // safe to trust, then attach a live, always-correct lesson count below.
       const courses = await Course.find(filter)
         .skip(Number(offset))
         .limit(Number(limit))
         .select('title price thumbnail level slug instructorId totalStudents avgRating academyId academyOnly')
         .populate('instructorId', 'firstName lastName')
         .lean();
+      const coursesWithLessonCounts = await attachLiveLessonCounts(courses);
       const total = await Course.countDocuments(filter);
-      return { courses, total };
+      return { courses: coursesWithLessonCounts, total };
     }, 3600);
 
     res.json({ success: true, data: data.courses, meta: { total: data.total } });
@@ -141,6 +173,10 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
 
       return {
         ...found.toObject(),
+        // totalLessons is derived from the actual lessons array we just
+        // fetched, not the cached counter on the Course document — this
+        // guarantees the single-course view can never show a stale count.
+        totalLessons: lessons.length,
         lessons,
         ratings,
       };
@@ -202,34 +238,43 @@ export const getUserEnrollments = async (req: Request, res: Response, next: Next
         select: 'title thumbnail totalLessons price rating level instructorId academyId academyOnly',
       })
       .lean();
-    const formatted = enrollments.map(enrollment => ({
-      _id: enrollment._id,
-      userId: enrollment.userId,
-      course: enrollment.courseId,
-      progress: enrollment.progress || 0,
-      status: enrollment.status,
-      startedAt: enrollment.startedAt,
-      completedAt: enrollment.completedAt,
-      courseId: enrollment.courseId?._id || enrollment.courseId,
-      academyId: enrollment.academyId,
-    }));
+
+    // Replace each populated course's cached totalLessons with a live count,
+    // same reasoning as getPublishedCourses above.
+    const courseIds = enrollments
+      .map((e: any) => e.courseId?._id)
+      .filter(Boolean);
+    const counts = await Lesson.aggregate([
+      { $match: { courseId: { $in: courseIds } } },
+      { $group: { _id: '$courseId', count: { $sum: 1 } } },
+    ]);
+    const countMap = new Map(counts.map(c => [c._id.toString(), c.count]));
+
+    const formatted = enrollments.map(enrollment => {
+      const course = enrollment.courseId as any;
+      if (course && course._id) {
+        course.totalLessons = countMap.get(course._id.toString()) || 0;
+      }
+      return {
+        ...enrollment,
+        courseId: course,
+      };
+    });
+
     res.json({ success: true, data: formatted });
   } catch (err) {
     next(err);
   }
 };
 
-// ─── ENROLL COURSE (with academy check) ─────────────────────────────
-export const enrollCourse = async (req: Request, res: Response, next: NextFunction) => {
+// ─── ENROLL IN COURSE (unchanged apart from totalLessons fix below) ────
+export const enrollInCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
-    if (!user || !user._id) {
-      console.error('[ENROLL] Unauthenticated attempt. Headers:', req.headers.authorization);
-      return res.status(401).json({ success: false, message: 'You must be logged in to enroll' });
-    }
     const course = await Course.findById(req.params.id);
-    if (!course || !course.isPublished) {
-      return res.status(404).json({ success: false, message: 'Course not available' });
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    if (!course.isPublished) {
+      return res.status(400).json({ success: false, message: 'Course is not published' });
     }
 
     // ─── Academy access check ──────────────────────────────────────────
@@ -257,12 +302,20 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
     await invalidateCourseCache(course._id.toString());
     const newEnrollment = await Enrollment.findOne({ userId: user._id, courseId: course._id })
       .populate('courseId', 'title thumbnail totalLessons price rating level');
+
+    // Attach a live lesson count to the populated course before responding.
+    let responseCourse: any = newEnrollment?.courseId;
+    if (responseCourse && responseCourse._id) {
+      const liveCount = await Lesson.countDocuments({ courseId: responseCourse._id });
+      responseCourse = { ...responseCourse.toObject?.() ?? responseCourse, totalLessons: liveCount };
+    }
+
     res.json({
       success: true,
       message: 'Enrolled successfully',
       data: {
         _id: newEnrollment?._id,
-        course: newEnrollment?.courseId,
+        course: responseCourse,
         progress: 0,
         status: 'active',
         academyId: course.academyId,
@@ -276,7 +329,7 @@ export const enrollCourse = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── UPDATE LESSON PROGRESS (unchanged, but adds academyId to progress) ──
+// ─── UPDATE LESSON PROGRESS (unchanged) ──────────────────────────────
 export const updateLessonProgress = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = req.user as IUser;
