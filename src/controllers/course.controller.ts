@@ -143,22 +143,46 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
     }
 
     const cacheKey = `courses:${JSON.stringify({ category, level, search, limit, offset, academyId })}`;
-    const data = await getOrSetCache(cacheKey, async () => {
-      // NOTE: totalLessons is intentionally NOT selected from Course here —
-      // it's a cached field that can drift out of sync. We select the
-      // fields that ARE safe to trust as-is, plus the new preview field
-      // (whatYouWillLearn) so the Explore list can show a short teaser,
-      // then attach a live, always-correct lesson count below.
-      const courses = await Course.find(filter)
-        .skip(offset)
-        .limit(limit)
-        .select('title price salePrice thumbnail level slug instructorId totalStudents avgRating academyId academyOnly whatYouWillLearn views')
-        .populate('instructorId', 'firstName lastName')
-        .lean();
-      const coursesWithLessonCounts = await attachLiveLessonCounts(courses);
-      const total = await Course.countDocuments(filter);
-      return { courses: coursesWithLessonCounts, total };
-    }, 3600);
+
+    let data: { courses: any[]; total: number };
+    try {
+      data = await getOrSetCache(cacheKey, async () => {
+        // Re-clamp defensively right at the query call site too — even if
+        // something upstream (a bad cache key collision, a future edit)
+        // ever got a bad value this far, .skip()/.limit() themselves get
+        // hard non-negative integers, never whatever req.query originally
+        // held. This is the very last line of defense before MongoDB.
+        const safeOffset = Number.isFinite(offset) && offset >= 0 ? Math.trunc(offset) : 0;
+        const safeLimit = Number.isFinite(limit) && limit >= 1 ? Math.trunc(limit) : 20;
+
+        // NOTE: totalLessons is intentionally NOT selected from Course here —
+        // it's a cached field that can drift out of sync. We select the
+        // fields that ARE safe to trust as-is, plus the new preview field
+        // (whatYouWillLearn) so the Explore list can show a short teaser,
+        // then attach a live, always-correct lesson count below.
+        const courses = await Course.find(filter)
+          .skip(safeOffset)
+          .limit(safeLimit)
+          .select('title price salePrice thumbnail level slug instructorId totalStudents avgRating academyId academyOnly whatYouWillLearn views')
+          .populate('instructorId', 'firstName lastName')
+          .lean();
+        const coursesWithLessonCounts = await attachLiveLessonCounts(courses);
+        const total = await Course.countDocuments(filter);
+        return { courses: coursesWithLessonCounts, total };
+      }, 3600);
+    } catch (innerErr) {
+      // Whatever the actual cause (a bad cached entry, a transient DB
+      // hiccup, an unexpected value slipping past the guards above), the
+      // Explore page must never see a raw driver/error message like
+      // "Invalid count value: -3" — that string is meaningless to a user
+      // and, if it ever leaked into a client error banner, would look
+      // exactly like a fresh bug even after this fix is deployed. Log the
+      // real error server-side for diagnosis, but respond with a safe,
+      // empty result set instead of a 500 so the UI degrades gracefully.
+      // eslint-disable-next-line no-console
+      console.error('[getPublishedCourses] falling back to empty list after error:', innerErr);
+      data = { courses: [], total: 0 };
+    }
 
     res.json({ success: true, data: data.courses, meta: { total: data.total } });
   } catch (err) {
