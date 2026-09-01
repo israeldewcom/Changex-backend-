@@ -105,7 +105,15 @@ async function attachLiveLessonCounts(courses: any[]) {
 // ==================== GET PUBLISHED COURSES (CACHED, with academy filter) ====================
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { category, level, search, limit = 20, offset = 0, academyId } = req.query;
+    const { category, level, search, academyId } = req.query;
+    // Sanitize pagination params: coerce to numbers and clamp to safe,
+    // non-negative ranges. A negative/NaN offset or limit reaching
+    // MongoDB's .skip()/.limit() throws "Invalid count value: <n>" and
+    // takes down the whole courses list.
+    const rawLimit = Number(req.query.limit);
+    const rawOffset = Number(req.query.offset);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 20;
+    const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
     const filter: any = { isPublished: true, approvalStatus: 'approved' };
     if (category) filter.category = category;
     if (level) filter.level = level;
@@ -129,8 +137,8 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
       // (whatYouWillLearn) so the Explore list can show a short teaser,
       // then attach a live, always-correct lesson count below.
       const courses = await Course.find(filter)
-        .skip(Number(offset))
-        .limit(Number(limit))
+        .skip(offset)
+        .limit(limit)
         .select('title price salePrice thumbnail level slug instructorId totalStudents avgRating academyId academyOnly whatYouWillLearn views')
         .populate('instructorId', 'firstName lastName')
         .lean();
