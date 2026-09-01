@@ -11,6 +11,7 @@ import {
   updateLessonProgress,
   rateCourse,
   askQuestion,
+  trackCourseView,
 } from '../controllers/course.controller.js';
 import * as certificateController from '../controllers/certificate.controller.js';
 import { authenticate } from '../middlewares/auth.js';
@@ -21,6 +22,7 @@ const router = Router();
 // Public routes
 router.get('/', getPublishedCourses);
 router.get('/:id', getCourse);
+router.post('/:id/view', trackCourseView);
 
 // Protected routes
 router.get('/my/enrollments', authenticate, getUserEnrollments);
