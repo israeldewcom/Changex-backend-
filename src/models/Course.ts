@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/models/Course.ts (UPDATED)
+// FILE: src/models/Course.ts (UPDATED - adds learning outcomes + requirements + preview fields)
 // ============================================================
 
 import mongoose, { Schema, Document } from 'mongoose';
@@ -38,9 +38,16 @@ export interface ICourse extends Document {
     }>;
     passingScore: number;
   }>;
+  // ─── NEW: SALES / PREVIEW FIELDS ─────────────────────────────
+  // Shown on the course detail page BEFORE purchase, so a buyer knows
+  // exactly what they're paying for. None of this existed before — the
+  // listing only had title/price/thumbnail and no way to preview content.
+  whatYouWillLearn: string[];
+  requirements: string[];
+  targetAudience?: string;
   // ─── NEW ACADEMY FIELDS ──────────────────────────────────────
-  academyId?: mongoose.Types.ObjectId;         // If course belongs to an academy
-  academyOnly?: boolean;                       // If true, only academy members can access
+  academyId?: mongoose.Types.ObjectId;
+  academyOnly?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -84,6 +91,9 @@ const CourseSchema = new Schema<ICourse>(
       default: []
     },
     // ─── NEW FIELDS ──────────────────────────────────────────────
+    whatYouWillLearn: { type: [String], default: [] },
+    requirements: { type: [String], default: [] },
+    targetAudience: { type: String, default: '' },
     academyId: { type: Schema.Types.ObjectId, ref: 'Academy' },
     academyOnly: { type: Boolean, default: false },
   },
