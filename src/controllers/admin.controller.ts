@@ -910,7 +910,16 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
 
     // ─── COURSE PURCHASE ──────────────────────────────────────────────────
     if (payment.type === 'course') {
-      const course = await Course.findById(payment.metadata?.courseId || payment.courseId);
+      // ─── Robust courseId resolution ─────────────────────────────────
+      // payment.metadata?.courseId is the primary source (set in
+      // submitManualPayment), with payment.courseId as a fallback for any
+      // record where metadata didn't get populated. Coerce whichever we
+      // get to a string so the enrollment lookup/creation below is never
+      // thrown off by one being an ObjectId instance and the other a
+      // plain string, which would otherwise make findOne fail to match an
+      // enrollment that actually already exists.
+      const resolvedCourseId = String(payment.metadata?.courseId || payment.courseId || '');
+      const course = await Course.findById(resolvedCourseId);
       if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
       const existingEnrollment = await Enrollment.findOne({ userId: payment.userId, courseId: course._id });
@@ -919,6 +928,20 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
         course.totalStudents += 1;
         await course.save();
       }
+
+      // ─── Invalidate this course's cache ─────────────────────────────
+      // getCourse (course.controller.ts) caches the full course response
+      // for 2 hours. Approving a manual payment changes totalStudents on
+      // the course and — more importantly — is the moment a student's
+      // access should flip from locked-preview to full content. The
+      // enrollment check itself runs fresh on every request (not cached),
+      // but clearing the cache here too keeps this endpoint consistent
+      // with every other place that mutates course data, and guarantees
+      // the very next /courses/:id call reflects the updated totalStudents
+      // count immediately rather than after a stale TTL expires.
+      await invalidateCache(`course:${course._id}`);
+      if (course.slug) await invalidateCache(`course:${course.slug}`);
+      await invalidateCache('courses:*');
 
       let affiliateCommission = 0;
       let affiliateUserId = null;
@@ -1822,5 +1845,42 @@ export const deletePostByAdmin = async (req: Request, res: Response, next: NextF
     res.json({ success: true, message: 'Post deleted by admin' });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ==================== CLEAR COURSE CACHE (diagnostic/ops tool) ====================
+// See admin.routes.ts for the full rationale: forces the cached course
+// payload (and, with ?all=1, the entire courses-list cache too) to be
+// dropped immediately, from both Redis and the in-process memory
+// fallback in services/cache.ts, instead of waiting out getCourse's
+// 2-hour TTL. Pass the course's Mongo _id or its slug — both are valid
+// cache key forms used by getCourse.
+export const clearCourseCache = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const clearAll = req.query.all === '1';
+
+    await invalidateCache(`course:${id}`);
+
+    // Also try clearing by slug, in case the course was originally cached
+    // under its slug rather than its ObjectId (getCourse's cache key uses
+    // whichever identifier the request was made with).
+    const course = await Course.findById(id).select('slug').lean().catch(() => null);
+    if (course?.slug) {
+      await invalidateCache(`course:${course.slug}`);
+    }
+
+    if (clearAll) {
+      await invalidateCache('courses:*');
+    }
+
+    res.json({
+      success: true,
+      message: clearAll
+        ? `Cleared cache for course ${id} and the courses list.`
+        : `Cleared cache for course ${id}.`,
+    });
+  } catch (err) {
+    next(err);
   }
 };
