@@ -14,14 +14,21 @@ import {
   trackCourseView,
 } from '../controllers/course.controller.js';
 import * as certificateController from '../controllers/certificate.controller.js';
-import { authenticate } from '../middlewares/auth.js';
+import { authenticate, optionalAuthenticate } from '../middlewares/auth.js';
 import { academyAuth } from '../middlewares/auth.js';
 
 const router = Router();
 
 // Public routes
 router.get('/', getPublishedCourses);
-router.get('/:id', getCourse);
+// optionalAuthenticate (not authenticate) — this route must stay
+// reachable by anonymous visitors previewing a course, but also needs
+// req.user populated for logged-in, enrolled students so getCourse can
+// correctly serve full lesson content instead of the locked preview.
+// This was the actual root cause of enrolled students seeing "0 lessons"
+// / placeholder lesson text even after paying: with no auth middleware
+// at all on this route, req.user was always undefined server-side.
+router.get('/:id', optionalAuthenticate, getCourse);
 router.post('/:id/view', trackCourseView);
 
 // Protected routes
