@@ -108,6 +108,9 @@ import {
     deleteAchievement,
     getLeaderboardAdmin,
 
+    // Export All Data
+    exportAllData,
+
 } from '../controllers/admin.controller.js';
 
 // ─── Article Admin Controllers ─────────────────────────────────
@@ -167,8 +170,8 @@ router.get('/users/:id', getUserById);
 router.get('/users/:userId/full', getUserFullDetails);
 router.get('/users/:userId/posts', getUserPosts);
 router.patch('/users/:userId/role', updateUserRole);
-router.patch('/users/:userId/ban', toggleUserBan); // legacy ban endpoint (kept for compatibility)
-router.patch('/users/:id/ban', banUser); // new ban/unban endpoint
+router.patch('/users/:userId/ban', toggleUserBan);
+router.patch('/users/:id/ban', banUser);
 router.post('/users/:userId/approve-instructor', approveInstructor);
 router.post('/users', createUser);
 
@@ -294,6 +297,9 @@ router.get('/settings/feature-flags', getFeatureFlags);
 router.post('/settings/feature-flags', updateFeatureFlags);
 router.get('/settings/bank-details', getBankDetails);
 router.post('/settings/bank-details', updateBankDetails);
+
+// ==================== EXPORT ALL DATA ====================
+router.get('/export/:type', exportAllData);
 
 // ==================== FILE UPLOADS ====================
 router.post('/upload', upload.any(), uploadImage);
