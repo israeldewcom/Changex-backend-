@@ -12,6 +12,25 @@ import { uploadToCloudinary } from '../services/cloudinary.js';
 import mongoose from 'mongoose';
 import Rating from '../models/Rating.js';
 import Transaction from '../models/Transaction.js';
+import { invalidateCache } from '../services/cache.js';
+
+// ─── Cache invalidation helper ──────────────────────────────────
+// getCourse (course.controller.ts) caches the full course + lessons
+// payload for 2 hours per course ID, shared across every viewer. None of
+// the instructor write paths below (saveDraft, submitForReview,
+// createLesson, updateLesson, deleteLesson) ever invalidated that cache
+// after changing course/lesson data. Concretely, this is why students
+// could keep seeing empty lesson content for up to 2 hours after an
+// instructor fixed and re-saved it: the database had the correct content,
+// but /courses/:id kept serving the stale cached snapshot taken before
+// the fix. Every write path that touches a course's lessons or metadata
+// must clear both this course's single-course cache entry and the
+// courses-list cache, so the very next viewer (student or otherwise)
+// gets fresh data instead of whatever was cached hours earlier.
+async function invalidateCourseCache(courseId: string) {
+  await invalidateCache(`course:${courseId}`);
+  await invalidateCache('courses:*');
+}
 
 // ✅ FIXED: Slug generation with timestamp – prevents duplicate title errors
 function generateSlug(title: string): string {
@@ -172,6 +191,52 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
     }
 
     if (lessons && Array.isArray(lessons)) {
+      // ─── Guard against clobbering real content with a blank re-save ──
+      // This endpoint fully deletes and reinserts every lesson on every
+      // save (delete-then-insertMany below), trusting whatever the client
+      // sends as the full source of truth. That's fine when the client is
+      // sending a complete, correct picture — but a client-side bug (a
+      // stale rich-text editor instance, a race in re-rendering the
+      // content step, a page that only partially loaded existing lessons
+      // before saving) can send lessons with empty content/videoUrl even
+      // though real content already exists in the database for them. That
+      // silently destroys real content with no error and no trace of what
+      // was lost.
+      //
+      // Before deleting anything, compare against what's currently stored.
+      // If a lesson that already has real saved content would be
+      // overwritten by an incoming lesson with no content and no video
+      // (matched by position, matching the existing insertMany/order
+      // behavior below since these lessons have no stable client-side id),
+      // refuse the whole draft save and tell the caller which lesson
+      // indexes are at risk, rather than 500ing or silently proceeding.
+      // This does not block legitimate edits — only the empty-over-real
+      // pattern that indicates a client bug, not an intentional clear.
+      const existingLessons = await Lesson.find({ courseId: course._id }).sort('order').lean();
+      const isBlank = (val: unknown) => {
+        if (!val) return true;
+        const stripped = String(val).replace(/<[^>]*>/g, '').replace(/&nbsp;/g, '').trim();
+        return stripped === '' || stripped === '<p><br></p>';
+      };
+      const wouldClobber: number[] = [];
+      lessons.forEach((l: any, i: number) => {
+        const existing = existingLessons[i];
+        if (!existing) return; // new lesson, nothing to clobber
+        const existingHasContent = !isBlank(existing.content) || !isBlank(existing.videoUrl);
+        const incomingHasContent = !isBlank(l.content) || !isBlank(l.videoUrl);
+        if (existingHasContent && !incomingHasContent) {
+          wouldClobber.push(i + 1); // 1-indexed for a human-readable message
+        }
+      });
+
+      if (wouldClobber.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: `Refusing to save: lesson(s) ${wouldClobber.join(', ')} already have content saved, but this save would replace them with empty content. If you intended to clear these lessons, edit and re-save just those lessons individually.`,
+          data: { lessonsAtRisk: wouldClobber }
+        });
+      }
+
       await Lesson.deleteMany({ courseId: course._id });
       if (lessons.length > 0) {
         const lessonDocs = lessons.map((l: any, i: number) => ({
@@ -187,6 +252,14 @@ export const saveDraft = async (req: Request, res: Response, next: NextFunction)
       course.totalLessons = lessons.length;
       await course.save();
     }
+
+    // ─── Invalidate the course cache ────────────────────────────────
+    // Without this, students hitting GET /courses/:id keep getting the
+    // stale cached lessons (possibly with empty content, from before this
+    // save) for up to 2 hours — even though the database now has the
+    // correct, just-saved data. See invalidateCourseCache's definition
+    // above for the full explanation.
+    await invalidateCourseCache(course._id.toString());
 
     res.json({ success: true, data: course, message: 'Draft saved successfully' });
   } catch (err: any) {
@@ -213,6 +286,7 @@ export const submitForReview = async (req: Request, res: Response, next: NextFun
     course.totalLessons = lessonCount;
     course.approvalStatus = 'pending';
     await course.save();
+    await invalidateCourseCache(course._id.toString());
     res.json({ success: true, message: 'Submitted for review' });
   } catch (err) { next(err); }
 };
@@ -241,6 +315,7 @@ export const createLesson = async (req: Request, res: Response, next: NextFuncti
 
     const lesson = await Lesson.create({ ...req.body, courseId: course._id });
     await Course.findByIdAndUpdate(course._id, { $inc: { totalLessons: 1 } });
+    await invalidateCourseCache(course._id.toString());
     res.status(201).json({ success: true, data: lesson });
   } catch (err) { next(err); }
 };
@@ -257,6 +332,7 @@ export const updateLesson = async (req: Request, res: Response, next: NextFuncti
       { new: true }
     );
     if (!lesson) return res.status(404).json({ success: false, message: 'Lesson not found' });
+    await invalidateCourseCache(course._id.toString());
     res.json({ success: true, data: lesson });
   } catch (err) { next(err); }
 };
@@ -271,6 +347,7 @@ export const deleteLesson = async (req: Request, res: Response, next: NextFuncti
     if (!lesson) return res.status(404).json({ success: false, message: 'Lesson not found' });
 
     await Course.findByIdAndUpdate(course._id, { $inc: { totalLessons: -1 } });
+    await invalidateCourseCache(course._id.toString());
     res.json({ success: true, message: 'Lesson deleted' });
   } catch (err) { next(err); }
 };
