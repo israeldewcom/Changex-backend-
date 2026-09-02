@@ -114,6 +114,9 @@ import {
 // ─── Revenue Analytics ─────────────────────────────────────────
 import { getRevenueAnalytics } from '../controllers/analytics.controller.js';
 
+// ─── Cache management ──────────────────────────────────────────
+import { clearCourseCache } from '../controllers/admin.controller.js';
+
 import { authenticate, authorize } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
 
@@ -238,5 +241,16 @@ router.delete('/posts/:id', deletePostByAdmin);
 // ==================== REVENUE ANALYTICS ====================
 router.get('/analytics/revenue', getRevenueAnalytics);
 router.get('/revenue', getRevenueAnalytics);
+
+// ==================== CACHE MANAGEMENT ====================
+// Diagnostic + operational tool: lets an admin force-clear the cached
+// course payload for one course (or, with ?all=1, every cached course/
+// list entry) without waiting out the 1–2 hour TTLs in getOrSetCache.
+// Useful whenever course/lesson data was changed through a path that
+// doesn't already call invalidateCourseCache, or when diagnosing whether
+// a "content not showing" report is a stale-cache issue vs. a real data/
+// rendering issue — clearing here and immediately re-checking the course
+// isolates that variable.
+router.post('/cache/clear-course/:id', clearCourseCache);
 
 export default router;
