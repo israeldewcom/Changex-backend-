@@ -80,22 +80,6 @@ async function completeChallengeAndReward(challengeId: string, userId: string, a
   });
 }
 
-// ─── Helper: hard safety net for pagination params ─────────────────
-// Belt-and-braces on top of the inline sanitization in getPublishedCourses:
-// no matter what calls this (a future route, a copy-pasted handler, a
-// query param typo'd by the client), a negative/NaN/non-finite value can
-// NEVER reach Mongoose's .skip()/.limit(), which throws a hard
-// "Invalid count value: <n>" error and 500s the whole request otherwise.
-function safePageParams(rawLimit: unknown, rawOffset: unknown, opts?: { maxLimit?: number; defaultLimit?: number }) {
-  const maxLimit = opts?.maxLimit ?? 100;
-  const defaultLimit = opts?.defaultLimit ?? 20;
-  const limitNum = Number(rawLimit);
-  const offsetNum = Number(rawOffset);
-  const limit = Number.isFinite(limitNum) ? Math.min(Math.max(Math.trunc(limitNum), 1), maxLimit) : defaultLimit;
-  const offset = Number.isFinite(offsetNum) ? Math.max(Math.trunc(offsetNum), 0) : 0;
-  return { limit, offset };
-}
-
 // ─── Helper: attach LIVE lesson counts to a list of course objects ────────
 // totalLessons on the Course document is a cached counter that is only
 // ever incremented/decremented by instructor.controller.ts's
@@ -122,11 +106,14 @@ async function attachLiveLessonCounts(courses: any[]) {
 export const getPublishedCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { category, level, search, academyId } = req.query;
-    // Sanitize pagination params via the shared safePageParams guard: coerce
-    // to numbers and clamp to safe, non-negative ranges. A negative/NaN
-    // offset or limit reaching MongoDB's .skip()/.limit() throws
-    // "Invalid count value: <n>" and takes down the whole courses list.
-    const { limit, offset } = safePageParams(req.query.limit, req.query.offset);
+    // Sanitize pagination params: coerce to numbers and clamp to safe,
+    // non-negative ranges. A negative/NaN offset or limit reaching
+    // MongoDB's .skip()/.limit() throws "Invalid count value: <n>" and
+    // takes down the whole courses list.
+    const rawLimit = Number(req.query.limit);
+    const rawOffset = Number(req.query.offset);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 20;
+    const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
     const filter: any = { isPublished: true, approvalStatus: 'approved' };
     if (category) filter.category = category;
     if (level) filter.level = level;
@@ -143,46 +130,22 @@ export const getPublishedCourses = async (req: Request, res: Response, next: Nex
     }
 
     const cacheKey = `courses:${JSON.stringify({ category, level, search, limit, offset, academyId })}`;
-
-    let data: { courses: any[]; total: number };
-    try {
-      data = await getOrSetCache(cacheKey, async () => {
-        // Re-clamp defensively right at the query call site too — even if
-        // something upstream (a bad cache key collision, a future edit)
-        // ever got a bad value this far, .skip()/.limit() themselves get
-        // hard non-negative integers, never whatever req.query originally
-        // held. This is the very last line of defense before MongoDB.
-        const safeOffset = Number.isFinite(offset) && offset >= 0 ? Math.trunc(offset) : 0;
-        const safeLimit = Number.isFinite(limit) && limit >= 1 ? Math.trunc(limit) : 20;
-
-        // NOTE: totalLessons is intentionally NOT selected from Course here —
-        // it's a cached field that can drift out of sync. We select the
-        // fields that ARE safe to trust as-is, plus the new preview field
-        // (whatYouWillLearn) so the Explore list can show a short teaser,
-        // then attach a live, always-correct lesson count below.
-        const courses = await Course.find(filter)
-          .skip(safeOffset)
-          .limit(safeLimit)
-          .select('title price salePrice thumbnail level slug instructorId totalStudents avgRating academyId academyOnly whatYouWillLearn views')
-          .populate('instructorId', 'firstName lastName')
-          .lean();
-        const coursesWithLessonCounts = await attachLiveLessonCounts(courses);
-        const total = await Course.countDocuments(filter);
-        return { courses: coursesWithLessonCounts, total };
-      }, 3600);
-    } catch (innerErr) {
-      // Whatever the actual cause (a bad cached entry, a transient DB
-      // hiccup, an unexpected value slipping past the guards above), the
-      // Explore page must never see a raw driver/error message like
-      // "Invalid count value: -3" — that string is meaningless to a user
-      // and, if it ever leaked into a client error banner, would look
-      // exactly like a fresh bug even after this fix is deployed. Log the
-      // real error server-side for diagnosis, but respond with a safe,
-      // empty result set instead of a 500 so the UI degrades gracefully.
-      // eslint-disable-next-line no-console
-      console.error('[getPublishedCourses] falling back to empty list after error:', innerErr);
-      data = { courses: [], total: 0 };
-    }
+    const data = await getOrSetCache(cacheKey, async () => {
+      // NOTE: totalLessons is intentionally NOT selected from Course here —
+      // it's a cached field that can drift out of sync. We select the
+      // fields that ARE safe to trust as-is, plus the new preview field
+      // (whatYouWillLearn) so the Explore list can show a short teaser,
+      // then attach a live, always-correct lesson count below.
+      const courses = await Course.find(filter)
+        .skip(offset)
+        .limit(limit)
+        .select('title price salePrice thumbnail level slug instructorId totalStudents avgRating academyId academyOnly whatYouWillLearn views')
+        .populate('instructorId', 'firstName lastName')
+        .lean();
+      const coursesWithLessonCounts = await attachLiveLessonCounts(courses);
+      const total = await Course.countDocuments(filter);
+      return { courses: coursesWithLessonCounts, total };
+    }, 3600);
 
     res.json({ success: true, data: data.courses, meta: { total: data.total } });
   } catch (err) {
@@ -242,7 +205,25 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
     let enrollment = null;
     const reqUser = req.user as IUser | undefined;
     if (reqUser) {
-      enrollment = await Enrollment.findOne({ userId: reqUser._id, courseId: course._id });
+      // ─── Robust enrollment lookup ────────────────────────────────────
+      // `course` here can come straight out of the 2-hour Redis/memory
+      // cache above (getOrSetCache), which round-trips through
+      // JSON.stringify/JSON.parse. That turns course._id from a Mongoose
+      // ObjectId instance into a plain string. Mongoose normally casts a
+      // valid ObjectId string back automatically, but to eliminate any
+      // possibility of a query mismatch (and to protect against a bad/
+      // malformed id ever reaching Mongo), explicitly validate and
+      // construct a real ObjectId before querying. If the cached id is
+      // somehow invalid, skip the lookup instead of throwing, and fall
+      // through to "not enrolled" rather than 500ing the whole request —
+      // this matches the acceptable-degradation approach used elsewhere in
+      // this file (see getPublishedCourses' inner try/catch).
+      const courseObjectId = mongoose.Types.ObjectId.isValid(course._id)
+        ? new mongoose.Types.ObjectId(String(course._id))
+        : null;
+      if (courseObjectId) {
+        enrollment = await Enrollment.findOne({ userId: reqUser._id, courseId: courseObjectId });
+      }
     }
 
     // ─── Curriculum preview for non-enrolled users ──────────────────────
@@ -272,6 +253,15 @@ export const getCourse = async (req: Request, res: Response, next: NextFunction)
 
     res.json({
       success: true,
+      // ─── Build/version marker ────────────────────────────────────────
+      // Temporary diagnostic field: proves definitively whether THIS
+      // version of getCourse (with the hasAccess/locked-lessons gate) is
+      // actually the code running on the deployed server, versus an older
+      // build that predates this gating logic. If a real API response
+      // from production is missing this field entirely, the server is
+      // running different code than what's in this repo — check the
+      // deploy, not the logic. Safe to delete once confirmed.
+      _debugBuild: 'course-controller-fix-v4-access-gate-active',
       data: {
         ...course,
         lessons: lessonsForResponse,
