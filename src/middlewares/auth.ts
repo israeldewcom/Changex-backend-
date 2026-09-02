@@ -51,6 +51,58 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// ─── NEW: Optional authentication ──────────────────────────────────
+// Populates req.user when a valid Bearer token is present, but never
+// blocks the request when the token is missing, malformed, or expired.
+// This is the piece that was missing for GET /courses/:id: that route
+// is intentionally public (anonymous visitors preview courses before
+// signing up), so it can never use the hard-required `authenticate`
+// above without breaking that. Without SOME auth middleware attached,
+// though, req.user was always undefined even for logged-in, paying,
+// enrolled students — which meant getCourse could never tell an
+// enrolled student apart from an anonymous visitor, and every
+// enrolled user was silently served the locked lesson-preview payload
+// (title/type/duration only, no content) instead of their real,
+// paid-for lesson content. Attaching this middleware is the actual
+// fix for that — getCourse's own enrollment-check logic was already
+// correct, it just never received a populated req.user to check.
+export const optionalAuthenticate = async (req: Request, res: Response, next: NextFunction) => {
+  if (req.method === 'OPTIONS') {
+    return next();
+  }
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return next();
+    }
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return next();
+    }
+    let decoded;
+    try {
+      decoded = verifyAccessToken(token);
+    } catch (err) {
+      // Invalid/expired token on an optional route is not an error —
+      // just proceed as an anonymous visitor rather than 401ing.
+      return next();
+    }
+    if (!decoded || !decoded.userId) {
+      return next();
+    }
+    const user = await User.findById(decoded.userId).catch(() => null);
+    if (!user || user.isBanned) {
+      return next();
+    }
+    req.user = user;
+    next();
+  } catch (err) {
+    // Any unexpected failure here must never block an otherwise-public
+    // route — fall through as anonymous rather than surfacing a 401/500.
+    next();
+  }
+};
+
 export const authorize = (...roles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     if (req.method === 'OPTIONS') {
