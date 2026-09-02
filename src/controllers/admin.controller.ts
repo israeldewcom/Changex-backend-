@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/controllers/admin.controller.ts (COMPLETE UPDATED)
+// FILE: src/controllers/admin.controller.ts (COMPLETE)
 // ============================================================
 
 import { Request, Response, NextFunction } from 'express';
@@ -18,6 +18,7 @@ import Like from '../models/Like.js';
 import Follow from '../models/Follow.js';
 import Challenge from '../models/Challenge.js';
 import Ad from '../models/Ad.js';
+import AdConfig from '../models/AdConfig.js';
 import ChallengeProgress from '../models/ChallengeProgress.js';
 import PostAnalytics from '../models/PostAnalytics.js';
 import SocialEarningsConfig from '../models/SocialEarningsConfig.js';
@@ -34,6 +35,12 @@ import ArticlePurchase from '../models/ArticlePurchase.js';
 import path from 'path';
 import fs from 'fs';
 import Lesson from '../models/Lesson.js';
+import Academy from '../models/Academy.js';
+import AcademyMembership from '../models/AcademyMembership.js';
+import Achievement from '../models/Achievement.js';
+import AuditLog from '../models/AuditLog.js';
+import bcrypt from 'bcryptjs';
+import { generateReferralCode } from '../utils/referralCode.js';
 
 // Maximum file size for Cloudinary (10MB)
 const CLOUDINARY_MAX_BYTES = 10 * 1024 * 1024;
@@ -84,7 +91,7 @@ export const getDashboard = async (req: Request, res: Response, next: NextFuncti
 // ==================== USER MANAGEMENT ====================
 export const getUsers = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { limit = 100, search = '' } = req.query;
+    const { limit = 100, search = '', page = 1 } = req.query;
     const filter: any = {};
 
     if (search) {
@@ -95,10 +102,14 @@ export const getUsers = async (req: Request, res: Response, next: NextFunction) 
       ];
     }
 
+    const skip = (Number(page) - 1) * Number(limit);
     const users = await User.find(filter)
       .select('-passwordHash')
+      .skip(skip)
       .limit(Number(limit))
       .sort('-createdAt');
+
+    const total = await User.countDocuments(filter);
 
     const stats = {
       total: await User.countDocuments(),
@@ -108,7 +119,7 @@ export const getUsers = async (req: Request, res: Response, next: NextFunction) 
       instructors: await User.countDocuments({ roles: 'instructor' }),
     };
 
-    res.json({ success: true, data: { users, stats } });
+    res.json({ success: true, data: { users, stats, pagination: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) } } });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
@@ -271,20 +282,84 @@ export const approveInstructor = async (req: Request, res: Response, next: NextF
   }
 };
 
+// ─── NEW: CREATE USER (ADMIN OVERRIDE) ──────────────────────────
+export const createUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, password, firstName, lastName, phone, roles, bio, location } = req.body;
+    if (!email || !password || !firstName || !lastName) {
+      return res.status(400).json({ success: false, message: 'Missing required fields' });
+    }
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(409).json({ success: false, message: 'Email already exists' });
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await User.create({
+      email,
+      passwordHash,
+      firstName,
+      lastName,
+      phone,
+      bio,
+      location,
+      roles: roles || ['student'],
+      referralCode: generateReferralCode(),
+    });
+
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: 'CREATE_USER',
+      resource: `User ${user._id}`,
+      ip: req.ip,
+    });
+
+    res.status(201).json({ success: true, data: user });
+  } catch (err) { next(err); }
+};
+
+// ─── NEW: BAN/UNBAN USER ──────────────────────────────────────────
+export const banUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { isBanned } = req.body;
+    const user = await User.findByIdAndUpdate(req.params.id, { isBanned }, { new: true });
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+
+    await sendNotification({
+      userId: user._id.toString(),
+      title: isBanned ? 'Account Suspended' : 'Account Reactivated',
+      message: isBanned ? 'Your account has been suspended.' : 'Your account has been reactivated.',
+      type: 'system',
+      channels: ['email', 'push'],
+    });
+
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: isBanned ? 'BAN_USER' : 'UNBAN_USER',
+      resource: `User ${user._id}`,
+      ip: req.ip,
+    });
+
+    res.json({ success: true, data: user });
+  } catch (err) { next(err); }
+};
+
 // ==================== COURSE MANAGEMENT ====================
 export const getAdminCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, limit = 100 } = req.query;
+    const { status, limit = 100, page = 1 } = req.query;
     const filter: any = {};
 
     if (status === 'pending') filter.approvalStatus = 'pending';
     if (status === 'approved') filter.approvalStatus = 'approved';
     if (status === 'rejected') filter.approvalStatus = 'rejected';
 
+    const skip = (Number(page) - 1) * Number(limit);
     const courses = await Course.find(filter)
       .populate('instructorId', 'firstName lastName email')
       .sort('-createdAt')
+      .skip(skip)
       .limit(Number(limit));
+
+    const total = await Course.countDocuments(filter);
 
     const stats = {
       total: await Course.countDocuments(),
@@ -294,7 +369,7 @@ export const getAdminCourses = async (req: Request, res: Response, next: NextFun
       published: await Course.countDocuments({ isPublished: true }),
     };
 
-    res.json({ success: true, data: { courses, stats } });
+    res.json({ success: true, data: { courses, stats, pagination: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) } } });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
@@ -405,17 +480,59 @@ export const deleteCourseByAdmin = async (req: Request, res: Response, next: Nex
   }
 };
 
+// ─── NEW: CREATE COURSE ──────────────────────────────────────────
+export const createCourse = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const admin = req.user as IUser;
+    const course = await Course.create({
+      ...req.body,
+      instructorId: req.body.instructorId || admin._id,
+      approvalStatus: 'approved',
+      isPublished: true,
+    });
+    await AuditLog.create({
+      userId: admin._id,
+      action: 'CREATE_COURSE',
+      resource: `Course ${course._id}`,
+      ip: req.ip,
+    });
+    res.status(201).json({ success: true, data: course });
+  } catch (err) { next(err); }
+};
+
+// ─── NEW: UPDATE COURSE ──────────────────────────────────────────
+export const updateCourse = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const course = await Course.findByIdAndUpdate(id, req.body, { new: true });
+    if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
+    await invalidateCache(`course:${id}`);
+    await invalidateCache('courses:*');
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: 'UPDATE_COURSE',
+      resource: `Course ${id}`,
+      ip: req.ip,
+    });
+    res.json({ success: true, data: course });
+  } catch (err) { next(err); }
+};
+
 // ==================== WITHDRAWAL MANAGEMENT ====================
 export const getWithdrawals = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { status, limit = 100 } = req.query;
+    const { status, limit = 100, page = 1 } = req.query;
     const filter: any = { type: 'withdrawal' };
     if (status && status !== 'all') filter.status = status;
 
+    const skip = (Number(page) - 1) * Number(limit);
     const withdrawals = await Transaction.find(filter)
       .populate('userId', 'firstName lastName email phone bankAccount')
       .sort('-createdAt')
+      .skip(skip)
       .limit(Number(limit));
+
+    const total = await Transaction.countDocuments(filter);
 
     const stats = {
       pending: await Transaction.countDocuments({ type: 'withdrawal', status: 'pending' }),
@@ -427,7 +544,7 @@ export const getWithdrawals = async (req: Request, res: Response, next: NextFunc
       ]),
     };
 
-    res.json({ success: true, data: { withdrawals, stats } });
+    res.json({ success: true, data: { withdrawals, stats, pagination: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) } } });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
@@ -577,8 +694,23 @@ export const deleteBook = async (req: Request, res: Response, next: NextFunction
 
 export const getAdminBooks = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const books = await Book.find().sort('-createdAt');
-    res.json({ success: true, data: books });
+    const { limit = 50, page = 1, status } = req.query;
+    const filter: any = {};
+    if (status && status !== 'all') filter.approvalStatus = status;
+
+    const skip = (Number(page) - 1) * Number(limit);
+    const books = await Book.find(filter)
+      .skip(skip)
+      .limit(Number(limit))
+      .sort('-createdAt');
+
+    const total = await Book.countDocuments(filter);
+
+    res.json({
+      success: true,
+      data: books,
+      pagination: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
@@ -910,16 +1042,7 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
 
     // ─── COURSE PURCHASE ──────────────────────────────────────────────────
     if (payment.type === 'course') {
-      // ─── Robust courseId resolution ─────────────────────────────────
-      // payment.metadata?.courseId is the primary source (set in
-      // submitManualPayment), with payment.courseId as a fallback for any
-      // record where metadata didn't get populated. Coerce whichever we
-      // get to a string so the enrollment lookup/creation below is never
-      // thrown off by one being an ObjectId instance and the other a
-      // plain string, which would otherwise make findOne fail to match an
-      // enrollment that actually already exists.
-      const resolvedCourseId = String(payment.metadata?.courseId || payment.courseId || '');
-      const course = await Course.findById(resolvedCourseId);
+      const course = await Course.findById(payment.metadata?.courseId || payment.courseId);
       if (!course) return res.status(404).json({ success: false, message: 'Course not found' });
 
       const existingEnrollment = await Enrollment.findOne({ userId: payment.userId, courseId: course._id });
@@ -928,20 +1051,6 @@ export const approveManualPayment = async (req: Request, res: Response, next: Ne
         course.totalStudents += 1;
         await course.save();
       }
-
-      // ─── Invalidate this course's cache ─────────────────────────────
-      // getCourse (course.controller.ts) caches the full course response
-      // for 2 hours. Approving a manual payment changes totalStudents on
-      // the course and — more importantly — is the moment a student's
-      // access should flip from locked-preview to full content. The
-      // enrollment check itself runs fresh on every request (not cached),
-      // but clearing the cache here too keeps this endpoint consistent
-      // with every other place that mutates course data, and guarantees
-      // the very next /courses/:id call reflects the updated totalStudents
-      // count immediately rather than after a stale TTL expires.
-      await invalidateCache(`course:${course._id}`);
-      if (course.slug) await invalidateCache(`course:${course.slug}`);
-      await invalidateCache('courses:*');
 
       let affiliateCommission = 0;
       let affiliateUserId = null;
@@ -1306,8 +1415,18 @@ export const createChallenge = async (req: Request, res: Response, next: NextFun
 
 export const getChallenges = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const challenges = await Challenge.find().sort('-createdAt').populate('createdBy', 'firstName lastName');
-    res.json({ success: true, data: challenges });
+    const { limit = 50, page = 1 } = req.query;
+    const challenges = await Challenge.find()
+      .sort('-createdAt')
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit))
+      .populate('createdBy', 'firstName lastName');
+    const total = await Challenge.countDocuments();
+    res.json({
+      success: true,
+      data: challenges,
+      pagination: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
@@ -1495,8 +1614,18 @@ export const createAd = async (req: Request, res: Response, next: NextFunction) 
 
 export const getAds = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const ads = await Ad.find().sort('-createdAt').populate('createdBy', 'firstName lastName');
-    res.json({ success: true, data: ads });
+    const { limit = 50, page = 1 } = req.query;
+    const ads = await Ad.find()
+      .sort('-createdAt')
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit))
+      .populate('createdBy', 'firstName lastName');
+    const total = await Ad.countDocuments();
+    res.json({
+      success: true,
+      data: ads,
+      pagination: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
@@ -1553,6 +1682,45 @@ export const getActiveAds = async (req: Request, res: Response, next: NextFuncti
       endDate: { $gte: now },
     }).limit(5);
     res.json({ success: true, data: ads });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+// ─── NEW: AD CONFIG ────────────────────────────────────────────────
+export const getAdConfig = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    let config = await AdConfig.findOne().populate('updatedBy', 'firstName lastName');
+    if (!config) {
+      const admin = req.user as IUser;
+      config = await AdConfig.create({
+        cpm: 1.00,
+        cpc: 0.02,
+        sharePercent: 50,
+        updatedBy: admin._id,
+      });
+    }
+    res.json({ success: true, data: config });
+  } catch (err) {
+    res.status(500).json({ success: false, message: String(err) });
+  }
+};
+
+export const updateAdConfig = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { cpm, cpc, sharePercent } = req.body;
+    const admin = req.user as IUser;
+    const config = await AdConfig.findOne();
+    if (!config) {
+      return res.status(404).json({ success: false, message: 'Ad config not found' });
+    }
+    if (cpm !== undefined) config.cpm = cpm;
+    if (cpc !== undefined) config.cpc = cpc;
+    if (sharePercent !== undefined) config.sharePercent = sharePercent;
+    config.updatedBy = admin._id;
+    config.updatedAt = new Date();
+    await config.save();
+    res.json({ success: true, data: config });
   } catch (err) {
     res.status(500).json({ success: false, message: String(err) });
   }
@@ -1848,39 +2016,210 @@ export const deletePostByAdmin = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ==================== CLEAR COURSE CACHE (diagnostic/ops tool) ====================
-// See admin.routes.ts for the full rationale: forces the cached course
-// payload (and, with ?all=1, the entire courses-list cache too) to be
-// dropped immediately, from both Redis and the in-process memory
-// fallback in services/cache.ts, instead of waiting out getCourse's
-// 2-hour TTL. Pass the course's Mongo _id or its slug — both are valid
-// cache key forms used by getCourse.
-export const clearCourseCache = async (req: Request, res: Response, next: NextFunction) => {
+// ==================== SETTINGS: FEATURE FLAGS ====================
+export const getFeatureFlags = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const clearAll = req.query.all === '1';
+    // For now, return defaults; can be stored in DB later
+    res.json({
+      success: true,
+      data: {
+        referrals: true,
+        affiliates: true,
+        socialEarnings: true,
+        aiChat: true,
+      },
+    });
+  } catch (err) { next(err); }
+};
 
-    await invalidateCache(`course:${id}`);
+export const updateFeatureFlags = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: 'UPDATE_FEATURE_FLAGS',
+      resource: JSON.stringify(req.body),
+      ip: req.ip,
+    });
+    res.json({ success: true, message: 'Feature flags updated (stub)' });
+  } catch (err) { next(err); }
+};
 
-    // Also try clearing by slug, in case the course was originally cached
-    // under its slug rather than its ObjectId (getCourse's cache key uses
-    // whichever identifier the request was made with).
-    const course = await Course.findById(id).select('slug').lean().catch(() => null);
-    if (course?.slug) {
-      await invalidateCache(`course:${course.slug}`);
-    }
+// ==================== SETTINGS: BANK DETAILS ====================
+export const getBankDetails = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Read from env or DB
+    res.json({
+      success: true,
+      data: {
+        bankName: process.env.BANK_NAME || 'Lead Bank',
+        accountNumber: process.env.BANK_ACCOUNT || '215799076919',
+        accountName: process.env.BANK_ACCOUNT_NAME || 'Ijigai John Thomas',
+      },
+    });
+  } catch (err) { next(err); }
+};
 
-    if (clearAll) {
-      await invalidateCache('courses:*');
-    }
+export const updateBankDetails = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: 'UPDATE_BANK_DETAILS',
+      resource: JSON.stringify(req.body),
+      ip: req.ip,
+    });
+    res.json({ success: true, message: 'Bank details updated (stub)' });
+  } catch (err) { next(err); }
+};
+
+// ==================== AUDIT LOGS ====================
+export const getAuditLogs = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { limit = 50, page = 1, user, action } = req.query;
+    const filter: any = {};
+    if (user) filter.userId = user;
+    if (action) filter.action = action;
+
+    const skip = (Number(page) - 1) * Number(limit);
+    const logs = await AuditLog.find(filter)
+      .populate('userId', 'firstName lastName email')
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(Number(limit));
+
+    const total = await AuditLog.countDocuments(filter);
 
     res.json({
       success: true,
-      message: clearAll
-        ? `Cleared cache for course ${id} and the courses list.`
-        : `Cleared cache for course ${id}.`,
+      data: logs,
+      pagination: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
     });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
+};
+
+// ==================== ACADEMIES ====================
+export const getAcademies = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { limit = 50, page = 1 } = req.query;
+    const academies = await Academy.find()
+      .skip((Number(page) - 1) * Number(limit))
+      .limit(Number(limit))
+      .lean();
+    const total = await Academy.countDocuments();
+    res.json({
+      success: true,
+      data: academies,
+      pagination: { total, page: Number(page), limit: Number(limit), pages: Math.ceil(total / Number(limit)) },
+    });
+  } catch (err) { next(err); }
+};
+
+export const createAcademyAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const admin = req.user as IUser;
+    const academy = await Academy.create({
+      ...req.body,
+      ownerId: req.body.ownerId || admin._id,
+      isActive: req.body.isActive !== undefined ? req.body.isActive : true,
+    });
+    await AuditLog.create({
+      userId: admin._id,
+      action: 'CREATE_ACADEMY',
+      resource: `Academy ${academy._id}`,
+      ip: req.ip,
+    });
+    res.status(201).json({ success: true, data: academy });
+  } catch (err) { next(err); }
+};
+
+export const updateAcademyAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const academy = await Academy.findByIdAndUpdate(id, req.body, { new: true });
+    if (!academy) return res.status(404).json({ success: false, message: 'Academy not found' });
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: 'UPDATE_ACADEMY',
+      resource: `Academy ${id}`,
+      ip: req.ip,
+    });
+    res.json({ success: true, data: academy });
+  } catch (err) { next(err); }
+};
+
+export const deleteAcademyAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const academy = await Academy.findById(id);
+    if (!academy) return res.status(404).json({ success: false, message: 'Academy not found' });
+    await academy.deleteOne();
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: 'DELETE_ACADEMY',
+      resource: `Academy ${id}`,
+      ip: req.ip,
+    });
+    res.json({ success: true, message: 'Academy deleted' });
+  } catch (err) { next(err); }
+};
+
+// ==================== GAMIFICATION ====================
+export const getAchievementsAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const achievements = await Achievement.find().sort('category');
+    res.json({ success: true, data: achievements });
+  } catch (err) { next(err); }
+};
+
+export const createAchievement = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const achievement = await Achievement.create(req.body);
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: 'CREATE_ACHIEVEMENT',
+      resource: `Achievement ${achievement._id}`,
+      ip: req.ip,
+    });
+    res.status(201).json({ success: true, data: achievement });
+  } catch (err) { next(err); }
+};
+
+export const updateAchievement = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const achievement = await Achievement.findByIdAndUpdate(id, req.body, { new: true });
+    if (!achievement) return res.status(404).json({ success: false, message: 'Achievement not found' });
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: 'UPDATE_ACHIEVEMENT',
+      resource: `Achievement ${id}`,
+      ip: req.ip,
+    });
+    res.json({ success: true, data: achievement });
+  } catch (err) { next(err); }
+};
+
+export const deleteAchievement = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const achievement = await Achievement.findByIdAndDelete(id);
+    if (!achievement) return res.status(404).json({ success: false, message: 'Achievement not found' });
+    await AuditLog.create({
+      userId: (req.user as IUser)._id,
+      action: 'DELETE_ACHIEVEMENT',
+      resource: `Achievement ${id}`,
+      ip: req.ip,
+    });
+    res.json({ success: true, message: 'Achievement deleted' });
+  } catch (err) { next(err); }
+};
+
+export const getLeaderboardAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { limit = 20 } = req.query;
+    const leaderboard = await User.find()
+      .sort({ xp: -1 })
+      .limit(Number(limit))
+      .select('firstName lastName xp level avatarUrl');
+    res.json({ success: true, data: leaderboard });
+  } catch (err) { next(err); }
 };
