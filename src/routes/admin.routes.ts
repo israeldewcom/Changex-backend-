@@ -1,5 +1,5 @@
 // ============================================================
-// FILE: src/routes/admin.routes.ts (WITH BOOK APPROVE/REJECT ROUTES)
+// FILE: src/routes/admin.routes.ts (COMPLETE)
 // ============================================================
 
 import { Router } from 'express';
@@ -15,24 +15,26 @@ import {
     updateUserRole,
     toggleUserBan,
     approveInstructor,
+    createUser,
+    banUser,
 
     // Course Management
     getAdminCourses,
     getCourseDetails,
     approveCourse,
     rejectCourse,
+    deleteCourseByAdmin,
+    createCourse,
+    updateCourse,
 
-    // Withdrawals
-    getWithdrawals,
-    processWithdrawal,
-
-    // Manual Payments
-    getPendingManualPayments,
-    getAllManualPayments,
-    getManualPaymentStats,
-    getManualPaymentById,
-    approveManualPayment,
-    rejectManualPayment,
+    // Books
+    createBook,
+    updateBook,
+    deleteBook,
+    getAdminBooks,
+    getPendingBooks,
+    approveBook,
+    rejectBook,
 
     // Announcements
     createAnnouncement,
@@ -64,6 +66,8 @@ import {
     trackAdImpression,
     trackAdClick,
     getActiveAds,
+    getAdConfig,
+    updateAdConfig,
 
     // Social Earnings
     getSocialEarningsConfig,
@@ -72,24 +76,37 @@ import {
     getTotalSocialEarningsPool,
     triggerSocialEarnings,
 
-    // Books (Admin CRUD + Approval)
-    createBook,
-    updateBook,
-    deleteBook,
-    getAdminBooks,
-    approveBook,
-    rejectBook,
-    getPendingBooks,
-
-    // File uploads
-    uploadImage,
-    uploadFile,
-
     // Platform Stats
     getPlatformStats,
 
     // Admin Post Management
     deletePostByAdmin,
+
+    // File Uploads
+    uploadImage,
+    uploadFile,
+
+    // Settings
+    getFeatureFlags,
+    updateFeatureFlags,
+    getBankDetails,
+    updateBankDetails,
+
+    // Audit
+    getAuditLogs,
+
+    // Academies
+    getAcademies,
+    createAcademyAdmin,
+    updateAcademyAdmin,
+    deleteAcademyAdmin,
+
+    // Gamification
+    getAchievementsAdmin,
+    createAchievement,
+    updateAchievement,
+    deleteAchievement,
+    getLeaderboardAdmin,
 
 } from '../controllers/admin.controller.js';
 
@@ -111,11 +128,27 @@ import {
     refundCampaign,
 } from '../controllers/campaign.controller.js';
 
+// ─── Sponsorship Admin Controllers ───────────────────────────
+import {
+    adminGetSponsorships,
+    approveSponsorship,
+    rejectSponsorship,
+} from '../controllers/sponsorship.controller.js';
+
 // ─── Revenue Analytics ─────────────────────────────────────────
 import { getRevenueAnalytics } from '../controllers/analytics.controller.js';
 
-// ─── Cache management ──────────────────────────────────────────
-import { clearCourseCache } from '../controllers/admin.controller.js';
+// ─── Payments ──────────────────────────────────────────────────
+import {
+    getWithdrawals,
+    processWithdrawal,
+    getPendingManualPayments,
+    getAllManualPayments,
+    getManualPaymentStats,
+    getManualPaymentById,
+    approveManualPayment,
+    rejectManualPayment,
+} from '../controllers/admin.controller.js';
 
 import { authenticate, authorize } from '../middlewares/auth.js';
 import { upload } from '../middlewares/upload.js';
@@ -128,20 +161,25 @@ router.use(authenticate, authorize('admin'));
 // ==================== DASHBOARD ====================
 router.get('/dashboard', getDashboard);
 
-// ==================== USER MANAGEMENT ====================
+// ==================== USERS ====================
 router.get('/users', getUsers);
 router.get('/users/:id', getUserById);
 router.get('/users/:userId/full', getUserFullDetails);
 router.get('/users/:userId/posts', getUserPosts);
 router.patch('/users/:userId/role', updateUserRole);
-router.patch('/users/:userId/ban', toggleUserBan);
+router.patch('/users/:userId/ban', toggleUserBan); // legacy ban endpoint (kept for compatibility)
+router.patch('/users/:id/ban', banUser); // new ban/unban endpoint
 router.post('/users/:userId/approve-instructor', approveInstructor);
+router.post('/users', createUser);
 
-// ==================== COURSE MANAGEMENT ====================
+// ==================== COURSES ====================
 router.get('/courses', getAdminCourses);
 router.get('/courses/:id', getCourseDetails);
 router.post('/courses/:id/approve', approveCourse);
 router.post('/courses/:id/reject', rejectCourse);
+router.delete('/courses/:id', deleteCourseByAdmin);
+router.post('/courses', createCourse);
+router.put('/courses/:id', updateCourse);
 
 // ==================== WITHDRAWALS ====================
 router.get('/withdrawals', getWithdrawals);
@@ -154,6 +192,23 @@ router.get('/manual-payments/stats', getManualPaymentStats);
 router.get('/manual-payments/:id', getManualPaymentById);
 router.post('/manual-payments/:id/approve', approveManualPayment);
 router.post('/manual-payments/:id/reject', rejectManualPayment);
+
+// ==================== BOOKS ====================
+router.post('/books', createBook);
+router.put('/books/:id', updateBook);
+router.delete('/books/:id', deleteBook);
+router.get('/books', getAdminBooks);
+router.get('/books/pending', getPendingBooks);
+router.post('/books/:id/approve', approveBook);
+router.put('/books/:id/approve', approveBook);
+router.post('/books/:id/reject', rejectBook);
+router.put('/books/:id/reject', rejectBook);
+
+// ==================== ARTICLES ====================
+router.get('/articles', getAdminArticles);
+router.get('/articles/stats', getArticleStats);
+router.post('/articles/:id/approve', approveArticle);
+router.post('/articles/:id/reject', rejectArticle);
 
 // ==================== ANNOUNCEMENTS ====================
 router.post('/announcements', createAnnouncement);
@@ -182,6 +237,8 @@ router.post('/ads', createAd);
 router.get('/ads', getAds);
 router.put('/ads/:id', updateAd);
 router.delete('/ads/:id', deleteAd);
+router.get('/ads/config', getAdConfig);
+router.put('/ads/config', updateAdConfig);
 router.post('/ads/:id/impression', trackAdImpression);
 router.post('/ads/:id/click', trackAdClick);
 router.get('/ads/placement/:placement', getActiveAds);
@@ -193,64 +250,53 @@ router.get('/social-earnings/top-posts', getTopEarningPosts);
 router.get('/social-earnings/total-pool', getTotalSocialEarningsPool);
 router.post('/social-earnings/trigger', triggerSocialEarnings);
 
-// ==================== BOOKS (Admin CRUD + Approval) ====================
-router.post('/books', createBook);
-router.put('/books/:id', updateBook);
-router.delete('/books/:id', deleteBook);
-router.get('/books', getAdminBooks);
-router.get('/books/pending', getPendingBooks);
-// ✅ Approve/reject routes – frontend expects both POST and PUT
-router.post('/books/:id/approve', approveBook);
-router.put('/books/:id/approve', approveBook);
-router.post('/books/:id/reject', rejectBook);
-router.put('/books/:id/reject', rejectBook);
-
-// ==================== ARTICLES (Admin) ====================
-router.get('/articles', getAdminArticles);
-router.get('/articles/stats', getArticleStats);
-router.post('/articles/:id/approve', approveArticle);
-router.post('/articles/:id/reject', rejectArticle);
-
-// ==================== CAMPAIGNS (Admin) ====================
-router.get('/campaigns', adminGetCampaigns);
-router.get('/campaigns/:id', adminGetCampaign);
-router.post('/campaigns/:id/approve', approveCampaign);
-router.post('/campaigns/:id/reject', rejectCampaign);
-router.post('/campaigns/:id/verify-manual', verifyManualPayment);
-router.post('/campaigns/:id/refund', refundCampaign);
-
-// ==================== FILE UPLOADS ====================
-// NOTE: uploadImage/uploadFile controllers read `req.files` (plural array).
-// upload.single() only populates `req.file` (singular), which left req.files
-// undefined and made every upload fail — on a slow connection this surfaced
-// to the user as a generic "Invalid response" toast instead of a real error.
-// upload.any() populates req.files, matching what the controllers expect.
-
-// Cover image upload: field name must be "image"
-router.post('/upload', upload.any(), uploadImage);
-
-// PDF file upload: field name must be "file"
-router.post('/upload-file', upload.any(), uploadFile);
+// ==================== POSTS (Admin override) ====================
+router.delete('/posts/:id', deletePostByAdmin);
 
 // ==================== PLATFORM STATS ====================
 router.get('/platform-stats', getPlatformStats);
 
-// ==================== ADMIN POST MANAGEMENT ====================
-router.delete('/posts/:id', deletePostByAdmin);
+// ==================== CAMPAIGNS ====================
+router.get('/campaigns/admin/all', adminGetCampaigns);
+router.get('/campaigns/admin/:id', adminGetCampaign);
+router.post('/campaigns/admin/:id/approve', approveCampaign);
+router.post('/campaigns/admin/:id/reject', rejectCampaign);
+router.post('/campaigns/admin/:id/verify-manual', verifyManualPayment);
+router.post('/campaigns/admin/:id/refund', refundCampaign);
 
-// ==================== REVENUE ANALYTICS ====================
+// ==================== SPONSORSHIPS ====================
+router.get('/sponsorships/admin/all', adminGetSponsorships);
+router.post('/sponsorships/admin/:id/approve', approveSponsorship);
+router.post('/sponsorships/admin/:id/reject', rejectSponsorship);
+
+// ==================== ACADEMIES (Admin override) ====================
+router.get('/academies', getAcademies);
+router.post('/academies', createAcademyAdmin);
+router.put('/academies/:id', updateAcademyAdmin);
+router.delete('/academies/:id', deleteAcademyAdmin);
+
+// ==================== GAMIFICATION (Admin) ====================
+router.get('/gamification/achievements', getAchievementsAdmin);
+router.post('/gamification/achievements', createAchievement);
+router.put('/gamification/achievements/:id', updateAchievement);
+router.delete('/gamification/achievements/:id', deleteAchievement);
+router.get('/gamification/leaderboard', getLeaderboardAdmin);
+
+// ==================== AUDIT LOGS ====================
+router.get('/audit-logs', getAuditLogs);
+
+// ==================== ANALYTICS ====================
 router.get('/analytics/revenue', getRevenueAnalytics);
 router.get('/revenue', getRevenueAnalytics);
 
-// ==================== CACHE MANAGEMENT ====================
-// Diagnostic + operational tool: lets an admin force-clear the cached
-// course payload for one course (or, with ?all=1, every cached course/
-// list entry) without waiting out the 1–2 hour TTLs in getOrSetCache.
-// Useful whenever course/lesson data was changed through a path that
-// doesn't already call invalidateCourseCache, or when diagnosing whether
-// a "content not showing" report is a stale-cache issue vs. a real data/
-// rendering issue — clearing here and immediately re-checking the course
-// isolates that variable.
-router.post('/cache/clear-course/:id', clearCourseCache);
+// ==================== SETTINGS ====================
+router.get('/settings/feature-flags', getFeatureFlags);
+router.post('/settings/feature-flags', updateFeatureFlags);
+router.get('/settings/bank-details', getBankDetails);
+router.post('/settings/bank-details', updateBankDetails);
+
+// ==================== FILE UPLOADS ====================
+router.post('/upload', upload.any(), uploadImage);
+router.post('/upload-file', upload.any(), uploadFile);
 
 export default router;
