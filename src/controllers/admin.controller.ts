@@ -41,6 +41,7 @@ import Achievement from '../models/Achievement.js';
 import AuditLog from '../models/AuditLog.js';
 import bcrypt from 'bcryptjs';
 import { generateReferralCode } from '../utils/referralCode.js';
+import { Parser } from 'json2csv';
 
 // Maximum file size for Cloudinary (10MB)
 const CLOUDINARY_MAX_BYTES = 10 * 1024 * 1024;
@@ -282,7 +283,7 @@ export const approveInstructor = async (req: Request, res: Response, next: NextF
   }
 };
 
-// ─── NEW: CREATE USER (ADMIN OVERRIDE) ──────────────────────────
+// ─── CREATE USER (ADMIN OVERRIDE) ──────────────────────────
 export const createUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password, firstName, lastName, phone, roles, bio, location } = req.body;
@@ -316,7 +317,7 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
   } catch (err) { next(err); }
 };
 
-// ─── NEW: BAN/UNBAN USER ──────────────────────────────────────────
+// ─── BAN/UNBAN USER ──────────────────────────────────────────
 export const banUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { isBanned } = req.body;
@@ -480,7 +481,7 @@ export const deleteCourseByAdmin = async (req: Request, res: Response, next: Nex
   }
 };
 
-// ─── NEW: CREATE COURSE ──────────────────────────────────────────
+// ─── CREATE COURSE ──────────────────────────────────────────
 export const createCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const admin = req.user as IUser;
@@ -500,7 +501,7 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 };
 
-// ─── NEW: UPDATE COURSE ──────────────────────────────────────────
+// ─── UPDATE COURSE ──────────────────────────────────────────
 export const updateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { id } = req.params;
@@ -1687,7 +1688,7 @@ export const getActiveAds = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-// ─── NEW: AD CONFIG ────────────────────────────────────────────────
+// ─── AD CONFIG ────────────────────────────────────────────────
 export const getAdConfig = async (req: Request, res: Response, next: NextFunction) => {
   try {
     let config = await AdConfig.findOne().populate('updatedBy', 'firstName lastName');
@@ -1927,7 +1928,6 @@ async function handleFileUpload(
     const jsonString = JSON.stringify(responsePayload);
     console.log('📤 Sending response:', jsonString);
 
-    // 🔥 CRITICAL: Pure JSON with no BOM, no whitespace, no monkey-patching
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('X-Response-JSON', 'true');
@@ -2019,7 +2019,6 @@ export const deletePostByAdmin = async (req: Request, res: Response, next: NextF
 // ==================== SETTINGS: FEATURE FLAGS ====================
 export const getFeatureFlags = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // For now, return defaults; can be stored in DB later
     res.json({
       success: true,
       data: {
@@ -2047,7 +2046,6 @@ export const updateFeatureFlags = async (req: Request, res: Response, next: Next
 // ==================== SETTINGS: BANK DETAILS ====================
 export const getBankDetails = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Read from env or DB
     res.json({
       success: true,
       data: {
@@ -2222,4 +2220,71 @@ export const getLeaderboardAdmin = async (req: Request, res: Response, next: Nex
       .select('firstName lastName xp level avatarUrl');
     res.json({ success: true, data: leaderboard });
   } catch (err) { next(err); }
+};
+
+// ==================== EXPORT ALL DATA (CSV) ====================
+export const exportAllData = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { type } = req.params;
+    let data: any[] = [];
+    let fields: string[] = [];
+    let filename = '';
+
+    switch (type) {
+      case 'users':
+        data = await User.find().lean();
+        fields = ['_id', 'firstName', 'lastName', 'email', 'phone', 'roles', 'isPremium', 'walletBalance', 'xp', 'level', 'createdAt'];
+        filename = 'users.csv';
+        break;
+      case 'courses':
+        data = await Course.find().populate('instructorId', 'firstName lastName').lean();
+        fields = ['_id', 'title', 'description', 'price', 'level', 'category', 'instructorId.firstName', 'instructorId.lastName', 'approvalStatus', 'totalStudents', 'createdAt'];
+        filename = 'courses.csv';
+        break;
+      case 'books':
+        data = await Book.find().lean();
+        fields = ['_id', 'title', 'author', 'description', 'price', 'approvalStatus', 'downloads', 'views', 'createdAt'];
+        filename = 'books.csv';
+        break;
+      case 'payments':
+        data = await Transaction.find({ type: 'withdrawal' }).populate('userId', 'firstName lastName').lean();
+        fields = ['_id', 'userId.firstName', 'userId.lastName', 'amount', 'status', 'createdAt'];
+        filename = 'payments.csv';
+        break;
+      case 'manual-payments':
+        data = await ManualPayment.find().populate('userId', 'firstName lastName').lean();
+        fields = ['_id', 'userId.firstName', 'userId.lastName', 'type', 'amount', 'reference', 'status', 'createdAt'];
+        filename = 'manual-payments.csv';
+        break;
+      case 'posts':
+        data = await Post.find().populate('authorId', 'firstName lastName').lean();
+        fields = ['_id', 'title', 'authorId.firstName', 'authorId.lastName', 'isPublished', 'views', 'likes', 'commentsCount', 'createdAt'];
+        filename = 'posts.csv';
+        break;
+      default:
+        return res.status(400).json({ success: false, message: 'Invalid export type' });
+    }
+
+    const flattened = data.map(item => {
+      const flat: any = {};
+      fields.forEach(field => {
+        const parts = field.split('.');
+        let value = item;
+        for (const part of parts) {
+          value = value?.[part];
+        }
+        flat[field] = value !== undefined && value !== null ? value : '';
+      });
+      return flat;
+    });
+
+    const parser = new Parser({ fields });
+    const csv = parser.parse(flattened);
+
+    res.header('Content-Type', 'text/csv');
+    res.attachment(filename);
+    res.send(csv);
+  } catch (err) {
+    next(err);
+  }
 };
