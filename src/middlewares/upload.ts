@@ -43,3 +43,29 @@ export const upload = multer({
     }
   },
 });
+
+// ============================================================
+// MEMORY-STORAGE VARIANT — for any route whose controller
+// uploads straight to Cloudinary via `req.file.buffer`
+// (thumbnails, lesson images, certificate templates, etc).
+// The disk-storage `upload` above does NOT populate
+// `req.file.buffer`, so those controllers would otherwise
+// always fail with "No file uploaded" even though a file
+// was sent.
+// ============================================================
+export const uploadMemory = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 20 * 1024 * 1024, // 20MB — plenty for images/templates
+  },
+  fileFilter: (req, file, cb) => {
+    console.log(`📎 Multer(memory) received: fieldname="${file.fieldname}", originalname="${file.originalname}", mimetype="${file.mimetype}"`);
+    const isImage = file.mimetype.startsWith('image/');
+    const isPDF = file.mimetype === 'application/pdf';
+    if (isImage || isPDF) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type not allowed: ${file.mimetype}`));
+    }
+  },
+});
