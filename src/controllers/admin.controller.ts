@@ -28,7 +28,7 @@ import AffiliateLink from '../models/AffiliateLink.js';
 import Rating from '../models/Rating.js';
 import { getIO } from '../socket.js';
 import { uploadToCloudinary, deleteFromCloudinary } from '../services/cloudinary.js';
-import { invalidateCache } from '../services/cache.js';
+import { invalidateCache, getOrSetCache } from '../services/cache.js';
 import { sendNotification } from '../services/notification.service.js';
 import Article from '../models/Article.js';
 import ArticlePurchase from '../models/ArticlePurchase.js';
@@ -1952,6 +1952,52 @@ export const uploadImage = async (req: Request, res: Response, next: NextFunctio
 
 export const uploadFile = async (req: Request, res: Response, next: NextFunction) => {
   await handleFileUpload(req, res, 'books', false);
+};
+
+// ==================== PLATFORM STATS ====================
+// ==================== PUBLIC PLATFORM STATS ====================
+// Safe subset of platform-stats for the public landing page (no auth).
+// Deliberately excludes anything internal/sensitive (pending withdrawals,
+// premium user counts, campaign counts, etc.) — only aggregate numbers
+// that are fine for any visitor to see. Cached for 5 minutes so landing
+// page traffic can't hammer these aggregation queries.
+export const getPublicPlatformStats = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const stats = await getOrSetCache(
+      'public:platform-stats',
+      async () => {
+        const totalUsers = await User.countDocuments();
+        const totalCourses = await Course.countDocuments({ approvalStatus: 'approved' });
+        const totalEnrollments = await Enrollment.countDocuments();
+        const totalRevenueAgg = await Transaction.aggregate([
+          { $match: { status: 'completed', type: { $ne: 'withdrawal' } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]);
+        const referralRevenueAgg = await Transaction.aggregate([
+          { $match: { status: 'completed', type: { $in: ['referral_bonus', 'referral_commission', 'affiliate_commission'] } } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]);
+        const courseRevenueAgg = await Transaction.aggregate([
+          { $match: { status: 'completed', type: 'course_purchase' } },
+          { $group: { _id: null, total: { $sum: '$amount' } } },
+        ]);
+
+        return {
+          totalUsers,
+          totalCourses,
+          totalEnrollments,
+          totalEarnings: totalRevenueAgg[0]?.total || 0,
+          referralEarnings: referralRevenueAgg[0]?.total || 0,
+          courseEarnings: courseRevenueAgg[0]?.total || 0,
+        };
+      },
+      300 // 5 minutes
+    );
+
+    res.json({ success: true, data: stats });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Unable to load platform stats' });
+  }
 };
 
 // ==================== PLATFORM STATS ====================
