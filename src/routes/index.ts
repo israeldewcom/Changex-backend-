@@ -38,6 +38,7 @@ import gamificationRoutes from './gamification.routes.js';
 import liveRoutes from './live.routes.js';
 import aiAdvancedRoutes from './ai-advanced.routes.js';
 import offlineRoutes from './offline.routes.js';
+import publicRoutes from './public.routes.js';
 
 const router = Router();
 
@@ -49,6 +50,7 @@ router.use('/seo', seoRoutes);
 router.use('/books', bookRoutes);
 router.use('/articles', articlesRoutes);
 router.use('/courses', courseRoutes);
+router.use('/public', publicRoutes);
 
 // Authenticated routes
 router.use('/users', userRoutes);
